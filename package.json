@@ -37,7 +37,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@serwist/next": "^9.5.11",
     "@types/node": "^20",
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
@@ -49,7 +48,6 @@
     "postcss": "^8.5.15",
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1",
-    "serwist": "^9.5.11",
     "tsx": "^4.22.4",
     "typescript": "^5"
   }
