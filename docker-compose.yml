@@ -1,0 +1,49 @@
+# Local development infrastructure only (Postgres + MinIO).
+# The app itself runs on the host via `npm run dev` / `npm run worker:dev`.
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: family_chronicle
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      # Allow the browser to PUT presigned uploads from the dev app origin.
+      MINIO_API_CORS_ALLOW_ORIGIN: '*'
+    ports:
+      - '9000:9000' # S3 API
+      - '9001:9001' # web console
+    volumes:
+      - miniodata:/data
+
+  # One-shot: create the bucket, then exit.
+  createbucket:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
+      mc mb -p local/family-chronicle || true;
+      mc anonymous set none local/family-chronicle || true;
+      exit 0;
+      "
+
+volumes:
+  pgdata:
+  miniodata:

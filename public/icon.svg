@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Family Chronicle">
+  <rect width="512" height="512" rx="96" fill="#c97c4e"/>
+  <g fill="#fbf7f2">
+    <path d="M150 120h150c28 0 50 22 50 50v222c0-18-14-32-32-32H150z" opacity="0.95"/>
+    <path d="M362 120h0c28 0 50 22 50 50v240c0-18-14-32-32-32h-18z" opacity="0.55"/>
+    <rect x="182" y="176" width="120" height="20" rx="10"/>
+    <rect x="182" y="224" width="120" height="20" rx="10"/>
+    <rect x="182" y="272" width="84" height="20" rx="10"/>
+  </g>
+</svg>

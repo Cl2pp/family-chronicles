@@ -1,0 +1,17 @@
+import type { MetadataRoute } from 'next';
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: 'Family Chronicle',
+    short_name: 'Chronicle',
+    description: 'A private vault where your family stories live.',
+    start_url: '/',
+    display: 'standalone',
+    background_color: '#fbf7f2',
+    theme_color: '#c97c4e',
+    icons: [
+      { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+      { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },
+    ],
+  };
+}
