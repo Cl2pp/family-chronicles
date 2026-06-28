@@ -60,10 +60,14 @@ deployment target (Coolify usually registers "localhost" automatically).
 Connect the GitHub repo (`Cl2pp/family-chronicles`, branch `main`), then create **two
 applications** from it, both using **Build Pack: Dockerfile**:
 
-| App | Port | Start command | Pre-deploy command |
+| App | Port | Role env | Pre-deploy command |
 |---|---|---|---|
-| **web** | `3000` | _(default — `npm run start`)_ | `npm run db:migrate` |
-| **worker** | — (no domain) | override to `npm run worker` | — |
+| **web** | `3000` | _(none — defaults to web)_ | `npm run db:migrate` |
+| **worker** | — (no domain) | `ROLE=worker` | — |
+
+Both apps use the **same Dockerfile/image**; the container's `docker-entrypoint.sh` runs the
+web server by default, or the job worker when `ROLE=worker` is set. (Coolify doesn't expose a
+start-command field for Dockerfile apps, so the role is selected via env var.)
 
 Assign your domain to **web**; Coolify provisions Let's Encrypt TLS via Traefik. Set the web
 app's health check path to `/api/health`.

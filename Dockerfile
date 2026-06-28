@@ -1,6 +1,6 @@
-# Single image used for BOTH services (Coolify deploys two apps from it):
-#   web    → default CMD (`npm run start`)
-#   worker → override command to `npm run worker`
+# Single image runs BOTH services; the ROLE env var selects which:
+#   ROLE unset/anything → web  (npm run start)
+#   ROLE=worker         → background job worker (npm run worker)
 FROM node:22-alpine AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -22,5 +22,6 @@ RUN npm run build
 FROM base AS runtime
 ENV NODE_ENV=production
 COPY --from=build /app ./
+RUN chmod +x ./docker-entrypoint.sh
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+CMD ["./docker-entrypoint.sh"]
