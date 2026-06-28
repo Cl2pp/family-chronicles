@@ -24,6 +24,17 @@ async function requireEditor(chronicleId: string, userId: string) {
   }
 }
 
+/**
+ * Guard against cross-chronicle file references: a client-supplied object key
+ * must live under this chronicle's storage prefix (the only place its presigned
+ * uploads can land). Prevents attaching/leaking another chronicle's media.
+ */
+function assertOwnedKey(chronicleId: string, key: string) {
+  if (!key.startsWith(`chronicles/${chronicleId}/`)) {
+    throw new Error('Invalid file reference.');
+  }
+}
+
 const photoInputSchema = z.object({
   s3Key: z.string().min(1),
   mimeType: z.string().min(1),
@@ -52,6 +63,7 @@ export async function createTextStoryAction(input: {
   const user = await requireUser();
   const data = createSchema.parse(input);
   await requireEditor(data.chronicleId, user.id);
+  data.photos?.forEach((p) => assertOwnedKey(data.chronicleId, p.s3Key));
 
   const eventDate = data.eventDate ? new Date(data.eventDate) : null;
   const story = await createTextStory({
@@ -118,6 +130,8 @@ export async function createVoiceStoryAction(input: {
   const user = await requireUser();
   const data = voiceSchema.parse(input);
   await requireEditor(data.chronicleId, user.id);
+  assertOwnedKey(data.chronicleId, data.s3Key);
+  data.photos?.forEach((p) => assertOwnedKey(data.chronicleId, p.s3Key));
 
   const eventDate = data.eventDate ? new Date(data.eventDate) : null;
   const { story, asset } = await createVoiceStory({
@@ -152,6 +166,7 @@ export async function addPhotosAction(input: {
   const user = await requireUser();
   const data = addPhotosSchema.parse(input);
   await requireEditor(data.chronicleId, user.id);
+  data.photos.forEach((p) => assertOwnedKey(data.chronicleId, p.s3Key));
 
   const story = await getStoryWithSubmitter(data.chronicleId, data.storyId);
   if (!story) throw new Error('Story not found');
