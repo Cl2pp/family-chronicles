@@ -34,5 +34,12 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
 - `docker compose up -d` — local Postgres + MinIO (S3) for development
 - `npm run lint`, `npm run build`
 
+## Deployment & infrastructure
+The app is **live in production** at https://family.clepp.de (Hetzner VPS + Coolify + Cloudflare
+R2). Before touching anything deploy/server/storage-related, read **`INFRASTRUCTURE.md`** — it
+documents the server, Coolify, R2 (incl. the EU-endpoint gotcha), the security model (admin ports
+are private; reach Coolify via SSH tunnel), env vars, the deploy loop, and the gotchas we hit.
+`DEPLOY.md` is the from-scratch runbook.
+
 ## Plan
 Full project plan: `~/.claude/plans/curious-gliding-dijkstra.md`. Build phases tracked as tasks.
