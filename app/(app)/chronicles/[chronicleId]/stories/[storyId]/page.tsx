@@ -14,7 +14,12 @@ import {
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
 import { requireMembership, canEdit } from '@/lib/chronicles';
-import { getStoryWithSubmitter, listAssets } from '@/lib/stories';
+import {
+  getStoryWithSubmitter,
+  listAssets,
+  listEventSiblings,
+  listStoryOptions,
+} from '@/lib/stories';
 import { presignGet } from '@/lib/s3';
 import { formatEventDate } from '@/lib/dates';
 import { storyStatusMeta, type StoryStatus } from '@/lib/story-status';
@@ -22,6 +27,7 @@ import { AutoRefresh } from '@/components/auto-refresh';
 import { StoryBody } from './story-body';
 import { RetryButton } from './retry-button';
 import { AddPhotos } from './add-photos';
+import { LinkTelling } from './link-telling';
 
 function formatAdded(date: Date): string {
   return new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(date);
@@ -51,6 +57,13 @@ export default async function StoryPage({
   const photos = await Promise.all(
     photoAssets.map(async (p) => ({ id: p.id, url: await presignGet(p.s3Key) })),
   );
+
+  const siblings = story.eventId
+    ? await listEventSiblings(chronicleId, story.eventId, storyId)
+    : [];
+  const linkOptions = editable
+    ? (await listStoryOptions(chronicleId, storyId)).map((o) => ({ value: o.id, label: o.title }))
+    : [];
 
   return (
     <Stack gap="md">
@@ -125,6 +138,35 @@ export default async function StoryPage({
             </SimpleGrid>
           ) : null}
           {editable ? <AddPhotos chronicleId={chronicleId} storyId={storyId} /> : null}
+        </Card>
+      ) : null}
+
+      {siblings.length > 0 || editable ? (
+        <Card withBorder radius="md" padding="md">
+          <Text size="sm" fw={500} mb="xs">
+            Other tellings of this event
+          </Text>
+          {siblings.length > 0 ? (
+            <Stack gap={4} mb={editable ? 'md' : 0}>
+              {siblings.map((s) => (
+                <Anchor
+                  key={s.id}
+                  href={`/chronicles/${chronicleId}/stories/${s.id}`}
+                  size="sm"
+                >
+                  {s.title}
+                </Anchor>
+              ))}
+            </Stack>
+          ) : (
+            <Text size="sm" c="dimmed" mb={editable ? 'md' : 0}>
+              Different family members may remember the same occurrence differently. Link another
+              telling to keep them together.
+            </Text>
+          )}
+          {editable ? (
+            <LinkTelling chronicleId={chronicleId} storyId={storyId} options={linkOptions} />
+          ) : null}
         </Card>
       ) : null}
 

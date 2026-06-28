@@ -1,6 +1,6 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '@/db';
-import { assets, stories, user } from '@/db/schema';
+import { assets, events, stories, user } from '@/db/schema';
 
 export type DatePrecision = 'day' | 'month' | 'year' | 'circa';
 
@@ -123,6 +123,7 @@ const storyListColumns = {
   bodyStyled: stories.bodyStyled,
   eventDate: stories.eventDate,
   eventDatePrecision: stories.eventDatePrecision,
+  eventId: stories.eventId,
   createdAt: stories.createdAt,
   submitterName: user.name,
 };
@@ -137,6 +138,75 @@ export async function listStories(chronicleId: string) {
 }
 
 export type StoryListItem = Awaited<ReturnType<typeof listStories>>[number];
+
+/** Photo counts per story for a chronicle (for thumbnails/badges in lists). */
+export async function listPhotoCounts(chronicleId: string) {
+  return db
+    .select({ storyId: assets.storyId, count: sql<number>`count(*)::int` })
+    .from(assets)
+    .innerJoin(stories, eq(assets.storyId, stories.id))
+    .where(and(eq(stories.chronicleId, chronicleId), eq(assets.kind, 'photo')))
+    .groupBy(assets.storyId);
+}
+
+/** Minimal {id,title} list of other stories (for the "link another telling" picker). */
+export async function listStoryOptions(chronicleId: string, excludeStoryId: string) {
+  return db
+    .select({ id: stories.id, title: stories.title })
+    .from(stories)
+    .where(and(eq(stories.chronicleId, chronicleId), ne(stories.id, excludeStoryId)))
+    .orderBy(desc(stories.createdAt));
+}
+
+/** Sibling stories sharing an event (other tellings of the same occurrence). */
+export async function listEventSiblings(
+  chronicleId: string,
+  eventId: string,
+  excludeStoryId: string,
+) {
+  return db
+    .select({ id: stories.id, title: stories.title, status: stories.status })
+    .from(stories)
+    .where(
+      and(
+        eq(stories.chronicleId, chronicleId),
+        eq(stories.eventId, eventId),
+        ne(stories.id, excludeStoryId),
+      ),
+    );
+}
+
+/** Link two stories as tellings of the same event (creating the event if needed). */
+export async function linkStories(chronicleId: string, storyIdA: string, storyIdB: string) {
+  return db.transaction(async (tx) => {
+    const a = await tx.query.stories.findFirst({
+      where: and(eq(stories.id, storyIdA), eq(stories.chronicleId, chronicleId)),
+    });
+    const b = await tx.query.stories.findFirst({
+      where: and(eq(stories.id, storyIdB), eq(stories.chronicleId, chronicleId)),
+    });
+    if (!a || !b) throw new Error('Story not found');
+
+    let eventId = a.eventId ?? b.eventId;
+    if (!eventId) {
+      const [ev] = await tx
+        .insert(events)
+        .values({
+          chronicleId,
+          title: a.title,
+          approxDate: a.eventDate ?? b.eventDate ?? null,
+        })
+        .returning();
+      eventId = ev.id;
+    }
+
+    await tx
+      .update(stories)
+      .set({ eventId, updatedAt: new Date() })
+      .where(inArray(stories.id, [storyIdA, storyIdB]));
+    return eventId;
+  });
+}
 
 /** A single story scoped to its chronicle (404 guard), with submitter name. */
 export async function getStoryWithSubmitter(chronicleId: string, storyId: string) {

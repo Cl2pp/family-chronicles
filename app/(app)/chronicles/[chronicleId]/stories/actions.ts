@@ -10,6 +10,7 @@ import {
   createTextStory,
   createVoiceStory,
   getStoryWithSubmitter,
+  linkStories,
   resetStoryForRetry,
   type PhotoInput,
 } from '@/lib/stories';
@@ -157,6 +158,26 @@ export async function addPhotosAction(input: {
 
   await addPhotos(data.storyId, data.photos);
   revalidatePath(`/chronicles/${data.chronicleId}/stories/${data.storyId}`);
+}
+
+const linkSchema = z.object({
+  chronicleId: z.string().uuid(),
+  storyId: z.string().uuid(),
+  otherStoryId: z.string().uuid(),
+});
+
+export async function linkStoryAction(input: {
+  chronicleId: string;
+  storyId: string;
+  otherStoryId: string;
+}) {
+  const user = await requireUser();
+  const { chronicleId, storyId, otherStoryId } = linkSchema.parse(input);
+  if (storyId === otherStoryId) throw new Error('Pick a different story');
+  await requireEditor(chronicleId, user.id);
+
+  await linkStories(chronicleId, storyId, otherStoryId);
+  revalidatePath(`/chronicles/${chronicleId}/stories/${storyId}`);
 }
 
 export async function retryStylingAction(input: { chronicleId: string; storyId: string }) {
