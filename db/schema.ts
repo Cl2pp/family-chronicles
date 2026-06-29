@@ -69,22 +69,78 @@ export const verification = pgTable('verification', {
  * Domain enums
  * ────────────────────────────────────────────────────────────────────────── */
 
-export const membershipRole = pgEnum('membership_role', ['owner', 'editor', 'viewer']);
-export const inputType = pgEnum('input_type', ['text', 'voice']);
+/** Per-family access level (authz). */
+export const accessRole = pgEnum('access_role', ['owner', 'contributor', 'viewer']);
+/** Global kinship edge types between people. */
+export const relationshipType = pgEnum('relationship_type', ['parent', 'spouse']);
+export const inputType = pgEnum('input_type', ['text', 'voice', 'chat']);
 export const storyStatus = pgEnum('story_status', ['draft', 'processing', 'ready', 'failed']);
 export const datePrecision = pgEnum('date_precision', ['day', 'month', 'year', 'circa']);
 export const assetKind = pgEnum('asset_kind', ['audio', 'photo']);
+export const messageRole = pgEnum('message_role', ['user', 'assistant', 'system', 'tool']);
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Domain tables
+ * Genealogy layer (global, family-agnostic): people + kinship edges
  * ────────────────────────────────────────────────────────────────────────── */
 
-/** A family vault. */
-export const chronicles = pgTable('chronicles', {
+/** A person — a node in the family graph. May or may not have an app account. */
+export const people = pgTable(
+  'people',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    displayName: text('display_name').notNull(),
+    givenName: text('given_name'),
+    /** Surname lives on the person, independent of any family. */
+    familyName: text('family_name'),
+    /** Optional link to an app account (most people never log in). */
+    userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+    bornOn: timestamp('born_on'),
+    bornPrecision: datePrecision('born_precision'),
+    diedOn: timestamp('died_on'),
+    diedPrecision: datePrecision('died_precision'),
+    avatarS3Key: text('avatar_s3_key'),
+    notes: text('notes'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'restrict' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('people_user_uq').on(t.userId)],
+);
+
+/** Global kinship edge. `parent`: from = parent, to = child. `spouse`: symmetric. */
+export const relationships = pgTable(
+  'relationships',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    type: relationshipType('type').notNull(),
+    personFromId: uuid('person_from_id')
+      .notNull()
+      .references(() => people.id, { onDelete: 'cascade' }),
+    personToId: uuid('person_to_id')
+      .notNull()
+      .references(() => people.id, { onDelete: 'cascade' }),
+    createdBy: text('created_by').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('relationships_uq').on(t.type, t.personFromId, t.personToId),
+    index('relationships_from_idx').on(t.personFromId),
+    index('relationships_to_idx').on(t.personToId),
+  ],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Family layer: a named sharing circle + its tree membership
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** A family = a named sharing circle (name is a label, NOT unique). */
+export const families = pgTable('families', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   description: text('description'),
-  /** Free-text style guide the family writes; injected into the styling prompt. */
+  /** Free-text writing-style guide, injected into the styling prompt. */
   styleGuide: text('style_guide'),
   createdBy: text('created_by')
     .notNull()
@@ -93,33 +149,54 @@ export const chronicles = pgTable('chronicles', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
-/** Which users belong to which chronicle, and their role. */
+/** USER access to a family (authz) — separate from being a tree node. */
 export const memberships = pgTable(
   'memberships',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    chronicleId: uuid('chronicle_id')
+    familyId: uuid('family_id')
       .notNull()
-      .references(() => chronicles.id, { onDelete: 'cascade' }),
+      .references(() => families.id, { onDelete: 'cascade' }),
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
-    role: membershipRole('role').notNull().default('editor'),
+    accessRole: accessRole('access_role').notNull().default('contributor'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('memberships_chronicle_user_uq').on(t.chronicleId, t.userId)],
+  (t) => [uniqueIndex('memberships_family_user_uq').on(t.familyId, t.userId)],
 );
 
-/** Pending email invitations to join a chronicle. */
+/** Which PEOPLE are nodes in a family's tree (person↔family, many-to-many). */
+export const familyMembers = pgTable(
+  'family_members',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    familyId: uuid('family_id')
+      .notNull()
+      .references(() => families.id, { onDelete: 'cascade' }),
+    personId: uuid('person_id')
+      .notNull()
+      .references(() => people.id, { onDelete: 'cascade' }),
+    /** Optional display override; role is normally derived from the tree. */
+    roleLabel: text('role_label'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('family_members_uq').on(t.familyId, t.personId),
+    index('family_members_family_idx').on(t.familyId),
+  ],
+);
+
+/** Pending email invitations to join a family (grants a membership). */
 export const invitations = pgTable(
   'invitations',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    chronicleId: uuid('chronicle_id')
+    familyId: uuid('family_id')
       .notNull()
-      .references(() => chronicles.id, { onDelete: 'cascade' }),
+      .references(() => families.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
-    role: membershipRole('role').notNull().default('editor'),
+    accessRole: accessRole('access_role').notNull().default('contributor'),
     token: text('token').notNull().unique(),
     invitedBy: text('invited_by')
       .notNull()
@@ -128,55 +205,102 @@ export const invitations = pgTable(
     acceptedAt: timestamp('accepted_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (t) => [index('invitations_chronicle_idx').on(t.chronicleId)],
+  (t) => [index('invitations_family_idx').on(t.familyId)],
 );
 
-/** Optional grouping so several members' tellings of one occurrence link together. */
-export const events = pgTable(
-  'events',
+/* ──────────────────────────────────────────────────────────────────────────
+ * Stories — standalone, shareable across many families
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const conversations = pgTable('conversations', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  /** Family context the chat was started in (nullable = "all"). */
+  familyId: uuid('family_id').references(() => families.id, { onDelete: 'set null' }),
+  userId: text('user_id')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  title: text('title'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const messages = pgTable(
+  'messages',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    chronicleId: uuid('chronicle_id')
+    conversationId: uuid('conversation_id')
       .notNull()
-      .references(() => chronicles.id, { onDelete: 'cascade' }),
-    title: text('title').notNull(),
-    approxDate: timestamp('approx_date'),
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    role: messageRole('role').notNull(),
+    content: text('content').notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (t) => [index('events_chronicle_idx').on(t.chronicleId)],
+  (t) => [index('messages_conversation_idx').on(t.conversationId)],
 );
 
-/** A single story in a chronicle. */
+/** A single story. No longer bound to one family — see story_families. */
 export const stories = pgTable(
   'stories',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    chronicleId: uuid('chronicle_id')
-      .notNull()
-      .references(() => chronicles.id, { onDelete: 'cascade' }),
     submittedBy: text('submitted_by')
       .notNull()
       .references(() => user.id, { onDelete: 'restrict' }),
     title: text('title').notNull(),
+    /** Short "what it's about" abstract. */
+    summary: text('summary'),
     /** Raw text or the verbatim transcript. */
     bodyOriginal: text('body_original'),
     /** AI-styled, third-person memoir version. */
     bodyStyled: text('body_styled'),
     inputType: inputType('input_type').notNull(),
     status: storyStatus('status').notNull().default('draft'),
-    /** Error detail when status = 'failed'. */
     errorMessage: text('error_message'),
-    /** When the events of the story took place (nullable for unknown). */
     eventDate: timestamp('event_date'),
     eventDatePrecision: datePrecision('event_date_precision'),
-    eventId: uuid('event_id').references(() => events.id, { onDelete: 'set null' }),
+    /** The chat this story came from, if any. */
+    conversationId: uuid('conversation_id').references(() => conversations.id, {
+      onDelete: 'set null',
+    }),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
+  (t) => [index('stories_event_date_idx').on(t.eventDate)],
+);
+
+/** A story is shared into every family linked here (≥1). */
+export const storyFamilies = pgTable(
+  'story_families',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    storyId: uuid('story_id')
+      .notNull()
+      .references(() => stories.id, { onDelete: 'cascade' }),
+    familyId: uuid('family_id')
+      .notNull()
+      .references(() => families.id, { onDelete: 'cascade' }),
+    sharedBy: text('shared_by').references(() => user.id, { onDelete: 'set null' }),
+    sharedAt: timestamp('shared_at').notNull().defaultNow(),
+  },
   (t) => [
-    index('stories_chronicle_idx').on(t.chronicleId),
-    index('stories_event_date_idx').on(t.eventDate),
+    uniqueIndex('story_families_uq').on(t.storyId, t.familyId),
+    index('story_families_family_idx').on(t.familyId),
   ],
+);
+
+/** Who/what a story is about. */
+export const storyPeople = pgTable(
+  'story_people',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    storyId: uuid('story_id')
+      .notNull()
+      .references(() => stories.id, { onDelete: 'cascade' }),
+    personId: uuid('person_id')
+      .notNull()
+      .references(() => people.id, { onDelete: 'cascade' }),
+  },
+  (t) => [uniqueIndex('story_people_uq').on(t.storyId, t.personId)],
 );
 
 /** Raw inputs kept for traceability: original voice messages and photos. */
@@ -198,4 +322,24 @@ export const assets = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (t) => [index('assets_story_idx').on(t.storyId)],
+);
+
+/** In-chat uploads (voice/photos) before a story is accepted. */
+export const messageAttachments = pgTable(
+  'message_attachments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    kind: assetKind('kind').notNull(),
+    s3Key: text('s3_key').notNull(),
+    mimeType: text('mime_type').notNull(),
+    bytes: integer('bytes'),
+    width: integer('width'),
+    height: integer('height'),
+    durationSec: integer('duration_sec'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('message_attachments_message_idx').on(t.messageId)],
 );

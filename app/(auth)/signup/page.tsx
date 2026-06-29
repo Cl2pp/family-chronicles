@@ -19,7 +19,7 @@ import { authClient } from '@/lib/auth-client';
 function SignupForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get('next') || '/dashboard';
+  const next = params.get('next') || '/stories';
   const [loading, setLoading] = useState(false);
 
   const form = useForm({

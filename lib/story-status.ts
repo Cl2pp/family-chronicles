@@ -4,9 +4,9 @@ export type StoryStatus = 'draft' | 'processing' | 'ready' | 'failed';
 export function storyStatusMeta(status: StoryStatus): { color: string; label: string } {
   switch (status) {
     case 'processing':
-      return { color: 'yellow', label: 'Retelling…' };
+      return { color: 'brand', label: 'Retelling…' };
     case 'ready':
-      return { color: 'teal', label: 'Ready' };
+      return { color: 'green', label: 'Ready' };
     case 'failed':
       return { color: 'red', label: 'Failed' };
     case 'draft':

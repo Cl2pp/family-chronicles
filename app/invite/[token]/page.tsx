@@ -23,7 +23,7 @@ export default async function InvitePage({
 
   const result = await acceptInvitation(token, session.user.id);
   if (result.ok) {
-    redirect(`/chronicles/${result.chronicleId}`);
+    redirect(`/family?family=${result.familyId}`);
   }
 
   return (
@@ -33,8 +33,8 @@ export default async function InvitePage({
           <Stack>
             <Title order={3}>Invitation</Title>
             <Text c="dimmed">{MESSAGES[result.reason]}</Text>
-            <Button component="a" href="/dashboard">
-              Go to your chronicles
+            <Button component="a" href="/family">
+              Go to your families
             </Button>
           </Stack>
         </Paper>

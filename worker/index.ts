@@ -1,11 +1,12 @@
 import 'dotenv/config';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { assets, stories, chronicles } from '@/db/schema';
+import { assets, stories } from '@/db/schema';
 import { getBoss, QUEUES, enqueueStyle, type TranscribeJob, type StyleJob } from '@/lib/queue';
 import { getObjectBuffer } from '@/lib/s3';
 import { transcribeAudio } from '@/lib/ai/groq';
 import { styleStory } from '@/lib/ai/openrouter';
+import { styleGuideForStory } from '@/lib/stories';
 
 async function markFailed(storyId: string, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
@@ -47,13 +48,11 @@ async function handleStyle(data: StyleJob) {
     if (!story) throw new Error(`Story ${storyId} not found`);
     if (!story.bodyOriginal?.trim()) throw new Error('No source text to style');
 
-    const chronicle = await db.query.chronicles.findFirst({
-      where: eq(chronicles.id, story.chronicleId),
-    });
+    const styleGuide = await styleGuideForStory(storyId);
 
     const styled = await styleStory({
       original: story.bodyOriginal,
-      styleGuide: chronicle?.styleGuide,
+      styleGuide,
       title: story.title,
     });
 

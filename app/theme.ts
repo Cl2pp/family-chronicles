@@ -2,30 +2,46 @@
 
 import { createTheme, type MantineColorsTuple } from '@mantine/core';
 
-// Warm terracotta — approachable, memoir-like, easy on the eyes in light mode.
-const sienna: MantineColorsTuple = [
-  '#fdf5ef',
-  '#f3e6da',
-  '#e7c9b3',
-  '#dbac89',
-  '#d1936b',
-  '#cb8458',
-  '#c97c4e',
-  '#b16a3f',
-  '#9e5e36',
-  '#8a4f2b',
+// Modern brand blue (#2563EB family) — confident, app-like, light-mode only.
+const brand: MantineColorsTuple = [
+  '#eff4ff',
+  '#dbe6fe',
+  '#bfd3fe',
+  '#93b4fd',
+  '#609afa',
+  '#3b82f6',
+  '#2563eb',
+  '#1d4ed8',
+  '#1e40af',
+  '#1e3a8a',
 ];
 
+// Cool slate neutrals so grays relate to the blue.
+const slate: MantineColorsTuple = [
+  '#f8fafc',
+  '#f1f5f9',
+  '#e2e8f0',
+  '#cbd5e1',
+  '#94a3b8',
+  '#64748b',
+  '#475569',
+  '#334155',
+  '#1e293b',
+  '#0f172a',
+];
+
+const fontStack =
+  'var(--font-inter), Inter, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
 export const theme = createTheme({
-  primaryColor: 'sienna',
+  primaryColor: 'brand',
   primaryShade: 6,
-  colors: { sienna },
+  colors: { brand, slate },
   defaultRadius: 'md',
-  fontFamily:
-    'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-  // Serif headings give the family-book feel; generous, readable sizes.
-  headings: {
-    fontFamily: 'Georgia, "Iowan Old Style", "Times New Roman", serif',
-    fontWeight: '600',
-  },
+  // Fully modern sans — UI and reading view alike (no serif).
+  fontFamily: fontStack,
+  fontFamilyMonospace: '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+  headings: { fontFamily: fontStack, fontWeight: '600' },
+  radius: { sm: '8px', md: '12px', lg: '16px' },
+  black: '#0f172a',
 });

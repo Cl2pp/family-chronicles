@@ -5,8 +5,16 @@ import '@mantine/notifications/styles.css';
 import './globals.css';
 
 import type { Metadata, Viewport } from 'next';
+import { Inter } from 'next/font/google';
 import { ColorSchemeScript, mantineHtmlProps } from '@mantine/core';
 import { Providers } from './providers';
+
+const inter = Inter({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+  variable: '--font-inter',
+});
 
 export const metadata: Metadata = {
   title: 'Family Chronicle',
@@ -24,14 +32,14 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#c97c4e',
+  themeColor: '#2563eb',
   width: 'device-width',
   initialScale: 1,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" {...mantineHtmlProps}>
+    <html lang="en" className={inter.variable} {...mantineHtmlProps}>
       <head>
         <ColorSchemeScript defaultColorScheme="light" forceColorScheme="light" />
       </head>
