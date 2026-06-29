@@ -1,4 +1,4 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { familyMembers, memberships, people, relationships } from '@/db/schema';
 
@@ -127,7 +127,7 @@ export interface FamilyTree {
  * them, plus the global kinship edges connecting two such people. Each person
  * carries the subset of `familyIds` (from the scope) they belong to.
  */
-export async function getTreeForFamilies(familyIds: string[]): Promise<FamilyTree> {
+async function getTreeForFamilies(familyIds: string[]): Promise<FamilyTree> {
   if (familyIds.length === 0) return { people: [], edges: [] };
 
   const fmRows = await db
@@ -202,17 +202,3 @@ export async function listFamilyPeople(familyId: string) {
     .orderBy(people.displayName);
 }
 
-export async function getPerson(personId: string) {
-  return db.query.people.findFirst({ where: eq(people.id, personId) });
-}
-
-/** Is the person a member of any family the user can access? (authz for person view) */
-export async function personVisibleToUser(personId: string, userId: string) {
-  const rows = await db
-    .select({ id: familyMembers.id })
-    .from(familyMembers)
-    .innerJoin(memberships, eq(familyMembers.familyId, memberships.familyId))
-    .where(and(eq(familyMembers.personId, personId), eq(memberships.userId, userId)))
-    .limit(1);
-  return rows.length > 0;
-}

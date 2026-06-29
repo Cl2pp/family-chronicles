@@ -20,7 +20,7 @@ import {
   IconPlus,
 } from '@tabler/icons-react';
 import type { TreeEdge, TreePerson } from '@/lib/people';
-import type { AddTarget } from './family-tabs';
+import type { AddTarget } from './types';
 
 const CARD_WIDTH = 150;
 

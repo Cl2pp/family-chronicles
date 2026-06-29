@@ -1,5 +1,5 @@
-import OpenAI from 'openai';
 import { env } from '@/lib/env';
+import { openrouter } from './client';
 
 /**
  * Conversational "family chronicler" assistant. It chats with a family member and,
@@ -7,14 +7,6 @@ import { env } from '@/lib/env';
  * which the UI renders as an accept/edit card. Uses the same OpenRouter endpoint as
  * styling (model = STYLING_MODEL), so no extra provider.
  */
-const client = new OpenAI({
-  apiKey: env.OPENROUTER_API_KEY,
-  baseURL: env.OPENROUTER_BASE_URL,
-  defaultHeaders: {
-    'HTTP-Referer': env.BETTER_AUTH_URL,
-    'X-Title': 'Family Chronicle',
-  },
-});
 
 export interface StoryProposal {
   kind: 'story';
@@ -92,7 +84,7 @@ function safeParse(raw: string): ChatResult {
 }
 
 export async function chatRespond(history: ChatTurn[]): Promise<ChatResult> {
-  const completion = await client.chat.completions.create({
+  const completion = await openrouter.chat.completions.create({
     model: env.STYLING_MODEL,
     messages: [{ role: 'system', content: SYSTEM }, ...history],
     response_format: { type: 'json_object' },

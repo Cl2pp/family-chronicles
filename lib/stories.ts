@@ -14,27 +14,7 @@ export type DatePrecision = 'day' | 'month' | 'year' | 'circa';
 export type InputType = 'text' | 'voice' | 'chat';
 export type StoryStatus = 'draft' | 'processing' | 'ready' | 'failed';
 
-export interface PhotoInput {
-  s3Key: string;
-  mimeType: string;
-  bytes?: number | null;
-  width?: number | null;
-  height?: number | null;
-}
-
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-
-function photoAssetValues(storyId: string, photos: PhotoInput[]) {
-  return photos.map((p) => ({
-    storyId,
-    kind: 'photo' as const,
-    s3Key: p.s3Key,
-    mimeType: p.mimeType,
-    bytes: p.bytes ?? null,
-    width: p.width ?? null,
-    height: p.height ?? null,
-  }));
-}
 
 async function linkFamiliesAndPeople(
   tx: Tx,
@@ -71,7 +51,6 @@ export async function createStory(input: {
   conversationId?: string | null;
   familyIds: string[];
   personIds?: string[];
-  photos?: PhotoInput[];
 }) {
   return db.transaction(async (tx) => {
     const [created] = await tx
@@ -96,61 +75,7 @@ export async function createStory(input: {
       input.familyIds,
       input.personIds ?? [],
     );
-    if (input.photos?.length)
-      await tx.insert(assets).values(photoAssetValues(created.id, input.photos));
     return created;
-  });
-}
-
-/** Create a voice story plus its audio asset (atomic). Enters `processing`. */
-export async function createVoiceStory(input: {
-  userId: string;
-  title: string;
-  eventDate?: Date | null;
-  eventDatePrecision?: DatePrecision | null;
-  familyIds: string[];
-  personIds?: string[];
-  s3Key: string;
-  mimeType: string;
-  bytes?: number | null;
-  durationSec?: number | null;
-  photos?: PhotoInput[];
-}) {
-  return db.transaction(async (tx) => {
-    const [story] = await tx
-      .insert(stories)
-      .values({
-        submittedBy: input.userId,
-        title: input.title,
-        inputType: 'voice',
-        status: 'processing',
-        eventDate: input.eventDate ?? null,
-        eventDatePrecision: input.eventDatePrecision ?? null,
-      })
-      .returning();
-
-    const [asset] = await tx
-      .insert(assets)
-      .values({
-        storyId: story.id,
-        kind: 'audio',
-        s3Key: input.s3Key,
-        mimeType: input.mimeType,
-        bytes: input.bytes ?? null,
-        durationSec: input.durationSec ?? null,
-      })
-      .returning();
-
-    await linkFamiliesAndPeople(
-      tx,
-      story.id,
-      input.userId,
-      input.familyIds,
-      input.personIds ?? [],
-    );
-    if (input.photos?.length)
-      await tx.insert(assets).values(photoAssetValues(story.id, input.photos));
-    return { story, asset };
   });
 }
 
@@ -162,9 +87,31 @@ export async function shareStoryToFamily(storyId: string, familyId: string, user
     .onConflictDoNothing();
 }
 
-export async function addPhotos(storyId: string, photos: PhotoInput[]) {
-  if (photos.length === 0) return;
-  await db.insert(assets).values(photoAssetValues(storyId, photos));
+export interface AssetInput {
+  kind: 'audio' | 'photo';
+  s3Key: string;
+  mimeType: string;
+  bytes?: number | null;
+  width?: number | null;
+  height?: number | null;
+  durationSec?: number | null;
+}
+
+/** Persist audio/photo assets for a story (e.g. copied from an accepted chat). */
+export async function addStoryAssets(storyId: string, items: AssetInput[]) {
+  if (items.length === 0) return;
+  await db.insert(assets).values(
+    items.map((a) => ({
+      storyId,
+      kind: a.kind,
+      s3Key: a.s3Key,
+      mimeType: a.mimeType,
+      bytes: a.bytes ?? null,
+      width: a.width ?? null,
+      height: a.height ?? null,
+      durationSec: a.durationSec ?? null,
+    })),
+  );
 }
 
 export async function listAssets(storyId: string) {
@@ -232,18 +179,6 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
   }));
 }
 
-/** Stories shared into one family. */
-export async function listStoriesForFamily(familyId: string): Promise<StoryListItem[]> {
-  const rows = (await db
-    .select(storyListColumns)
-    .from(storyFamilies)
-    .innerJoin(stories, eq(storyFamilies.storyId, stories.id))
-    .innerJoin(user, eq(stories.submittedBy, user.id))
-    .where(eq(storyFamilies.familyId, familyId))
-    .orderBy(desc(stories.createdAt))) as StoryRow[];
-  return decorateStories(rows);
-}
-
 /** Stories across every family the user belongs to (deduped). */
 export async function listStoriesForUser(userId: string): Promise<StoryListItem[]> {
   const fams = await db
@@ -297,26 +232,6 @@ export async function getStoryForUser(storyId: string, userId: string) {
   if (access.length === 0) return null;
 
   return story;
-}
-
-/** Stories that feature a given person (across the user's accessible families). */
-export async function listStoriesAboutPerson(personId: string, userId: string) {
-  const fams = await db
-    .select({ familyId: memberships.familyId })
-    .from(memberships)
-    .where(eq(memberships.userId, userId));
-  const familyIds = fams.map((f) => f.familyId);
-  if (familyIds.length === 0) return [];
-
-  return db
-    .selectDistinct({ id: stories.id, title: stories.title, status: stories.status })
-    .from(storyPeople)
-    .innerJoin(stories, eq(storyPeople.storyId, stories.id))
-    .innerJoin(storyFamilies, eq(storyFamilies.storyId, stories.id))
-    .where(
-      and(eq(storyPeople.personId, personId), inArray(storyFamilies.familyId, familyIds)),
-    )
-    .orderBy(desc(stories.createdAt));
 }
 
 export async function resetStoryForRetry(storyId: string) {

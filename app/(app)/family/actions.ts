@@ -8,18 +8,7 @@ import { createFamily, requireContributor, requireOwner, updateFamily } from '@/
 import { addPersonToFamily, connectPeople, createPerson } from '@/lib/people';
 import { createInvitation } from '@/lib/invitations';
 import type { AccessRole } from '@/lib/permissions';
-
-/** Build a Jan-1 UTC date from a 4-digit year (precision 'year'). */
-function yearToDate(year: number): Date {
-  return new Date(Date.UTC(year, 0, 1));
-}
-
-function parseYear(value: unknown): number | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  const n = Number(value);
-  if (!Number.isInteger(n) || n < 0 || n > 9999) return undefined;
-  return n;
-}
+import { parseYear, yearToDate } from '@/lib/dates';
 
 /** Create a family, make it active, and go to the family screen. */
 export async function createFamilyAction(formData: FormData) {

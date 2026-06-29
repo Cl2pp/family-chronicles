@@ -1,4 +1,4 @@
-export type StoryStatus = 'draft' | 'processing' | 'ready' | 'failed';
+import type { StoryStatus } from '@/lib/stories';
 
 /** Badge color + label for a story status. */
 export function storyStatusMeta(status: StoryStatus): { color: string; label: string } {
