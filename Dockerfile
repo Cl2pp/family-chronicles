@@ -21,6 +21,8 @@ RUN npm run build
 # ── runtime ──────────────────────────────────────────────────────────────────
 FROM base AS runtime
 ENV NODE_ENV=production
+# curl is needed for Coolify's container healthcheck (alpine ships without it).
+RUN apk add --no-cache curl
 COPY --from=build /app ./
 RUN chmod +x ./docker-entrypoint.sh
 EXPOSE 3000
