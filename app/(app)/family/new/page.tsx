@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import {
   Anchor,
   Box,
@@ -44,7 +43,7 @@ export default async function NewFamilyPage() {
                 minRows={2}
               />
               <Group justify="space-between" mt="sm">
-                <Anchor component={Link} href="/family" c="dimmed" size="sm">
+                <Anchor component="a" href="/family" c="dimmed" size="sm">
                   Cancel
                 </Anchor>
                 <Button type="submit">Create family</Button>

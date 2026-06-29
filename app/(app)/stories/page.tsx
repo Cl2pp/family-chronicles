@@ -1,5 +1,4 @@
 import { cookies } from 'next/headers';
-import Link from 'next/link';
 import { Box, Button, Card, Stack, Text, Title } from '@mantine/core';
 import { IconMessageCircle2 } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
@@ -35,7 +34,7 @@ export default async function StoriesPage() {
               your family memoir.
             </Text>
             <Button
-              component={Link}
+              component="a"
               href="/chat"
               mt="sm"
               leftSection={<IconMessageCircle2 size={18} />}

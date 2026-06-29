@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { Box, Button, Card, Stack, Text, Title } from '@mantine/core';
 import { IconUsersPlus } from '@tabler/icons-react';
@@ -29,7 +28,7 @@ export default async function FamilyPage() {
                 together.
               </Text>
             </Stack>
-            <Button component={Link} href="/family/new" size="md">
+            <Button component="a" href="/family/new" size="md">
               Start your family
             </Button>
           </Stack>
