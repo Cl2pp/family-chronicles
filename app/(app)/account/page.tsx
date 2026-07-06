@@ -1,41 +1,41 @@
-import { Avatar, Box, Card, Group, Stack, Text, Title } from '@mantine/core';
+import { and, eq } from 'drizzle-orm';
+import { Anchor, Box, Card, Text, Title } from '@mantine/core';
+import { db } from '@/db';
+import { account } from '@/db/schema';
 import { requireUser } from '@/lib/session';
-import { SignOutButton } from './sign-out-button';
-
-function initials(name: string) {
-  return name
-    .split(' ')
-    .map((p) => p[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-}
+import { presignGet } from '@/lib/s3';
+import { ProfileCard } from './profile-card';
+import { ChangePasswordForm } from './change-password-form';
 
 export default async function AccountPage() {
   const user = await requireUser();
+  const avatarUrl = user.image ? await presignGet(user.image) : null;
+  const credential = await db.query.account.findFirst({
+    where: and(eq(account.userId, user.id), eq(account.providerId, 'credential')),
+    columns: { id: true },
+  });
 
   return (
     <Box p="lg" maw={640} mx="auto">
       <Title order={1} mb="lg">
         Account
       </Title>
-      <Card withBorder radius="md" p="lg">
-        <Group justify="space-between" wrap="nowrap">
-          <Group wrap="nowrap">
-            <Avatar size={48} radius="xl" color="brand">
-              {initials(user.name)}
-            </Avatar>
-            <Stack gap={0}>
-              <Text fw={600}>{user.name}</Text>
-              <Text size="sm" c="dimmed">
-                {user.email}
-              </Text>
-            </Stack>
-          </Group>
-          <SignOutButton />
-        </Group>
+      <ProfileCard name={user.name} email={user.email} avatarUrl={avatarUrl} />
+
+      <Card withBorder radius="md" p="lg" mt="lg">
+        <Title order={3} mb="md">
+          Change password
+        </Title>
+        <ChangePasswordForm hasPassword={!!credential} />
       </Card>
+
+      <Text size="sm" c="dimmed" mt="lg">
+        Looking for your families or app info? See{' '}
+        <Anchor component="a" href="/settings" size="sm">
+          App settings
+        </Anchor>
+        .
+      </Text>
     </Box>
   );
 }

@@ -54,7 +54,7 @@ export function AppChrome({
   user,
   children,
 }: {
-  user: { name: string; email: string };
+  user: { name: string; email: string; avatarUrl?: string | null };
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -125,7 +125,7 @@ export function AppChrome({
             <Menu.Target>
               <UnstyledButton w="100%" px={6} py={4}>
                 <Group gap={8} wrap="nowrap">
-                  <Avatar size={28} radius="xl" color="slate">
+                  <Avatar size={28} radius="xl" color="slate" src={user.avatarUrl}>
                     {initials(user.name)}
                   </Avatar>
                   <Box style={{ minWidth: 0 }}>
@@ -147,6 +147,13 @@ export function AppChrome({
                 href="/account"
               >
                 Account
+              </Menu.Item>
+              <Menu.Item
+                leftSection={<IconSettings size={16} />}
+                component={Link}
+                href="/settings"
+              >
+                Settings
               </Menu.Item>
               <Menu.Item leftSection={<IconLogout size={16} />} onClick={signOut}>
                 Sign out
