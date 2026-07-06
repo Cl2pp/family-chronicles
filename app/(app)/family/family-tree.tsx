@@ -220,7 +220,14 @@ export function FamilyTree({
         comp.sort((a, b) => keyOf(a) - keyOf(b) || nameOf(a).localeCompare(nameOf(b)));
         comps.push(comp);
       }
-      const compKey = (comp: string[]) => Math.min(...comp.map(keyOf));
+      // Order groups by the barycenter (average) of their members' parent positions.
+      // Using the minimum instead would let a couple that straddles two families
+      // claim the leftmost slot and push a sibling in between another family's
+      // children, making the connector lines cross.
+      const compKey = (comp: string[]) => {
+        const keys = comp.map(keyOf).filter((k) => k < 1e9);
+        return keys.length ? keys.reduce((s, v) => s + v, 0) / keys.length : 1e9;
+      };
       comps.sort(
         (a, b) => compKey(a) - compKey(b) || nameOf(a[0]).localeCompare(nameOf(b[0])),
       );
@@ -258,17 +265,42 @@ export function FamilyTree({
 
     const parents: string[] = [];
     const spouses: { x1: number; x2: number; y: number }[] = [];
+    const parentPosOfChild = new Map<string, Pos[]>();
     for (const e of validEdges) {
       const a = pos.get(e.from);
       const b = pos.get(e.to);
       if (!a || !b) continue;
       if (e.type === 'parent') {
-        const midY = (a.bottom + b.top) / 2;
-        parents.push(`M ${a.cx} ${a.bottom} V ${midY} H ${b.cx} V ${b.top}`);
+        const arr = parentPosOfChild.get(e.to) ?? [];
+        arr.push(a);
+        parentPosOfChild.set(e.to, arr);
       } else {
         const [l, r] = a.cx <= b.cx ? [a, b] : [b, a];
         const y = (l.midY + r.midY) / 2;
         spouses.push({ x1: l.right, x2: r.left, y });
+      }
+    }
+
+    // Parent connectors. When both parents sit side by side, drop ONE line from
+    // the middle of the couple (the spouse bar) — two separate elbows read as if
+    // the child descended from several couples at once.
+    for (const [childId, pps] of parentPosOfChild) {
+      const child = pos.get(childId);
+      if (!child) continue;
+      const sideBySide =
+        pps.length === 2 &&
+        Math.abs(pps[0].midY - pps[1].midY) < 4 &&
+        Math.abs(pps[0].cx - pps[1].cx) < CARD_WIDTH * 2;
+      if (sideBySide) {
+        const x = (pps[0].cx + pps[1].cx) / 2;
+        const startY = (pps[0].midY + pps[1].midY) / 2;
+        const busY = (Math.max(pps[0].bottom, pps[1].bottom) + child.top) / 2;
+        parents.push(`M ${x} ${startY} V ${busY} H ${child.cx} V ${child.top}`);
+      } else {
+        for (const p of pps) {
+          const busY = (p.bottom + child.top) / 2;
+          parents.push(`M ${p.cx} ${p.bottom} V ${busY} H ${child.cx} V ${child.top}`);
+        }
       }
     }
 
