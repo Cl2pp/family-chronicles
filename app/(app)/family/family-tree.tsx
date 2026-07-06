@@ -131,7 +131,7 @@ export function FamilyTree({
   }, [people]);
 
   // Build adjacency + generation layout.
-  const { rows, validEdges } = useMemo(() => {
+  const { rows, validEdges, margins } = useMemo(() => {
     const ids = new Set(people.map((p) => p.id));
     const parentsOf = new Map<string, string[]>();
     const spousesOf = new Map<string, string[]>();
@@ -184,6 +184,7 @@ export function FamilyTree({
 
     const sortedGens = [...new Set([...gen.values()])].sort((a, b) => a - b);
     const genOrder = new Map<number, string[]>();
+    const compsByGen = new Map<number, string[][]>();
     const nameOf = (id: string) => peopleById.get(id)?.displayName ?? '';
 
     for (const g of sortedGens) {
@@ -231,7 +232,45 @@ export function FamilyTree({
       comps.sort(
         (a, b) => compKey(a) - compKey(b) || nameOf(a[0]).localeCompare(nameOf(b[0])),
       );
+      compsByGen.set(g, comps);
       genOrder.set(g, comps.flat());
+    }
+
+    // Horizontal placement: rows are NOT centered independently — that would put a
+    // lone child in the middle of the page instead of below their parents. Each
+    // spouse-group is placed under the average position of its members' parents,
+    // greedily left-to-right so row order and minimum spacing are preserved. The
+    // resulting offsets are applied as marginLeft on the cards.
+    const H_GAP = 24;
+    const colW = CARD_WIDTH + H_GAP;
+    const centerXById = new Map<string, number>();
+    const marginById = new Map<string, number>();
+    for (const g of sortedGens) {
+      let cursor = 0; // minimum left edge for the next group
+      let flow = 0; // left edge the next card would get with zero margins
+      for (const comp of compsByGen.get(g) ?? []) {
+        const desires: number[] = [];
+        comp.forEach((id, k) => {
+          const ps = (parentsOf.get(id) ?? [])
+            .map((pid) => centerXById.get(pid))
+            .filter((v): v is number => v !== undefined);
+          if (ps.length) {
+            const want = ps.reduce((s, v) => s + v, 0) / ps.length;
+            desires.push(want - (k * colW + CARD_WIDTH / 2));
+          }
+        });
+        const desired = desires.length
+          ? desires.reduce((s, v) => s + v, 0) / desires.length
+          : cursor;
+        const start = Math.max(cursor, desired);
+        comp.forEach((id, k) => {
+          const left = start + k * colW;
+          centerXById.set(id, left + CARD_WIDTH / 2);
+          marginById.set(id, left - flow);
+          flow = left + CARD_WIDTH;
+        });
+        cursor = start + comp.length * colW;
+      }
     }
 
     const builtRows = sortedGens.map((g) => ({
@@ -239,7 +278,7 @@ export function FamilyTree({
       ids: genOrder.get(g) ?? [],
     }));
 
-    return { rows: builtRows, validEdges: valid };
+    return { rows: builtRows, validEdges: valid, margins: marginById };
   }, [people, edges, peopleById]);
 
   const measure = useCallback(() => {
@@ -481,9 +520,18 @@ export function FamilyTree({
             </svg>
           )}
 
-          <Stack gap={56} style={{ position: 'relative', zIndex: 1, minWidth: 'fit-content' }}>
+          <Stack
+            gap={56}
+            style={{
+              position: 'relative',
+              zIndex: 1,
+              minWidth: 'fit-content',
+              width: 'fit-content',
+              margin: '0 auto',
+            }}
+          >
             {rows.map((row) => (
-              <Group key={row.gen} justify="center" gap="lg" wrap="nowrap" align="flex-start">
+              <Group key={row.gen} gap={0} wrap="nowrap" align="flex-start">
                 {row.ids.map((id) => {
                   const person = peopleById.get(id);
                   if (!person) return null;
@@ -503,6 +551,7 @@ export function FamilyTree({
                         position: 'relative',
                         width: CARD_WIDTH,
                         flex: '0 0 auto',
+                        marginLeft: margins.get(id) ?? 0,
                         cursor: 'pointer',
                         borderColor: isMe ? 'var(--mantine-color-brand-6)' : undefined,
                         borderWidth: isMe ? 2 : undefined,
