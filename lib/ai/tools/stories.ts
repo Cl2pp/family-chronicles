@@ -1,9 +1,28 @@
 import { z } from 'zod';
 import { listFamiliesForUser } from '@/lib/families';
-import { listStoriesForUser, shareStoryToFamily } from '@/lib/stories';
+import {
+  canUserEditStory,
+  familiesForStory,
+  listStoriesForUser,
+  shareStoryToFamily,
+  type StoryListItem,
+} from '@/lib/stories';
 import { canContribute, type AccessRole } from '@/lib/permissions';
-import { defineTool } from './types';
+import { defineTool, type ToolContext } from './types';
 import { ensureContributor } from './util';
+
+/** Find one of the user's stories by exact title (case-insensitive) or id. */
+async function resolveStory(
+  ctx: ToolContext,
+  ref: string,
+): Promise<{ story: StoryListItem } | { error: string }> {
+  const stories = await listStoriesForUser(ctx.userId);
+  const wanted = ref.trim().toLowerCase();
+  const matches = stories.filter((s) => s.id === ref.trim() || s.title.toLowerCase() === wanted);
+  if (matches.length === 0) return { error: `No story titled "${ref}" was found.` };
+  if (matches.length > 1) return { error: `Several stories match "${ref}" — be more specific.` };
+  return { story: matches[0] };
+}
 
 /**
  * draft_story — compose a memoir story from the conversation and show it to the user
@@ -59,14 +78,9 @@ export const shareStoryTool = defineTool({
     familyName: z.string().min(1).describe('The family to share it into.'),
   }),
   async execute(args, ctx) {
-    const stories = await listStoriesForUser(ctx.userId);
-    const wantedStory = args.story.trim().toLowerCase();
-    const storyMatches = stories.filter(
-      (s) => s.id === args.story.trim() || s.title.toLowerCase() === wantedStory,
-    );
-    if (storyMatches.length === 0) return { ok: false, error: `No story titled "${args.story}" was found.` };
-    if (storyMatches.length > 1) return { ok: false, error: `Several stories match "${args.story}" — be more specific.` };
-    const story = storyMatches[0];
+    const found = await resolveStory(ctx, args.story);
+    if ('error' in found) return { ok: false, error: found.error };
+    const story = found.story;
 
     const families = await listFamiliesForUser(ctx.userId);
     const wantedFamily = args.familyName.trim().toLowerCase();
@@ -87,6 +101,90 @@ export const shareStoryTool = defineTool({
       ok: true,
       message: `Shared "${story.title}" into ${family.name}.`,
       receipt: { label: `Shared "${story.title}" with ${family.name}`, href: `/stories/${story.id}` },
+    };
+  },
+});
+
+/** get_story — read tool: one story in full, for answering questions or before an edit. */
+export const getStoryTool = defineTool({
+  name: 'get_story',
+  description:
+    'Read one story in full (title, summary, body, year, status) by its title or id. Always call ' +
+    'this before update_story so the revision starts from the current text.',
+  schema: z.object({
+    story: z.string().min(1).describe('The story title (or id) to read.'),
+  }),
+  async execute(args, ctx) {
+    const found = await resolveStory(ctx, args.story);
+    if ('error' in found) return { ok: false, error: found.error };
+    const s = found.story;
+    return {
+      ok: true,
+      message: JSON.stringify({
+        id: s.id,
+        title: s.title,
+        summary: s.summary,
+        body: s.bodyStyled ?? s.bodyOriginal,
+        eventYear: s.eventDate ? s.eventDate.getUTCFullYear() : null,
+        status: s.status,
+      }),
+    };
+  },
+});
+
+/**
+ * update_story — propose a revision to an existing story. Like draft_story this does NOT
+ * save: the client shows the revised text in an editable card and the user accepts it
+ * (which calls the applyStoryUpdate server action).
+ */
+export const updateStoryTool = defineTool({
+  name: 'update_story',
+  description:
+    'Propose a revision to an existing story — a rewrite, a correction, or new details woven in. ' +
+    'Call get_story first and base the revision on the current text. The body MUST be the ' +
+    'COMPLETE revised story (not just the changes), keep the third-person memoir style, preserve ' +
+    'every fact that is still true, invent NOTHING, and keep the original language. This shows an ' +
+    'editable review card — it does not save. Keep your reply short afterwards.',
+  schema: z.object({
+    story: z.string().min(1).describe('The story title (or id) to update.'),
+    title: z.string().min(1).describe('The (possibly unchanged) title.'),
+    summary: z.string().describe('One short sentence on what the story is about.'),
+    body: z.string().min(1).describe('The complete revised third-person memoir prose.'),
+    eventYear: z
+      .number()
+      .int()
+      .nullish()
+      .describe('The year the events happened. Pass the current year unless it changed.'),
+  }),
+  async execute(args, ctx) {
+    const found = await resolveStory(ctx, args.story);
+    if ('error' in found) return { ok: false, error: found.error };
+    const s = found.story;
+
+    if (s.status !== 'ready') {
+      return { ok: false, error: 'This story is still being processed — it can be edited once it is ready.' };
+    }
+    if (!(await canUserEditStory(s.id, ctx.userId))) {
+      return { ok: false, error: "Only the story's author or a family owner can edit it." };
+    }
+
+    const families = await familiesForStory(s.id);
+    return {
+      ok: true,
+      message: 'Revision prepared and shown to the user for review. Await their edits and acceptance.',
+      storyDraft: {
+        updateStoryId: s.id,
+        proposal: {
+          kind: 'story',
+          title: args.title,
+          summary: args.summary ?? '',
+          body: args.body,
+          eventYear: args.eventYear ?? (s.eventDate ? s.eventDate.getUTCFullYear() : null),
+          people: [],
+        },
+        familyId: families[0]?.id ?? '',
+        familyName: families[0]?.name ?? 'your family',
+      },
     };
   },
 });

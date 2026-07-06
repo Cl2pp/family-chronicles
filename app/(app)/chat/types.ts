@@ -13,8 +13,8 @@ export interface Msg {
   receipts?: Receipt[];
   /** A story draft awaiting the user's review + save. */
   storyDraft?: StoryDraft | null;
-  /** Set once a draft on this message has been saved. */
-  result?: { kind: 'story'; storyId: string; familyName: string };
+  /** Set once a draft on this message has been saved (created or updated). */
+  result?: { kind: 'story' | 'story-update'; storyId: string; familyName: string };
 }
 
 export type MsgResult = Msg['result'];

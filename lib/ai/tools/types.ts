@@ -24,6 +24,8 @@ export interface StoryDraft {
   proposal: StoryProposal;
   familyId: string;
   familyName: string;
+  /** When set, accepting updates this existing story instead of creating one. */
+  updateStoryId?: string;
 }
 
 /** How to reverse an applied action — attached to a receipt to power an Undo button. */
