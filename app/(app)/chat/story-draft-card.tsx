@@ -3,28 +3,27 @@
 import { useState } from 'react';
 import { Button, Card, Group, Text, TextInput, Textarea } from '@mantine/core';
 import { IconSparkles } from '@tabler/icons-react';
-import type { StoryProposal } from '@/lib/ai/chat';
+import type { StoryDraft } from '@/lib/ai/tools';
 import { acceptStory } from './actions';
 import type { MsgResult } from './types';
 
 /** Editable story draft proposed by the assistant, with accept/discard. */
 export function StoryDraftCard({
-  proposal,
-  family,
+  draft,
   conversationId,
   busy,
   setBusy,
   onDiscard,
   onResult,
 }: {
-  proposal: StoryProposal;
-  family: { id: string; name: string };
+  draft: StoryDraft;
   conversationId: string | null;
   busy: boolean;
   setBusy: (b: boolean) => void;
   onDiscard: () => void;
   onResult: (r: MsgResult) => void;
 }) {
+  const { proposal, familyId, familyName } = draft;
   const [title, setTitle] = useState(proposal.title);
   const [body, setBody] = useState(proposal.body);
   const [year, setYear] = useState(proposal.eventYear ? String(proposal.eventYear) : '');
@@ -34,7 +33,7 @@ export function StoryDraftCard({
     try {
       const res = await acceptStory({
         conversationId: conversationId ?? '',
-        familyId: family.id,
+        familyId,
         proposal: {
           ...proposal,
           title,
@@ -42,7 +41,7 @@ export function StoryDraftCard({
           eventYear: year ? Number(year) : null,
         },
       });
-      onResult({ kind: 'story', storyId: res.storyId });
+      onResult({ kind: 'story', storyId: res.storyId, familyName });
     } finally {
       setBusy(false);
     }
@@ -53,7 +52,7 @@ export function StoryDraftCard({
       <Group gap={6} mb="xs">
         <IconSparkles size={15} color="var(--mantine-color-brand-6)" />
         <Text size="xs" fw={600} c="brand.7" tt="uppercase">
-          Story draft · {family.name}
+          Story draft · {familyName}
         </Text>
       </Group>
       <TextInput

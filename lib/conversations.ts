@@ -40,16 +40,26 @@ export async function latestConversation(userId: string) {
 
 export async function listMessages(conversationId: string) {
   return db
-    .select({ id: messages.id, role: messages.role, content: messages.content })
+    .select({
+      id: messages.id,
+      role: messages.role,
+      content: messages.content,
+      metadata: messages.metadata,
+    })
     .from(messages)
     .where(eq(messages.conversationId, conversationId))
     .orderBy(asc(messages.createdAt));
 }
 
-export async function addMessage(conversationId: string, role: ChatRole, content: string) {
+export async function addMessage(
+  conversationId: string,
+  role: ChatRole,
+  content: string,
+  metadata?: unknown,
+) {
   const [created] = await db
     .insert(messages)
-    .values({ conversationId, role, content })
+    .values({ conversationId, role, content, metadata: metadata ?? null })
     .returning();
   await db
     .update(conversations)

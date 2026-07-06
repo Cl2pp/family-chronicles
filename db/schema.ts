@@ -6,6 +6,7 @@ import {
   timestamp,
   uuid,
   integer,
+  jsonb,
   index,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
@@ -233,6 +234,8 @@ export const messages = pgTable(
       .references(() => conversations.id, { onDelete: 'cascade' }),
     role: messageRole('role').notNull(),
     content: text('content').notNull(),
+    /** Structured extras for rendering (e.g. applied-action receipts). */
+    metadata: jsonb('metadata'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (t) => [index('messages_conversation_idx').on(t.conversationId)],

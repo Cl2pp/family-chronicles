@@ -21,6 +21,7 @@ import type { FamilyTree as MergedTree, TreePerson } from '@/lib/people';
 import { canContribute, canManage, roleLabel, type AccessRole } from '@/lib/permissions';
 import { FamilyTree } from './family-tree';
 import { AddPersonModal } from './add-person-modal';
+import { DeletePersonButton } from './delete-person-button';
 import { AccessTab } from './access-tab';
 import { SettingsTab } from './settings-tab';
 import type { AddTarget, FamilyRow, InviteRow, MemberRow, PersonRow } from './types';
@@ -185,11 +186,20 @@ export function FamilyTabs({
                         </Group>
                       </Table.Td>
                       <Table.Td style={{ textAlign: 'right' }}>
-                        {p.userId && (
-                          <Badge variant="light" color="brand">
-                            Account
-                          </Badge>
-                        )}
+                        <Group gap="xs" justify="flex-end" wrap="nowrap">
+                          {p.userId && (
+                            <Badge variant="light" color="brand">
+                              Account
+                            </Badge>
+                          )}
+                          {canContribute(role) && !p.userId && (
+                            <DeletePersonButton
+                              familyId={active.id}
+                              personId={p.id}
+                              name={p.displayName}
+                            />
+                          )}
+                        </Group>
                       </Table.Td>
                     </Table.Tr>
                   ))}

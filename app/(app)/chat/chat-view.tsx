@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import {
   ActionIcon,
   Box,
@@ -21,7 +20,8 @@ import { MessageRow } from './message-row';
 import { presignUpload, sendMessage, sendVoiceMessage } from './actions';
 import type { ChatAttachment, Msg } from './types';
 
-const SUGGESTIONS = ['A childhood memory', 'About Grandma', 'Add a relative to the tree'];
+const SETUP_SUGGESTIONS = ['Set up my family', 'Add a relative', 'Record a memory'];
+const FAMILY_SUGGESTIONS = ['A childhood memory', 'About Grandma', 'Add a relative to the tree'];
 
 interface PendingPhoto {
   s3Key: string;
@@ -72,27 +72,6 @@ export function ChatView({
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busyLabel]);
 
-  if (!family) {
-    return (
-      <Box p="lg" maw={760} mx="auto">
-        <Card withBorder radius="md" p="xl">
-          <Stack align="center" gap="sm">
-            <Text fw={600} size="lg">
-              Create a family first
-            </Text>
-            <Text c="dimmed" ta="center" maw={420}>
-              Chat turns your memories into stories for a family. Make your first family to
-              get started.
-            </Text>
-            <Button component={Link} href="/family/new" mt="sm">
-              Create a family
-            </Button>
-          </Stack>
-        </Card>
-      </Box>
-    );
-  }
-
   function pushError() {
     setMessages((m) => [
       ...m,
@@ -113,7 +92,6 @@ export function ChatView({
     try {
       const res = await sendMessage({
         conversationId,
-        familyId: family!.id,
         text: trimmed || 'Here are some photos.',
         attachments: pendingPhotos.map((p) => ({
           kind: 'photo',
@@ -123,7 +101,10 @@ export function ChatView({
         })),
       });
       setConversationId(res.conversationId);
-      setMessages((m) => [...m, { role: 'assistant', content: res.reply, proposal: res.proposal }]);
+      setMessages((m) => [
+        ...m,
+        { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
+      ]);
     } catch {
       pushError();
     } finally {
@@ -160,7 +141,6 @@ export function ChatView({
       const s3Key = await uploadBlob('audio', audio.blob, audio.mimeType, `note.${audio.mimeType.includes('mp4') ? 'mp4' : 'webm'}`);
       const res = await sendVoiceMessage({
         conversationId,
-        familyId: family!.id,
         s3Key,
         mimeType: audio.mimeType,
         bytes: audio.blob.size,
@@ -170,7 +150,7 @@ export function ChatView({
       setMessages((m) => [
         ...m,
         { role: 'user', content: res.transcript, attachments: [{ kind: 'audio', url: previewUrl }] },
-        { role: 'assistant', content: res.reply, proposal: res.proposal },
+        { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
       ]);
     } catch (err) {
       setMessages((m) => [
@@ -190,6 +170,7 @@ export function ChatView({
   }
 
   const empty = messages.length === 0;
+  const suggestions = family ? FAMILY_SUGGESTIONS : SETUP_SUGGESTIONS;
 
   return (
     <Box
@@ -202,13 +183,17 @@ export function ChatView({
         {empty ? (
           <Stack gap="lg" mt="xl">
             <Stack gap={4}>
-              <Title order={2}>What would you like to do?</Title>
+              <Title order={2}>
+                {family ? 'What would you like to do?' : 'Welcome — let’s begin your chronicle'}
+              </Title>
               <Text c="dimmed">
-                Talk or type — I&apos;ll write stories and grow your family tree.
+                {family
+                  ? "Talk or type — I’ll write stories and grow your family tree."
+                  : "Tell me about your family and I’ll set it up, then we can start collecting memories."}
               </Text>
             </Stack>
             <Group gap="sm">
-              {SUGGESTIONS.map((s) => (
+              {suggestions.map((s) => (
                 <Button key={s} variant="light" size="xs" radius="xl" onClick={() => send(s)}>
                   {s}
                 </Button>
@@ -221,7 +206,6 @@ export function ChatView({
               <MessageRow
                 key={i}
                 msg={m}
-                family={family!}
                 conversationId={conversationId}
                 onResult={(r) => setResult(i, r)}
               />

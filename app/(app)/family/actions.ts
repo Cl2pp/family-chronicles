@@ -5,7 +5,14 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/session';
 import { createFamily, requireContributor, requireOwner, updateFamily } from '@/lib/families';
-import { addPersonToFamily, connectPeople, createPerson } from '@/lib/people';
+import {
+  addPersonToFamily,
+  connectPeople,
+  createPerson,
+  deletePerson,
+  getPerson,
+  isPersonInFamily,
+} from '@/lib/people';
 import { createInvitation } from '@/lib/invitations';
 import type { AccessRole } from '@/lib/permissions';
 import { parseYear, yearToDate } from '@/lib/dates';
@@ -100,6 +107,27 @@ export async function addPersonAction(input: AddPersonInput) {
 
   revalidatePath('/family');
   return { id: person.id };
+}
+
+/** Delete a person from this family's tree (and their relationships). Contributor+. */
+export async function deletePersonAction(input: { familyId: string; personId: string }) {
+  const user = await requireUser();
+  await requireContributor(input.familyId, user.id);
+
+  const person = await getPerson(input.personId);
+  if (!person) {
+    revalidatePath('/family');
+    return;
+  }
+  if (person.userId) {
+    throw new Error('This person is linked to an account and cannot be deleted here.');
+  }
+  if (!(await isPersonInFamily(input.familyId, input.personId))) {
+    throw new Error('That person is not in this family.');
+  }
+
+  await deletePerson(input.personId);
+  revalidatePath('/family');
 }
 
 /** Create an invitation and return its shareable token. */
