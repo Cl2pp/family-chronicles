@@ -59,7 +59,9 @@ export function MessageRow({
           href={`/stories/${msg.result.storyId}`}
           style={{ cursor: 'pointer' }}
         >
-          Saved to {msg.result.familyName} — View story
+          {msg.result.kind === 'story-update'
+            ? 'Story updated — View story'
+            : `Saved to ${msg.result.familyName} — View story`}
         </Badge>
       )}
 

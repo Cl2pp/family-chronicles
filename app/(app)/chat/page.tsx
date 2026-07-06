@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { requireUser } from '@/lib/session';
 import { resolveActiveFamily } from '@/lib/families';
-import { attachmentsByMessage, latestConversation, listMessages } from '@/lib/conversations';
+import { attachmentsByMessage, listMessages, resumableConversation } from '@/lib/conversations';
 import { presignGet } from '@/lib/s3';
 import type { Receipt } from '@/lib/ai/tools';
 import { ChatView } from './chat-view';
@@ -11,7 +11,7 @@ export default async function ChatPage() {
   const cookieValue = (await cookies()).get('activeFamilyId')?.value;
   const { active } = await resolveActiveFamily(user.id, cookieValue);
 
-  const convo = await latestConversation(user.id);
+  const convo = await resumableConversation(user.id);
   const stored = convo ? await listMessages(convo.id) : [];
   const visible = stored.filter((m) => m.role === 'user' || m.role === 'assistant');
 

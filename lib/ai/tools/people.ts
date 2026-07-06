@@ -4,13 +4,13 @@ import {
   connectPeople,
   createPerson,
   deletePerson,
+  edgeForRelation,
   getPerson,
   getTreeForFamily,
   isPersonInFamily,
   removeRelationship,
   updatePerson,
   type PersonPatch,
-  type RelationshipType,
 } from '@/lib/people';
 import { parseYear, yearToDate } from '@/lib/dates';
 import { defineTool } from './types';
@@ -20,16 +20,7 @@ const relation = z
   .enum(['parent', 'child', 'partner'])
   .describe("The subject's relation TO the named relative (e.g. 'parent' = subject is the relative's parent).");
 
-/** Turn a "subject is X of relative" relation into a canonical kinship edge. */
-function edgeFor(
-  rel: 'parent' | 'child' | 'partner',
-  subjectId: string,
-  relativeId: string,
-): { type: RelationshipType; personFromId: string; personToId: string } {
-  if (rel === 'parent') return { type: 'parent', personFromId: subjectId, personToId: relativeId };
-  if (rel === 'child') return { type: 'parent', personFromId: relativeId, personToId: subjectId };
-  return { type: 'spouse', personFromId: subjectId, personToId: relativeId };
-}
+const gender = z.enum(['male', 'female']).describe("The person's gender, if known.");
 
 /** add_person — create a person in the active family's tree, optionally connected to a relative. */
 export const addPersonTool = defineTool({
@@ -40,6 +31,7 @@ export const addPersonTool = defineTool({
   schema: z.object({
     displayName: z.string().min(1).describe('The name to show, e.g. "Maria" or "Maria Schmidt".'),
     familyName: z.string().nullish().describe('Optional surname.'),
+    gender: gender.nullish(),
     bornYear: z.number().int().nullish().describe('Birth year, if known.'),
     diedYear: z.number().int().nullish().describe('Death year, if known.'),
     relateTo: z
@@ -68,6 +60,7 @@ export const addPersonTool = defineTool({
     const person = await createPerson({
       displayName,
       familyName: args.familyName?.trim() || null,
+      gender: args.gender ?? null,
       bornOn: bornYear !== undefined ? yearToDate(bornYear) : null,
       bornPrecision: bornYear !== undefined ? 'year' : null,
       diedOn: diedYear !== undefined ? yearToDate(diedYear) : null,
@@ -79,7 +72,10 @@ export const addPersonTool = defineTool({
 
     let detail: string | undefined;
     if (relative && args.relateTo) {
-      await connectPeople({ ...edgeFor(args.relateTo.relation, person.id, relative.id), createdBy: ctx.userId });
+      await connectPeople({
+        ...edgeForRelation(args.relateTo.relation, person.id, relative.id),
+        createdBy: ctx.userId,
+      });
       detail = `${args.relateTo.relation} of ${relative.displayName}`;
     }
 
@@ -120,7 +116,7 @@ export const relatePeopleTool = defineTool({
       return { ok: false, error: 'A person cannot be related to themselves.' };
     }
 
-    const edge = edgeFor(args.relation, subject.person.id, relative.person.id);
+    const edge = edgeForRelation(args.relation, subject.person.id, relative.person.id);
     await connectPeople({ ...edge, createdBy: ctx.userId });
 
     const detail = `${args.relation} of ${relative.person.displayName}`;
@@ -156,7 +152,7 @@ export const unrelatePeopleTool = defineTool({
     const relative = await resolvePerson(gate.familyId, args.relativeName);
     if ('error' in relative) return { ok: false, error: relative.error };
 
-    const edge = edgeFor(args.relation, subject.person.id, relative.person.id);
+    const edge = edgeForRelation(args.relation, subject.person.id, relative.person.id);
     await removeRelationship(edge);
 
     const detail = `${args.relation} of ${relative.person.displayName}`;
@@ -172,13 +168,14 @@ export const unrelatePeopleTool = defineTool({
 export const editPersonTool = defineTool({
   name: 'edit_person',
   description:
-    "Update an existing person in the active family's tree — correct their name, surname, or " +
-    'birth/death year. Pass only the fields to change; pass null to clear a year or surname. ' +
+    "Update an existing person in the active family's tree — correct their name, surname, " +
+    'gender, or birth/death year. Pass only the fields to change; pass null to clear a field. ' +
     'Contributor access required.',
   schema: z.object({
     name: z.string().min(1).describe('The person to edit (their current name in the tree).'),
     newName: z.string().min(1).nullish().describe('A corrected display name.'),
     familyName: z.string().nullish().describe('A corrected surname (null to clear).'),
+    gender: gender.nullish().describe("The person's gender (null to clear)."),
     bornYear: z.number().int().nullish().describe('Corrected birth year (null to clear).'),
     diedYear: z.number().int().nullish().describe('Corrected death year (null to clear).'),
   }),
@@ -196,6 +193,7 @@ export const editPersonTool = defineTool({
       patch.displayName = trimmed;
     }
     if (args.familyName !== undefined) patch.familyName = args.familyName?.trim() || null;
+    if (args.gender !== undefined) patch.gender = args.gender;
     if (args.bornYear !== undefined) {
       const y = parseYear(args.bornYear);
       patch.bornOn = args.bornYear === null || y === undefined ? null : yearToDate(y);
@@ -207,7 +205,7 @@ export const editPersonTool = defineTool({
       patch.diedPrecision = patch.diedOn ? 'year' : null;
     }
     if (Object.keys(patch).length === 0) {
-      return { ok: false, error: 'Nothing to change — provide a new name, surname, or year.' };
+      return { ok: false, error: 'Nothing to change — provide a new name, surname, gender, or year.' };
     }
 
     await updatePerson(found.person.id, patch);
@@ -259,9 +257,9 @@ export const deletePersonTool = defineTool({
 export const getFamilyTreeTool = defineTool({
   name: 'get_family_tree',
   description:
-    "List everyone in the active family's tree with their birth/death years AND the existing " +
-    'relationships (parent/child, partners). Use before adding or connecting people to avoid ' +
-    'duplicates, wrong links, or giving someone a third parent.',
+    "List everyone in the active family's tree with their gender, birth/death years, and the " +
+    'kinship relationships between them. Use before adding or linking people to avoid duplicates, ' +
+    'wrong links, or giving someone a third parent.',
   schema: z.object({}),
   async execute(_args, ctx) {
     if (!ctx.activeFamilyId) {
@@ -271,20 +269,21 @@ export const getFamilyTreeTool = defineTool({
       };
     }
     const tree = await getTreeForFamily(ctx.activeFamilyId);
-    const nameById = new Map(tree.people.map((p) => [p.id, p.displayName]));
+    const nameOf = new Map(tree.people.map((p) => [p.id, p.displayName]));
     return {
       ok: true,
       message: JSON.stringify({
         people: tree.people.map((p) => ({
           name: p.displayName,
           familyName: p.familyName,
+          gender: p.gender,
           born: p.bornOn ? new Date(p.bornOn).getUTCFullYear() : null,
           died: p.diedOn ? new Date(p.diedOn).getUTCFullYear() : null,
         })),
         relationships: tree.edges.map((e) =>
           e.type === 'parent'
-            ? { parent: nameById.get(e.from), child: nameById.get(e.to) }
-            : { partners: [nameById.get(e.from), nameById.get(e.to)] },
+            ? { parent: nameOf.get(e.from), child: nameOf.get(e.to) }
+            : { partners: [nameOf.get(e.from), nameOf.get(e.to)] },
         ),
       }),
     };

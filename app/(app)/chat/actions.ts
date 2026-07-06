@@ -15,7 +15,7 @@ import {
 } from '@/lib/conversations';
 import { runAgent, type ChatTurn } from '@/lib/ai/agent';
 import type { Receipt, StoryDraft, StoryProposal, ToolContext, UndoAction } from '@/lib/ai/tools';
-import { addStoryAssets, createStory } from '@/lib/stories';
+import { addStoryAssets, applyStoryEdit, createStory } from '@/lib/stories';
 import {
   canUserEditPerson,
   deletePerson,
@@ -256,4 +256,26 @@ export async function acceptStory(input: {
 
   revalidatePath('/stories');
   return { storyId: story.id };
+}
+
+/** Accept a reviewed story revision → update the existing story in place. */
+export async function applyStoryUpdate(input: {
+  storyId: string;
+  proposal: StoryProposal;
+}): Promise<{ storyId: string }> {
+  const user = await requireUser();
+  const p = input.proposal;
+  const result = await applyStoryEdit({
+    storyId: input.storyId,
+    userId: user.id,
+    title: p.title,
+    summary: p.summary || null,
+    body: p.body,
+    eventYear: p.eventYear,
+  });
+  if (!result.ok) throw new Error(result.error);
+
+  revalidatePath('/stories');
+  revalidatePath(`/stories/${input.storyId}`);
+  return { storyId: input.storyId };
 }

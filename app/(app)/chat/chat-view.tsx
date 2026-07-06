@@ -14,7 +14,7 @@ import {
   Textarea,
   Title,
 } from '@mantine/core';
-import { IconMicrophone, IconPhoto, IconSend, IconX } from '@tabler/icons-react';
+import { IconMicrophone, IconPhoto, IconPlus, IconSend, IconX } from '@tabler/icons-react';
 import { AudioRecorder, type RecordedAudio } from '@/components/audio-recorder';
 import { MessageRow } from './message-row';
 import { presignUpload, sendMessage, sendVoiceMessage } from './actions';
@@ -169,6 +169,16 @@ export function ChatView({
     setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, result } : msg)));
   }
 
+  /** Start a fresh conversation; the old one stays stored and linked to its stories. */
+  function startNewChat() {
+    setConversationId(null);
+    setMessages([]);
+    setInput('');
+    setPhotos([]);
+    setRecording(false);
+    setRecorded(null);
+  }
+
   const empty = messages.length === 0;
   const suggestions = family ? FAMILY_SUGGESTIONS : SETUP_SUGGESTIONS;
 
@@ -179,6 +189,20 @@ export function ChatView({
       px="md"
       style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}
     >
+      {!empty && (
+        <Group justify="flex-end" pt="xs">
+          <Button
+            size="xs"
+            variant="subtle"
+            color="gray"
+            leftSection={<IconPlus size={14} />}
+            onClick={startNewChat}
+            disabled={sending}
+          >
+            New chat
+          </Button>
+        </Group>
+      )}
       <Box style={{ flex: 1, overflowY: 'auto' }} py="lg">
         {empty ? (
           <Stack gap="lg" mt="xl">

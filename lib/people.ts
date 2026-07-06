@@ -6,6 +6,21 @@ import { canContribute, type AccessRole } from '@/lib/permissions';
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export type RelationshipType = 'parent' | 'spouse';
+export type Gender = 'male' | 'female';
+
+/** A relation as users phrase it: the subject is the relative's parent/child/partner. */
+export type PersonRelation = 'parent' | 'child' | 'partner';
+
+/** Turn a "subject is X of relative" relation into a canonical kinship edge. */
+export function edgeForRelation(
+  rel: PersonRelation,
+  subjectId: string,
+  relativeId: string,
+): { type: RelationshipType; personFromId: string; personToId: string } {
+  if (rel === 'parent') return { type: 'parent', personFromId: subjectId, personToId: relativeId };
+  if (rel === 'child') return { type: 'parent', personFromId: relativeId, personToId: subjectId };
+  return { type: 'spouse', personFromId: subjectId, personToId: relativeId };
+}
 
 /** Find or create the person node that represents an app user. Returns personId. */
 export async function ensurePersonForUser(
@@ -32,6 +47,7 @@ export interface NewPerson {
   displayName: string;
   givenName?: string | null;
   familyName?: string | null;
+  gender?: Gender | null;
   bornOn?: Date | null;
   bornPrecision?: 'day' | 'month' | 'year' | 'circa' | null;
   diedOn?: Date | null;
@@ -50,6 +66,7 @@ export async function createPerson(
         displayName: input.displayName,
         givenName: input.givenName ?? null,
         familyName: input.familyName ?? null,
+        gender: input.gender ?? null,
         bornOn: input.bornOn ?? null,
         bornPrecision: input.bornPrecision ?? null,
         diedOn: input.diedOn ?? null,
@@ -83,6 +100,7 @@ export async function getPerson(id: string) {
 export interface PersonPatch {
   displayName?: string;
   familyName?: string | null;
+  gender?: Gender | null;
   bornOn?: Date | null;
   bornPrecision?: 'day' | 'month' | 'year' | 'circa' | null;
   diedOn?: Date | null;
@@ -201,6 +219,7 @@ export interface TreePerson {
   displayName: string;
   familyName: string | null;
   userId: string | null;
+  gender: Gender | null;
   bornOn: Date | null;
   bornPrecision: string | null;
   diedOn: Date | null;
@@ -248,6 +267,7 @@ async function getTreeForFamilies(familyIds: string[]): Promise<FamilyTree> {
       displayName: people.displayName,
       familyName: people.familyName,
       userId: people.userId,
+      gender: people.gender,
       bornOn: people.bornOn,
       bornPrecision: people.bornPrecision,
       diedOn: people.diedOn,
@@ -274,7 +294,7 @@ async function getTreeForFamilies(familyIds: string[]): Promise<FamilyTree> {
   return { people: treePeople, edges };
 }
 
-/** One family's tree — people plus the kinship edges among them. */
+/** One family's tree: its people plus the kinship edges between them. */
 export async function getTreeForFamily(familyId: string): Promise<FamilyTree> {
   return getTreeForFamilies([familyId]);
 }
@@ -296,6 +316,7 @@ export async function listFamilyPeople(familyId: string) {
       displayName: people.displayName,
       familyName: people.familyName,
       userId: people.userId,
+      gender: people.gender,
       bornOn: people.bornOn,
       diedOn: people.diedOn,
     })

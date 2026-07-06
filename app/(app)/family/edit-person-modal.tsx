@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useTransition } from 'react';
-import { Button, Group, Modal, Stack, TextInput } from '@mantine/core';
+import { Button, Group, Modal, Select, Stack, TextInput } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
+import type { Gender } from '@/lib/people';
 import { editPersonAction } from './actions';
+import { GENDER_OPTIONS } from './add-person-modal';
 import type { PersonRow } from './types';
 
 function yearOf(d: Date | string | null | undefined): string {
@@ -27,7 +29,13 @@ export function EditPersonModal({
 }) {
   const [pending, startTransition] = useTransition();
   const form = useForm({
-    initialValues: { displayName: '', familyName: '', bornYear: '', diedYear: '' },
+    initialValues: {
+      displayName: '',
+      familyName: '',
+      gender: null as Gender | null,
+      bornYear: '',
+      diedYear: '',
+    },
     validate: {
       displayName: (v) => (v.trim() ? null : 'A name is required'),
       bornYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : 'Use a 4-digit year'),
@@ -40,6 +48,7 @@ export function EditPersonModal({
       form.setValues({
         displayName: person.displayName,
         familyName: person.familyName ?? '',
+        gender: person.gender,
         bornYear: yearOf(person.bornOn),
         diedYear: yearOf(person.diedOn),
       });
@@ -56,6 +65,7 @@ export function EditPersonModal({
           personId: person.id,
           displayName: values.displayName,
           familyName: values.familyName.trim() || null,
+          gender: values.gender,
           bornYear: values.bornYear ? Number(values.bornYear) : null,
           diedYear: values.diedYear ? Number(values.diedYear) : null,
         });
@@ -79,6 +89,13 @@ export function EditPersonModal({
             label="Family name (surname)"
             placeholder="Optional"
             {...form.getInputProps('familyName')}
+          />
+          <Select
+            label="Gender"
+            placeholder="Optional"
+            data={GENDER_OPTIONS}
+            clearable
+            {...form.getInputProps('gender')}
           />
           <Group grow>
             <TextInput label="Birth year" placeholder="e.g. 1948" {...form.getInputProps('bornYear')} />

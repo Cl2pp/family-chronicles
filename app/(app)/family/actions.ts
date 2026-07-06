@@ -11,10 +11,13 @@ import {
   connectPeople,
   createPerson,
   deletePerson,
+  edgeForRelation,
   getPerson,
   isPersonInFamily,
   removeRelationship,
   updatePerson,
+  type Gender,
+  type PersonRelation,
 } from '@/lib/people';
 import { createInvitation } from '@/lib/invitations';
 import type { AccessRole } from '@/lib/permissions';
@@ -47,9 +50,10 @@ export interface AddPersonInput {
   familyId: string;
   displayName: string;
   familyName?: string;
+  gender?: Gender | null;
   bornYear?: number;
   diedYear?: number;
-  connectTo?: { personId: string; relation: 'parent' | 'child' | 'partner' };
+  connectTo?: { personId: string; relation: PersonRelation };
 }
 
 /** Add a person to a family's tree, optionally wiring a kinship edge. */
@@ -68,6 +72,7 @@ export async function addPersonAction(input: AddPersonInput) {
   const person = await createPerson({
     displayName,
     familyName: input.familyName?.trim() || null,
+    gender: input.gender ?? null,
     bornOn: bornYear !== undefined ? yearToDate(bornYear) : null,
     bornPrecision: bornYear !== undefined ? 'year' : null,
     diedOn: diedYear !== undefined ? yearToDate(diedYear) : null,
@@ -82,30 +87,10 @@ export async function addPersonAction(input: AddPersonInput) {
 
   if (input.connectTo) {
     const { personId: target, relation } = input.connectTo;
-    if (relation === 'parent') {
-      // New person is the PARENT of the target.
-      await connectPeople({
-        type: 'parent',
-        personFromId: person.id,
-        personToId: target,
-        createdBy: user.id,
-      });
-    } else if (relation === 'child') {
-      // New person is the CHILD of the target.
-      await connectPeople({
-        type: 'parent',
-        personFromId: target,
-        personToId: person.id,
-        createdBy: user.id,
-      });
-    } else {
-      await connectPeople({
-        type: 'spouse',
-        personFromId: person.id,
-        personToId: target,
-        createdBy: user.id,
-      });
-    }
+    await connectPeople({
+      ...edgeForRelation(relation, person.id, target),
+      createdBy: user.id,
+    });
   }
 
   revalidatePath('/family');
@@ -118,6 +103,7 @@ export async function editPersonAction(input: {
   personId: string;
   displayName: string;
   familyName?: string | null;
+  gender?: Gender | null;
   bornYear?: number | null;
   diedYear?: number | null;
 }) {
@@ -136,6 +122,7 @@ export async function editPersonAction(input: {
   await updatePerson(input.personId, {
     displayName,
     familyName: input.familyName?.trim() || null,
+    gender: input.gender ?? null,
     bornOn: bornYear !== undefined ? yearToDate(bornYear) : null,
     bornPrecision: bornYear !== undefined ? 'year' : null,
     diedOn: diedYear !== undefined ? yearToDate(diedYear) : null,
@@ -164,6 +151,34 @@ export async function removeRelationshipAction(input: {
   }
 
   await removeRelationship(input);
+  revalidatePath('/family');
+}
+
+/** Connect two people who are already in this family's tree. Contributor+. */
+export async function relatePeopleAction(input: {
+  familyId: string;
+  personId: string;
+  relativeId: string;
+  relation: PersonRelation;
+}) {
+  const user = await requireUser();
+  await requireContributor(input.familyId, user.id);
+
+  if (input.personId === input.relativeId) {
+    throw new Error('A person cannot be related to themselves.');
+  }
+  const [personIn, relativeIn] = await Promise.all([
+    isPersonInFamily(input.familyId, input.personId),
+    isPersonInFamily(input.familyId, input.relativeId),
+  ]);
+  if (!personIn || !relativeIn) {
+    throw new Error('Both people must be in this family.');
+  }
+
+  await connectPeople({
+    ...edgeForRelation(input.relation, input.personId, input.relativeId),
+    createdBy: user.id,
+  });
   revalidatePath('/family');
 }
 

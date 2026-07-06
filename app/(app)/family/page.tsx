@@ -3,7 +3,7 @@ import { Box, Button, Card, Stack, Text, Title } from '@mantine/core';
 import { IconUsersPlus } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
 import { getFamily, listMembers, resolveActiveFamily } from '@/lib/families';
-import { getMergedTreeForUser, listFamilyPeople } from '@/lib/people';
+import { getMergedTreeForUser } from '@/lib/people';
 import { listPendingInvitations } from '@/lib/invitations';
 import type { AccessRole } from '@/lib/permissions';
 import { FamilyTabs } from './family-tabs';
@@ -37,9 +37,8 @@ export default async function FamilyPage() {
     );
   }
 
-  const [tree, people, members, invites, fullFamily] = await Promise.all([
+  const [tree, members, invites, fullFamily] = await Promise.all([
     getMergedTreeForUser(user.id),
-    listFamilyPeople(active.id),
     listMembers(active.id),
     listPendingInvitations(active.id),
     getFamily(active.id),
@@ -52,7 +51,6 @@ export default async function FamilyPage() {
         role={active.role as AccessRole}
         families={families}
         tree={tree}
-        people={people}
         members={members.map((m) => ({ ...m, role: m.role as AccessRole }))}
         invites={invites.map((i) => ({
           id: i.id,
