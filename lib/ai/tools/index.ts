@@ -13,7 +13,13 @@ import {
   getFamilyTreeTool,
   relatePeopleTool,
 } from './people';
-import { draftStoryTool, listStoriesTool, shareStoryTool } from './stories';
+import {
+  draftStoryTool,
+  getStoryTool,
+  listStoriesTool,
+  shareStoryTool,
+  updateStoryTool,
+} from './stories';
 import { inviteMemberTool } from './members';
 import type { Tool } from './types';
 
@@ -25,6 +31,7 @@ export const tools: Tool[] = [
   listFamiliesTool,
   getFamilyTreeTool,
   listStoriesTool,
+  getStoryTool,
   // setup / structure (execute directly)
   createFamilyTool,
   switchFamilyTool,
@@ -37,6 +44,7 @@ export const tools: Tool[] = [
   shareStoryTool,
   // review-then-save
   draftStoryTool,
+  updateStoryTool,
 ];
 
 export const toolsByName = new Map(tools.map((t) => [t.name, t]));

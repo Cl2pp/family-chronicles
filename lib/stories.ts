@@ -9,6 +9,7 @@ import {
   storyPeople,
   user,
 } from '@/db/schema';
+import { yearToDate } from '@/lib/dates';
 
 export type DatePrecision = 'day' | 'month' | 'year' | 'circa';
 export type InputType = 'text' | 'voice' | 'chat';
@@ -232,6 +233,69 @@ export async function getStoryForUser(storyId: string, userId: string) {
   if (access.length === 0) return null;
 
   return story;
+}
+
+/** Whether the user may edit a story: its submitter, or an owner of a family it's shared into. */
+export async function canUserEditStory(storyId: string, userId: string): Promise<boolean> {
+  const rows = await db
+    .select({ submittedBy: stories.submittedBy })
+    .from(stories)
+    .where(eq(stories.id, storyId))
+    .limit(1);
+  const story = rows[0];
+  if (!story) return false;
+  if (story.submittedBy === userId) return true;
+
+  const owner = await db
+    .select({ id: storyFamilies.id })
+    .from(storyFamilies)
+    .innerJoin(memberships, eq(storyFamilies.familyId, memberships.familyId))
+    .where(
+      and(
+        eq(storyFamilies.storyId, storyId),
+        eq(memberships.userId, userId),
+        eq(memberships.accessRole, 'owner'),
+      ),
+    )
+    .limit(1);
+  return owner.length > 0;
+}
+
+/**
+ * Apply a reviewed edit to a ready story. Only `bodyStyled` (+ title/summary/date) change;
+ * `bodyOriginal` and assets stay untouched as the raw source. A finer-grained event date
+ * (day/month/circa) is preserved when the year itself didn't change.
+ */
+export async function applyStoryEdit(input: {
+  storyId: string;
+  userId: string;
+  title: string;
+  summary: string | null;
+  body: string;
+  eventYear: number | null;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!(await canUserEditStory(input.storyId, input.userId))) {
+    return { ok: false, error: "Only the story's author or a family owner can edit it." };
+  }
+  const story = await getStoryForUser(input.storyId, input.userId);
+  if (!story) return { ok: false, error: 'Story not found.' };
+  if (story.status !== 'ready') {
+    return { ok: false, error: 'This story can only be edited once it is ready.' };
+  }
+
+  const currentYear = story.eventDate ? story.eventDate.getUTCFullYear() : null;
+  const set: Partial<typeof stories.$inferInsert> = {
+    title: input.title.trim() || story.title,
+    summary: input.summary,
+    bodyStyled: input.body,
+    updatedAt: new Date(),
+  };
+  if (input.eventYear !== currentYear) {
+    set.eventDate = yearToDate(input.eventYear);
+    set.eventDatePrecision = input.eventYear ? 'year' : null;
+  }
+  await db.update(stories).set(set).where(eq(stories.id, input.storyId));
+  return { ok: true };
 }
 
 export async function resetStoryForRetry(storyId: string) {

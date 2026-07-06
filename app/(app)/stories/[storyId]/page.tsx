@@ -14,13 +14,14 @@ import {
 } from '@mantine/core';
 import { IconAlertTriangle, IconMessageCircle2 } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
-import { familiesForStory, getStoryForUser, listAssets } from '@/lib/stories';
+import { canUserEditStory, familiesForStory, getStoryForUser, listAssets } from '@/lib/stories';
 import { listFamiliesForUser } from '@/lib/families';
 import { formatEventDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
 import { presignGet } from '@/lib/s3';
 import { RetryButton } from './retry-button';
 import { ShareControl } from './share-control';
+import { EditControl } from './edit-control';
 
 function paragraphs(text: string): string[] {
   return text
@@ -39,10 +40,11 @@ export default async function StoryDetailPage({
   const story = await getStoryForUser(storyId, user.id);
   if (!story) notFound();
 
-  const [shareFamilies, assets, userFamilies] = await Promise.all([
+  const [shareFamilies, assets, userFamilies, canEdit] = await Promise.all([
     familiesForStory(storyId),
     listAssets(storyId),
     listFamiliesForUser(user.id),
+    canUserEditStory(storyId, user.id),
   ]);
 
   const sharedIds = new Set(shareFamilies.map((f) => f.id));
@@ -96,6 +98,17 @@ export default async function StoryDetailPage({
             </Group>
           )}
           <ShareControl storyId={story.id} candidates={shareCandidates} />
+          {canEdit && story.status === 'ready' && (
+            <EditControl
+              storyId={story.id}
+              initial={{
+                title: story.title,
+                summary: story.summary ?? '',
+                body: story.bodyStyled ?? story.bodyOriginal ?? '',
+                eventYear: story.eventDate ? story.eventDate.getUTCFullYear() : null,
+              }}
+            />
+          )}
         </Stack>
 
         {/* Failure */}

@@ -4,10 +4,10 @@ import { useState } from 'react';
 import { Button, Card, Group, Text, TextInput, Textarea } from '@mantine/core';
 import { IconSparkles } from '@tabler/icons-react';
 import type { StoryDraft } from '@/lib/ai/tools';
-import { acceptStory } from './actions';
+import { acceptStory, applyStoryUpdate } from './actions';
 import type { MsgResult } from './types';
 
-/** Editable story draft proposed by the assistant, with accept/discard. */
+/** Editable story draft (new or a revision) proposed by the assistant, with accept/discard. */
 export function StoryDraftCard({
   draft,
   conversationId,
@@ -23,7 +23,8 @@ export function StoryDraftCard({
   onDiscard: () => void;
   onResult: (r: MsgResult) => void;
 }) {
-  const { proposal, familyId, familyName } = draft;
+  const { proposal, familyId, familyName, updateStoryId } = draft;
+  const isUpdate = Boolean(updateStoryId);
   const [title, setTitle] = useState(proposal.title);
   const [body, setBody] = useState(proposal.body);
   const [year, setYear] = useState(proposal.eventYear ? String(proposal.eventYear) : '');
@@ -31,17 +32,18 @@ export function StoryDraftCard({
   async function accept() {
     setBusy(true);
     try {
-      const res = await acceptStory({
-        conversationId: conversationId ?? '',
-        familyId,
-        proposal: {
-          ...proposal,
-          title,
-          body,
-          eventYear: year ? Number(year) : null,
-        },
-      });
-      onResult({ kind: 'story', storyId: res.storyId, familyName });
+      const edited = { ...proposal, title, body, eventYear: year ? Number(year) : null };
+      if (updateStoryId) {
+        const res = await applyStoryUpdate({ storyId: updateStoryId, proposal: edited });
+        onResult({ kind: 'story-update', storyId: res.storyId, familyName });
+      } else {
+        const res = await acceptStory({
+          conversationId: conversationId ?? '',
+          familyId,
+          proposal: edited,
+        });
+        onResult({ kind: 'story', storyId: res.storyId, familyName });
+      }
     } finally {
       setBusy(false);
     }
@@ -52,7 +54,7 @@ export function StoryDraftCard({
       <Group gap={6} mb="xs">
         <IconSparkles size={15} color="var(--mantine-color-brand-6)" />
         <Text size="xs" fw={600} c="brand.7" tt="uppercase">
-          Story draft · {familyName}
+          {isUpdate ? 'Story update' : 'Story draft'} · {familyName}
         </Text>
       </Group>
       <TextInput
@@ -84,7 +86,7 @@ export function StoryDraftCard({
       />
       <Group gap="xs">
         <Button size="xs" onClick={accept} loading={busy}>
-          Accept &amp; save
+          {isUpdate ? 'Save changes' : 'Accept & save'}
         </Button>
         <Button size="xs" variant="default" onClick={onDiscard} disabled={busy}>
           Discard
