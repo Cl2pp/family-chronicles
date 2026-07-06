@@ -1,7 +1,18 @@
 import { z } from 'zod';
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
-import { createFamilyTool, listFamiliesTool, updateFamilySettingsTool } from './families';
-import { addPersonTool, deletePersonTool, getFamilyTreeTool, relatePeopleTool } from './people';
+import {
+  createFamilyTool,
+  listFamiliesTool,
+  switchFamilyTool,
+  updateFamilySettingsTool,
+} from './families';
+import {
+  addPersonTool,
+  deletePersonTool,
+  editPersonTool,
+  getFamilyTreeTool,
+  relatePeopleTool,
+} from './people';
 import { draftStoryTool, listStoriesTool, shareStoryTool } from './stories';
 import { inviteMemberTool } from './members';
 import type { Tool } from './types';
@@ -16,8 +27,10 @@ export const tools: Tool[] = [
   listStoriesTool,
   // setup / structure (execute directly)
   createFamilyTool,
+  switchFamilyTool,
   addPersonTool,
   relatePeopleTool,
+  editPersonTool,
   deletePersonTool,
   updateFamilySettingsTool,
   inviteMemberTool,

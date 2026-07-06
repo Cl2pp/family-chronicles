@@ -2,7 +2,9 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
+  ActionIcon,
   Avatar,
   Badge,
   Box,
@@ -10,17 +12,25 @@ import {
   Card,
   Group,
   Paper,
+  Select,
   Stack,
   Table,
   Tabs,
   Text,
   Title,
 } from '@mantine/core';
-import { IconBinaryTree2, IconPlus, IconSettings, IconUsers } from '@tabler/icons-react';
+import {
+  IconBinaryTree2,
+  IconPencil,
+  IconPlus,
+  IconSettings,
+  IconUsers,
+} from '@tabler/icons-react';
 import type { FamilyTree as MergedTree, TreePerson } from '@/lib/people';
 import { canContribute, canManage, roleLabel, type AccessRole } from '@/lib/permissions';
 import { FamilyTree } from './family-tree';
 import { AddPersonModal } from './add-person-modal';
+import { EditPersonModal } from './edit-person-modal';
 import { DeletePersonButton } from './delete-person-button';
 import { AccessTab } from './access-tab';
 import { SettingsTab } from './settings-tab';
@@ -52,9 +62,19 @@ export function FamilyTabs({
   currentUserId,
   styleGuide,
 }: FamilyTabsProps) {
+  const router = useRouter();
   const [addState, setAddState] = useState<{ opened: boolean; target?: AddTarget }>({
     opened: false,
   });
+  const [editState, setEditState] = useState<{ opened: boolean; person: PersonRow | null }>({
+    opened: false,
+    person: null,
+  });
+
+  function switchFamily(id: string) {
+    document.cookie = `activeFamilyId=${id}; path=/; max-age=31536000; samesite=lax`;
+    router.refresh();
+  }
 
   // Map each family id -> a stable palette color (by families list order).
   const colorByFamily: Record<string, string> = {};
@@ -79,9 +99,22 @@ export function FamilyTabs({
             </Text>
           )}
         </div>
-        <Button component={Link} href="/family/new" variant="default">
-          New family
-        </Button>
+        <Group gap="sm" wrap="nowrap">
+          {families.length > 1 && (
+            <Select
+              aria-label="Active family"
+              w={200}
+              allowDeselect={false}
+              value={active.id}
+              onChange={(id) => id && switchFamily(id)}
+              data={families.map((f) => ({ value: f.id, label: f.name }))}
+              comboboxProps={{ withinPortal: true }}
+            />
+          )}
+          <Button component={Link} href="/family/new" variant="default">
+            New family
+          </Button>
+        </Group>
       </Group>
 
       <Tabs defaultValue="tree" keepMounted={false}>
@@ -192,6 +225,16 @@ export function FamilyTabs({
                               Account
                             </Badge>
                           )}
+                          {canContribute(role) && (
+                            <ActionIcon
+                              variant="subtle"
+                              color="gray"
+                              aria-label={`Edit ${p.displayName}`}
+                              onClick={() => setEditState({ opened: true, person: p })}
+                            >
+                              <IconPencil size={16} />
+                            </ActionIcon>
+                          )}
                           {canContribute(role) && !p.userId && (
                             <DeletePersonButton
                               familyId={active.id}
@@ -236,6 +279,13 @@ export function FamilyTabs({
         opened={addState.opened}
         target={addState.target}
         onClose={closeAdd}
+      />
+
+      <EditPersonModal
+        familyId={active.id}
+        person={editState.person}
+        opened={editState.opened}
+        onClose={() => setEditState((s) => ({ ...s, opened: false }))}
       />
     </Stack>
   );

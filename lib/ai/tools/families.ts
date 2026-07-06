@@ -75,6 +75,31 @@ export const updateFamilySettingsTool = defineTool({
   },
 });
 
+/** switch_family — make a different family (the user already belongs to) the active one. */
+export const switchFamilyTool = defineTool({
+  name: 'switch_family',
+  description:
+    'Switch the active family to another one the user belongs to, so later actions (add_person, ' +
+    'draft_story, etc.) apply to it. Identify it by name.',
+  schema: z.object({
+    name: z.string().min(1).describe('The family to switch to.'),
+  }),
+  async execute(args, ctx) {
+    const families = await listFamiliesForUser(ctx.userId);
+    const wanted = args.name.trim().toLowerCase();
+    const matches = families.filter((f) => f.name.toLowerCase() === wanted);
+    if (matches.length === 0) return { ok: false, error: `You are not in a family named "${args.name}".` };
+    if (matches.length > 1) return { ok: false, error: `Several families are named "${args.name}" — be more specific.` };
+
+    ctx.setActiveFamily(matches[0].id, matches[0].name);
+    return {
+      ok: true,
+      message: `Switched the active family to "${matches[0].name}". Later actions apply to it.`,
+      receipt: { label: `Switched to the ${matches[0].name} family` },
+    };
+  },
+});
+
 /** list_families — read tool: the families the user belongs to and their role in each. */
 export const listFamiliesTool = defineTool({
   name: 'list_families',

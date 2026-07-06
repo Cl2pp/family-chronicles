@@ -7,6 +7,8 @@ import {
   getPerson,
   isPersonInFamily,
   listFamilyPeople,
+  updatePerson,
+  type PersonPatch,
   type RelationshipType,
 } from '@/lib/people';
 import { parseYear, yearToDate } from '@/lib/dates';
@@ -128,6 +130,58 @@ export const relatePeopleTool = defineTool({
         detail,
         undo: { kind: 'relationship', relType: edge.type, from: edge.personFromId, to: edge.personToId },
       },
+    };
+  },
+});
+
+/** edit_person — fix the details of someone already in the active family's tree. */
+export const editPersonTool = defineTool({
+  name: 'edit_person',
+  description:
+    "Update an existing person in the active family's tree — correct their name, surname, or " +
+    'birth/death year. Pass only the fields to change; pass null to clear a year or surname. ' +
+    'Contributor access required.',
+  schema: z.object({
+    name: z.string().min(1).describe('The person to edit (their current name in the tree).'),
+    newName: z.string().min(1).nullish().describe('A corrected display name.'),
+    familyName: z.string().nullish().describe('A corrected surname (null to clear).'),
+    bornYear: z.number().int().nullish().describe('Corrected birth year (null to clear).'),
+    diedYear: z.number().int().nullish().describe('Corrected death year (null to clear).'),
+  }),
+  async execute(args, ctx) {
+    const gate = await ensureContributor(ctx);
+    if ('error' in gate) return { ok: false, error: gate.error };
+
+    const found = await resolvePerson(gate.familyId, args.name);
+    if ('error' in found) return { ok: false, error: found.error };
+
+    const patch: PersonPatch = {};
+    if (args.newName != null) {
+      const trimmed = args.newName.trim();
+      if (!trimmed) return { ok: false, error: 'The new name cannot be empty.' };
+      patch.displayName = trimmed;
+    }
+    if (args.familyName !== undefined) patch.familyName = args.familyName?.trim() || null;
+    if (args.bornYear !== undefined) {
+      const y = parseYear(args.bornYear);
+      patch.bornOn = args.bornYear === null || y === undefined ? null : yearToDate(y);
+      patch.bornPrecision = patch.bornOn ? 'year' : null;
+    }
+    if (args.diedYear !== undefined) {
+      const y = parseYear(args.diedYear);
+      patch.diedOn = args.diedYear === null || y === undefined ? null : yearToDate(y);
+      patch.diedPrecision = patch.diedOn ? 'year' : null;
+    }
+    if (Object.keys(patch).length === 0) {
+      return { ok: false, error: 'Nothing to change — provide a new name, surname, or year.' };
+    }
+
+    await updatePerson(found.person.id, patch);
+    const label = patch.displayName ?? found.person.displayName;
+    return {
+      ok: true,
+      message: `Updated ${found.person.displayName}${patch.displayName ? ` (now ${patch.displayName})` : ''}.`,
+      receipt: { label: `Updated ${label}` },
     };
   },
 });

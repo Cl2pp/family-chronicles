@@ -177,7 +177,7 @@ export function ChatView({
       maw={820}
       mx="auto"
       px="md"
-      style={{ display: 'flex', flexDirection: 'column', height: 'calc(100dvh - 56px)' }}
+      style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}
     >
       <Box style={{ flex: 1, overflowY: 'auto' }} py="lg">
         {empty ? (

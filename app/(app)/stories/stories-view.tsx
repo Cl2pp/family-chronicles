@@ -5,6 +5,7 @@ import {
   Badge,
   Box,
   Card,
+  Chip,
   Group,
   SegmentedControl,
   SimpleGrid,
@@ -259,7 +260,27 @@ export function StoriesView({
   familyNames: Record<string, string>;
 }) {
   const [view, setView] = useState<ViewMode>('timeline');
-  const groups = useMemo(() => groupByYear(stories), [stories]);
+  const [families, setFamilies] = useState<string[]>([]);
+
+  // Families that actually have stories — the ones worth offering as filters.
+  const familyOptions = useMemo(() => {
+    const ids = new Set<string>();
+    for (const s of stories) for (const id of s.familyIds) ids.add(id);
+    return [...ids]
+      .map((id) => ({ id, name: familyNames[id] ?? 'Family' }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [stories, familyNames]);
+
+  // No filter selected → show all; otherwise keep stories in any selected family.
+  const visible = useMemo(
+    () =>
+      families.length === 0
+        ? stories
+        : stories.filter((s) => s.familyIds.some((id) => families.includes(id))),
+    [stories, families],
+  );
+
+  const groups = useMemo(() => groupByYear(visible), [visible]);
 
   return (
     <Stack gap="lg">
@@ -275,7 +296,38 @@ export function StoriesView({
         />
       </Group>
 
-      {view === 'timeline' ? (
+      {familyOptions.length > 1 && (
+        <Group gap="xs" align="center">
+          <Text size="sm" c="dimmed">
+            Show:
+          </Text>
+          <Chip
+            size="sm"
+            variant="light"
+            checked={families.length === 0}
+            onClick={() => setFamilies([])}
+          >
+            All families
+          </Chip>
+          <Chip.Group multiple value={families} onChange={setFamilies}>
+            <Group gap="xs">
+              {familyOptions.map((f) => (
+                <Chip key={f.id} value={f.id} size="sm" variant="light">
+                  {f.name}
+                </Chip>
+              ))}
+            </Group>
+          </Chip.Group>
+        </Group>
+      )}
+
+      {visible.length === 0 ? (
+        <Card withBorder radius="md" p="xl">
+          <Text c="dimmed" ta="center">
+            No stories in the selected families.
+          </Text>
+        </Card>
+      ) : view === 'timeline' ? (
         <Timeline groups={groups} familyNames={familyNames} />
       ) : (
         <Bubbles groups={groups} familyNames={familyNames} />
