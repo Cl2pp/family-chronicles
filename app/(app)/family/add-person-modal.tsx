@@ -1,11 +1,17 @@
 'use client';
 
 import { useEffect, useTransition } from 'react';
-import { Button, Group, Modal, Stack, TextInput } from '@mantine/core';
+import { Button, Group, Modal, Select, Stack, TextInput } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
+import type { Gender } from '@/lib/people';
 import { addPersonAction } from './actions';
 import type { AddTarget } from './types';
+
+export const GENDER_OPTIONS = [
+  { value: 'male', label: 'Male' },
+  { value: 'female', label: 'Female' },
+];
 
 const RELATION_TITLE: Record<AddTarget['relation'], (name: string) => string> = {
   parent: (n) => `Add a parent of ${n}`,
@@ -26,7 +32,13 @@ export function AddPersonModal({
 }) {
   const [pending, startTransition] = useTransition();
   const form = useForm({
-    initialValues: { displayName: '', familyName: '', bornYear: '', diedYear: '' },
+    initialValues: {
+      displayName: '',
+      familyName: '',
+      gender: null as Gender | null,
+      bornYear: '',
+      diedYear: '',
+    },
     validate: {
       displayName: (v) => (v.trim() ? null : 'A name is required'),
       bornYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : 'Use a 4-digit year'),
@@ -48,6 +60,7 @@ export function AddPersonModal({
           familyId,
           displayName: values.displayName,
           familyName: values.familyName || undefined,
+          gender: values.gender,
           bornYear: values.bornYear ? Number(values.bornYear) : undefined,
           diedYear: values.diedYear ? Number(values.diedYear) : undefined,
           connectTo: target
@@ -79,6 +92,13 @@ export function AddPersonModal({
             label="Family name (surname)"
             placeholder="Optional"
             {...form.getInputProps('familyName')}
+          />
+          <Select
+            label="Gender"
+            placeholder="Optional"
+            data={GENDER_OPTIONS}
+            clearable
+            {...form.getInputProps('gender')}
           />
           <Group grow>
             <TextInput

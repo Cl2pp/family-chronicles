@@ -1,41 +1,17 @@
 'use client';
 
-import Link from 'next/link';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  ActionIcon,
-  Avatar,
-  Badge,
-  Box,
-  Button,
-  Card,
-  Group,
-  Paper,
-  Select,
-  Stack,
-  Table,
-  Tabs,
-  Text,
-  Title,
-} from '@mantine/core';
-import {
-  IconBinaryTree2,
-  IconPencil,
-  IconPlus,
-  IconSettings,
-  IconUsers,
-} from '@tabler/icons-react';
+import { Box, Group, Paper, Select, Stack, Tabs, Text, Title } from '@mantine/core';
+import { IconBinaryTree2, IconSettings, IconUsers } from '@tabler/icons-react';
 import type { FamilyTree as MergedTree, TreePerson } from '@/lib/people';
 import { canContribute, canManage, roleLabel, type AccessRole } from '@/lib/permissions';
 import { FamilyTree } from './family-tree';
 import { AddPersonModal } from './add-person-modal';
 import { EditPersonModal } from './edit-person-modal';
-import { DeletePersonButton } from './delete-person-button';
 import { AccessTab } from './access-tab';
 import { SettingsTab } from './settings-tab';
 import type { AddTarget, FamilyRow, InviteRow, MemberRow, PersonRow } from './types';
-import { initials, lifeSpan } from './utils';
 
 const PALETTE = ['brand', 'grape', 'teal', 'orange', 'pink', 'cyan', 'lime', 'violet', 'red'];
 
@@ -44,7 +20,6 @@ interface FamilyTabsProps {
   role: AccessRole;
   families: FamilyRow[];
   tree: MergedTree;
-  people: PersonRow[];
   members: MemberRow[];
   invites: InviteRow[];
   currentUserId: string;
@@ -56,7 +31,6 @@ export function FamilyTabs({
   role,
   families,
   tree,
-  people,
   members,
   invites,
   currentUserId,
@@ -99,31 +73,23 @@ export function FamilyTabs({
             </Text>
           )}
         </div>
-        <Group gap="sm" wrap="nowrap">
-          {families.length > 1 && (
-            <Select
-              aria-label="Active family"
-              w={200}
-              allowDeselect={false}
-              value={active.id}
-              onChange={(id) => id && switchFamily(id)}
-              data={families.map((f) => ({ value: f.id, label: f.name }))}
-              comboboxProps={{ withinPortal: true }}
-            />
-          )}
-          <Button component={Link} href="/family/new" variant="default">
-            New family
-          </Button>
-        </Group>
+        {families.length > 1 && (
+          <Select
+            aria-label="Active family"
+            w={200}
+            allowDeselect={false}
+            value={active.id}
+            onChange={(id) => id && switchFamily(id)}
+            data={families.map((f) => ({ value: f.id, label: f.name }))}
+            comboboxProps={{ withinPortal: true }}
+          />
+        )}
       </Group>
 
       <Tabs defaultValue="tree" keepMounted={false}>
         <Tabs.List>
           <Tabs.Tab value="tree" leftSection={<IconBinaryTree2 size={16} />}>
             Tree
-          </Tabs.Tab>
-          <Tabs.Tab value="people" leftSection={<IconUsers size={16} />}>
-            People
           </Tabs.Tab>
           <Tabs.Tab value="access" leftSection={<IconUsers size={16} />}>
             Access
@@ -167,88 +133,11 @@ export function FamilyTabs({
               edges={tree.edges}
               colorByFamily={colorByFamily}
               currentUserId={currentUserId}
+              activeFamilyId={active.id}
               canEdit={canContribute(role)}
               onAddPerson={openAdd}
+              onEditPerson={(person) => setEditState({ opened: true, person })}
             />
-          </Stack>
-        </Tabs.Panel>
-
-        {/* ── People ───────────────────────────────────────────────────── */}
-        <Tabs.Panel value="people" pt="lg">
-          <Stack gap="md">
-            {canContribute(role) && (
-              <Group justify="flex-end">
-                <Button
-                  leftSection={<IconPlus size={16} />}
-                  variant="light"
-                  onClick={() => openAdd()}
-                >
-                  Add person
-                </Button>
-              </Group>
-            )}
-            <Card withBorder radius="md" p={0}>
-              <Table verticalSpacing="sm" horizontalSpacing="md">
-                <Table.Tbody>
-                  {people.length === 0 && (
-                    <Table.Tr>
-                      <Table.Td>
-                        <Text c="dimmed" p="md">
-                          No people in this family yet.
-                        </Text>
-                      </Table.Td>
-                    </Table.Tr>
-                  )}
-                  {people.map((p) => (
-                    <Table.Tr key={p.id}>
-                      <Table.Td>
-                        <Group gap="sm" wrap="nowrap">
-                          <Avatar radius="xl" size={36} color="slate">
-                            {initials(p.displayName)}
-                          </Avatar>
-                          <div>
-                            <Text fw={600} size="sm">
-                              {p.displayName}
-                            </Text>
-                            {lifeSpan(p.bornOn, p.diedOn) && (
-                              <Text size="xs" c="dimmed">
-                                {lifeSpan(p.bornOn, p.diedOn)}
-                              </Text>
-                            )}
-                          </div>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td style={{ textAlign: 'right' }}>
-                        <Group gap="xs" justify="flex-end" wrap="nowrap">
-                          {p.userId && (
-                            <Badge variant="light" color="brand">
-                              Account
-                            </Badge>
-                          )}
-                          {canContribute(role) && (
-                            <ActionIcon
-                              variant="subtle"
-                              color="gray"
-                              aria-label={`Edit ${p.displayName}`}
-                              onClick={() => setEditState({ opened: true, person: p })}
-                            >
-                              <IconPencil size={16} />
-                            </ActionIcon>
-                          )}
-                          {canContribute(role) && !p.userId && (
-                            <DeletePersonButton
-                              familyId={active.id}
-                              personId={p.id}
-                              name={p.displayName}
-                            />
-                          )}
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
-                </Table.Tbody>
-              </Table>
-            </Card>
           </Stack>
         </Tabs.Panel>
 

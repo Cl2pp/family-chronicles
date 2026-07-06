@@ -1,9 +1,10 @@
 import type { AccessRole } from '@/lib/permissions';
+import type { Gender, PersonRelation } from '@/lib/people';
 
 export interface AddTarget {
   personId: string;
   personName: string;
-  relation: 'parent' | 'child' | 'partner';
+  relation: PersonRelation;
 }
 
 export interface FamilyRow {
@@ -32,6 +33,7 @@ export interface PersonRow {
   displayName: string;
   familyName: string | null;
   userId: string | null;
+  gender: Gender | null;
   bornOn: Date | string | null;
   diedOn: Date | string | null;
 }
