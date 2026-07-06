@@ -80,6 +80,25 @@ export async function getPerson(id: string) {
   return db.query.people.findFirst({ where: eq(people.id, id) });
 }
 
+export interface PersonPatch {
+  displayName?: string;
+  familyName?: string | null;
+  bornOn?: Date | null;
+  bornPrecision?: 'day' | 'month' | 'year' | 'circa' | null;
+  diedOn?: Date | null;
+  diedPrecision?: 'day' | 'month' | 'year' | 'circa' | null;
+  notes?: string | null;
+}
+
+/** Update a person's details. Only the keys present in `patch` are changed. */
+export async function updatePerson(id: string, patch: PersonPatch) {
+  if (Object.keys(patch).length === 0) return;
+  await db
+    .update(people)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(people.id, id));
+}
+
 export async function isPersonInFamily(familyId: string, personId: string): Promise<boolean> {
   const row = await db.query.familyMembers.findFirst({
     where: and(eq(familyMembers.familyId, familyId), eq(familyMembers.personId, personId)),

@@ -1,18 +1,16 @@
-import { cookies } from 'next/headers';
 import { Box, Button, Card, Stack, Text, Title } from '@mantine/core';
 import { IconMessageCircle2 } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
 import { listStoriesForUser } from '@/lib/stories';
-import { resolveActiveFamily } from '@/lib/families';
+import { listFamiliesForUser } from '@/lib/families';
 import { StoriesView } from './stories-view';
 
 export default async function StoriesPage() {
   const user = await requireUser();
-  const cookieValue = (await cookies()).get('activeFamilyId')?.value;
 
-  const [stories, { families }] = await Promise.all([
+  const [stories, families] = await Promise.all([
     listStoriesForUser(user.id),
-    resolveActiveFamily(user.id, cookieValue),
+    listFamiliesForUser(user.id),
   ]);
 
   const familyNames: Record<string, string> = {};

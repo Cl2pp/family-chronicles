@@ -12,6 +12,7 @@ import {
   deletePerson,
   getPerson,
   isPersonInFamily,
+  updatePerson,
 } from '@/lib/people';
 import { createInvitation } from '@/lib/invitations';
 import type { AccessRole } from '@/lib/permissions';
@@ -107,6 +108,39 @@ export async function addPersonAction(input: AddPersonInput) {
 
   revalidatePath('/family');
   return { id: person.id };
+}
+
+/** Edit a person's details in this family's tree. Contributor+. */
+export async function editPersonAction(input: {
+  familyId: string;
+  personId: string;
+  displayName: string;
+  familyName?: string | null;
+  bornYear?: number | null;
+  diedYear?: number | null;
+}) {
+  const user = await requireUser();
+  await requireContributor(input.familyId, user.id);
+
+  const displayName = input.displayName.trim();
+  if (!displayName) throw new Error('A name is required.');
+  if (!(await isPersonInFamily(input.familyId, input.personId))) {
+    throw new Error('That person is not in this family.');
+  }
+
+  const bornYear = parseYear(input.bornYear ?? undefined);
+  const diedYear = parseYear(input.diedYear ?? undefined);
+
+  await updatePerson(input.personId, {
+    displayName,
+    familyName: input.familyName?.trim() || null,
+    bornOn: bornYear !== undefined ? yearToDate(bornYear) : null,
+    bornPrecision: bornYear !== undefined ? 'year' : null,
+    diedOn: diedYear !== undefined ? yearToDate(diedYear) : null,
+    diedPrecision: diedYear !== undefined ? 'year' : null,
+  });
+
+  revalidatePath('/family');
 }
 
 /** Delete a person from this family's tree (and their relationships). Contributor+. */
