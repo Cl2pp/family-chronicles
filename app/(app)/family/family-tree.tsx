@@ -1,7 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
+import {
+  ActionIcon,
   Avatar,
   Box,
   Button,
@@ -18,8 +27,11 @@ import {
   IconArrowUp,
   IconHeart,
   IconPlus,
+  IconUnlink,
 } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
 import type { TreeEdge, TreePerson } from '@/lib/people';
+import { removeRelationshipAction } from './actions';
 import type { AddTarget } from './types';
 
 const CARD_WIDTH = 150;
@@ -262,6 +274,54 @@ export function FamilyTree({
   }, [measure]);
 
   const selected = selectedId ? peopleById.get(selectedId) : undefined;
+  const [unlinking, startUnlink] = useTransition();
+
+  // The selected person's existing edges, labelled from their point of view.
+  const connections = useMemo(() => {
+    if (!selectedId) return [];
+    const rows: { label: string; other: TreePerson; edge: TreeEdge }[] = [];
+    for (const e of validEdges) {
+      let label: string | null = null;
+      let otherId: string | null = null;
+      if (e.type === 'parent' && e.to === selectedId) {
+        label = 'Parent';
+        otherId = e.from;
+      } else if (e.type === 'parent' && e.from === selectedId) {
+        label = 'Child';
+        otherId = e.to;
+      } else if (e.type === 'spouse' && (e.from === selectedId || e.to === selectedId)) {
+        label = 'Partner';
+        otherId = e.from === selectedId ? e.to : e.from;
+      }
+      const other = otherId ? peopleById.get(otherId) : undefined;
+      if (label && other) rows.push({ label, other, edge: e });
+    }
+    const order: Record<string, number> = { Parent: 0, Partner: 1, Child: 2 };
+    rows.sort(
+      (a, b) =>
+        (order[a.label] ?? 9) - (order[b.label] ?? 9) ||
+        a.other.displayName.localeCompare(b.other.displayName),
+    );
+    return rows;
+  }, [selectedId, validEdges, peopleById]);
+
+  function handleUnlink(edge: TreeEdge) {
+    startUnlink(async () => {
+      try {
+        await removeRelationshipAction({
+          type: edge.type,
+          personFromId: edge.from,
+          personToId: edge.to,
+        });
+        notifications.show({ message: 'Connection removed' });
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : 'Could not remove the connection',
+        });
+      }
+    });
+  }
 
   return (
     <Stack gap="md">
@@ -425,6 +485,39 @@ export function FamilyTree({
               </Text>
             )}
 
+            {connections.length > 0 && (
+              <Stack gap="xs" mt="md">
+                <Text size="sm" fw={600}>
+                  Connections
+                </Text>
+                {connections.map(({ label, other, edge }) => (
+                  <Group
+                    key={`${edge.type}-${edge.from}-${edge.to}-${label}`}
+                    justify="space-between"
+                    wrap="nowrap"
+                  >
+                    <Text size="sm">
+                      <Text span c="dimmed">
+                        {label}:{' '}
+                      </Text>
+                      {other.displayName}
+                    </Text>
+                    {canEdit && (
+                      <ActionIcon
+                        variant="subtle"
+                        color="red"
+                        aria-label={`Remove ${label.toLowerCase()} connection to ${other.displayName}`}
+                        loading={unlinking}
+                        onClick={() => handleUnlink(edge)}
+                      >
+                        <IconUnlink size={16} />
+                      </ActionIcon>
+                    )}
+                  </Group>
+                ))}
+              </Stack>
+            )}
+
             {canEdit && (
               <Stack gap="xs" mt="md">
                 <Text size="sm" fw={600}>
@@ -433,6 +526,7 @@ export function FamilyTree({
                 <Button
                   variant="light"
                   leftSection={<IconArrowUp size={16} />}
+                  disabled={connections.filter((c) => c.label === 'Parent').length >= 2}
                   onClick={() =>
                     onAddPerson({
                       personId: selected.id,
@@ -443,6 +537,11 @@ export function FamilyTree({
                 >
                   Add parent
                 </Button>
+                {connections.filter((c) => c.label === 'Parent').length >= 2 && (
+                  <Text size="xs" c="dimmed">
+                    Both parents are set — remove one above to change them.
+                  </Text>
+                )}
                 <Button
                   variant="light"
                   leftSection={<IconArrowDown size={16} />}

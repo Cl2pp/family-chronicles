@@ -5,8 +5,9 @@ import {
   createPerson,
   deletePerson,
   getPerson,
+  getTreeForFamily,
   isPersonInFamily,
-  listFamilyPeople,
+  removeRelationship,
   updatePerson,
   type PersonPatch,
   type RelationshipType,
@@ -100,7 +101,8 @@ export const relatePeopleTool = defineTool({
   name: 'relate_people',
   description:
     "Create a relationship between two people who are already in the active family's tree. " +
-    'Contributor access required.',
+    'A person can have at most two parents — check get_family_tree for existing relationships ' +
+    'before adding parent links. Contributor access required.',
   schema: z.object({
     personName: z.string().min(1).describe('The subject (must already exist in the tree).'),
     relativeName: z.string().min(1).describe('The relative (must already exist in the tree).'),
@@ -130,6 +132,38 @@ export const relatePeopleTool = defineTool({
         detail,
         undo: { kind: 'relationship', relType: edge.type, from: edge.personFromId, to: edge.personToId },
       },
+    };
+  },
+});
+
+/** unrelate_people — remove a relationship between two people in the active family's tree. */
+export const unrelatePeopleTool = defineTool({
+  name: 'unrelate_people',
+  description:
+    "Remove an existing relationship between two people in the active family's tree — e.g. to fix " +
+    'a wrongly linked parent or partner. The people themselves are kept. Contributor access required.',
+  schema: z.object({
+    personName: z.string().min(1).describe('The subject (must already exist in the tree).'),
+    relativeName: z.string().min(1).describe('The relative to disconnect from (must already exist).'),
+    relation,
+  }),
+  async execute(args, ctx) {
+    const gate = await ensureContributor(ctx);
+    if ('error' in gate) return { ok: false, error: gate.error };
+
+    const subject = await resolvePerson(gate.familyId, args.personName);
+    if ('error' in subject) return { ok: false, error: subject.error };
+    const relative = await resolvePerson(gate.familyId, args.relativeName);
+    if ('error' in relative) return { ok: false, error: relative.error };
+
+    const edge = edgeFor(args.relation, subject.person.id, relative.person.id);
+    await removeRelationship(edge);
+
+    const detail = `${args.relation} of ${relative.person.displayName}`;
+    return {
+      ok: true,
+      message: `Removed the link: ${subject.person.displayName} is no longer ${detail}.`,
+      receipt: { label: `Unlinked ${subject.person.displayName}`, detail: `no longer ${detail}` },
     };
   },
 });
@@ -225,24 +259,34 @@ export const deletePersonTool = defineTool({
 export const getFamilyTreeTool = defineTool({
   name: 'get_family_tree',
   description:
-    "List everyone in the active family's tree with their birth/death years. Use before adding " +
-    'people to avoid duplicates or to answer questions about who is in the tree.',
+    "List everyone in the active family's tree with their birth/death years AND the existing " +
+    'relationships (parent/child, partners). Use before adding or connecting people to avoid ' +
+    'duplicates, wrong links, or giving someone a third parent.',
   schema: z.object({}),
   async execute(_args, ctx) {
     if (!ctx.activeFamilyId) {
-      return { ok: true, message: JSON.stringify({ people: [], note: 'No active family yet.' }) };
+      return {
+        ok: true,
+        message: JSON.stringify({ people: [], relationships: [], note: 'No active family yet.' }),
+      };
     }
-    const people = await listFamilyPeople(ctx.activeFamilyId);
+    const tree = await getTreeForFamily(ctx.activeFamilyId);
+    const nameById = new Map(tree.people.map((p) => [p.id, p.displayName]));
     return {
       ok: true,
-      message: JSON.stringify(
-        people.map((p) => ({
+      message: JSON.stringify({
+        people: tree.people.map((p) => ({
           name: p.displayName,
           familyName: p.familyName,
           born: p.bornOn ? new Date(p.bornOn).getUTCFullYear() : null,
           died: p.diedOn ? new Date(p.diedOn).getUTCFullYear() : null,
         })),
-      ),
+        relationships: tree.edges.map((e) =>
+          e.type === 'parent'
+            ? { parent: nameById.get(e.from), child: nameById.get(e.to) }
+            : { partners: [nameById.get(e.from), nameById.get(e.to)] },
+        ),
+      }),
     };
   },
 });
