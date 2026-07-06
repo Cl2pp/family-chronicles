@@ -1,8 +1,19 @@
-import { asc, desc, eq } from 'drizzle-orm';
+import { asc, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
-import { conversations, messages } from '@/db/schema';
+import { conversations, messageAttachments, messages } from '@/db/schema';
 
 export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';
+export type AttachmentKind = 'audio' | 'photo';
+
+export interface AttachmentInput {
+  kind: AttachmentKind;
+  s3Key: string;
+  mimeType: string;
+  bytes?: number | null;
+  width?: number | null;
+  height?: number | null;
+  durationSec?: number | null;
+}
 
 export async function createConversation(userId: string, familyId?: string | null) {
   const [created] = await db
@@ -29,20 +40,91 @@ export async function latestConversation(userId: string) {
 
 export async function listMessages(conversationId: string) {
   return db
-    .select({ id: messages.id, role: messages.role, content: messages.content })
+    .select({
+      id: messages.id,
+      role: messages.role,
+      content: messages.content,
+      metadata: messages.metadata,
+    })
     .from(messages)
     .where(eq(messages.conversationId, conversationId))
     .orderBy(asc(messages.createdAt));
 }
 
-export async function addMessage(conversationId: string, role: ChatRole, content: string) {
+export async function addMessage(
+  conversationId: string,
+  role: ChatRole,
+  content: string,
+  metadata?: unknown,
+) {
   const [created] = await db
     .insert(messages)
-    .values({ conversationId, role, content })
+    .values({ conversationId, role, content, metadata: metadata ?? null })
     .returning();
   await db
     .update(conversations)
     .set({ updatedAt: new Date() })
     .where(eq(conversations.id, conversationId));
   return created;
+}
+
+/** Attach in-chat uploads (voice/photos) to a message. */
+export async function addAttachments(messageId: string, items: AttachmentInput[]) {
+  if (items.length === 0) return;
+  await db.insert(messageAttachments).values(
+    items.map((a) => ({
+      messageId,
+      kind: a.kind,
+      s3Key: a.s3Key,
+      mimeType: a.mimeType,
+      bytes: a.bytes ?? null,
+      width: a.width ?? null,
+      height: a.height ?? null,
+      durationSec: a.durationSec ?? null,
+    })),
+  );
+}
+
+/** All attachments in a conversation, oldest first (e.g. to copy onto a story). */
+export async function listConversationAttachments(conversationId: string) {
+  return db
+    .select({
+      kind: messageAttachments.kind,
+      s3Key: messageAttachments.s3Key,
+      mimeType: messageAttachments.mimeType,
+      bytes: messageAttachments.bytes,
+      width: messageAttachments.width,
+      height: messageAttachments.height,
+      durationSec: messageAttachments.durationSec,
+    })
+    .from(messageAttachments)
+    .innerJoin(messages, eq(messageAttachments.messageId, messages.id))
+    .where(eq(messages.conversationId, conversationId))
+    .orderBy(asc(messageAttachments.createdAt));
+}
+
+/** Attachments grouped by message id, for a set of messages. */
+export async function attachmentsByMessage(messageIds: string[]) {
+  const map = new Map<string, AttachmentInput[]>();
+  if (messageIds.length === 0) return map;
+  const rows = await db
+    .select({
+      messageId: messageAttachments.messageId,
+      kind: messageAttachments.kind,
+      s3Key: messageAttachments.s3Key,
+      mimeType: messageAttachments.mimeType,
+      bytes: messageAttachments.bytes,
+      width: messageAttachments.width,
+      height: messageAttachments.height,
+      durationSec: messageAttachments.durationSec,
+    })
+    .from(messageAttachments)
+    .where(inArray(messageAttachments.messageId, messageIds))
+    .orderBy(asc(messageAttachments.createdAt));
+  for (const r of rows) {
+    const arr = map.get(r.messageId) ?? [];
+    arr.push(r);
+    map.set(r.messageId, arr);
+  }
+  return map;
 }

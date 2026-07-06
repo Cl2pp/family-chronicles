@@ -1,33 +1,51 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import {
   ActionIcon,
-  Badge,
   Box,
   Button,
   Card,
   Group,
+  Image,
   Paper,
   Stack,
   Text,
-  TextInput,
   Textarea,
   Title,
 } from '@mantine/core';
-import { IconCheck, IconSend, IconSparkles } from '@tabler/icons-react';
-import type { Proposal, StoryProposal, TreeProposal } from '@/lib/ai/chat';
-import { acceptStory, acceptTree, sendMessage } from './actions';
+import { IconMicrophone, IconPhoto, IconSend, IconX } from '@tabler/icons-react';
+import { AudioRecorder, type RecordedAudio } from '@/components/audio-recorder';
+import { MessageRow } from './message-row';
+import { presignUpload, sendMessage, sendVoiceMessage } from './actions';
+import type { ChatAttachment, Msg } from './types';
 
-interface Msg {
-  role: 'user' | 'assistant';
-  content: string;
-  proposal?: Proposal | null;
-  result?: { kind: 'story'; storyId: string } | { kind: 'tree'; name: string };
+const SETUP_SUGGESTIONS = ['Set up my family', 'Add a relative', 'Record a memory'];
+const FAMILY_SUGGESTIONS = ['A childhood memory', 'About Grandma', 'Add a relative to the tree'];
+
+interface PendingPhoto {
+  s3Key: string;
+  mimeType: string;
+  bytes: number;
+  previewUrl: string;
 }
 
-const SUGGESTIONS = ['A childhood memory', 'About Grandma', 'Add a relative to the tree'];
+/** Upload a blob straight to storage via a presigned PUT; returns its S3 key. */
+async function uploadBlob(
+  kind: 'audio' | 'photo',
+  blob: Blob,
+  mimeType: string,
+  filename?: string,
+): Promise<string> {
+  const { url, s3Key } = await presignUpload({ kind, mimeType, filename });
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': mimeType },
+    body: blob,
+  });
+  if (!res.ok) throw new Error('Upload failed');
+  return s3Key;
+}
 
 export function ChatView({
   conversationId: initialConversationId,
@@ -35,64 +53,115 @@ export function ChatView({
   family,
 }: {
   conversationId: string | null;
-  initialMessages: { role: 'user' | 'assistant'; content: string }[];
+  initialMessages: Msg[];
   family?: { id: string; name: string };
 }) {
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [messages, setMessages] = useState<Msg[]>(initialMessages);
   const [input, setInput] = useState('');
-  const [sending, setSending] = useState(false);
+  const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<PendingPhoto[]>([]);
+  const [recording, setRecording] = useState(false);
+  const [recorded, setRecorded] = useState<RecordedAudio | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+
+  const sending = busyLabel !== null;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, sending]);
+  }, [messages, busyLabel]);
 
-  if (!family) {
-    return (
-      <Box p="lg" maw={760} mx="auto">
-        <Card withBorder radius="md" p="xl">
-          <Stack align="center" gap="sm">
-            <Text fw={600} size="lg">
-              Create a family first
-            </Text>
-            <Text c="dimmed" ta="center" maw={420}>
-              Chat turns your memories into stories for a family. Make your first family to
-              get started.
-            </Text>
-            <Button component={Link} href="/family/new" mt="sm">
-              Create a family
-            </Button>
-          </Stack>
-        </Card>
-      </Box>
-    );
+  function pushError() {
+    setMessages((m) => [
+      ...m,
+      { role: 'assistant', content: 'Sorry — something went wrong. Please try again.' },
+    ]);
   }
 
   async function send(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    if ((!trimmed && photos.length === 0) || sending) return;
+
+    const attachments: ChatAttachment[] = photos.map((p) => ({ kind: 'photo', url: p.previewUrl }));
+    const pendingPhotos = photos;
     setInput('');
-    setMessages((m) => [...m, { role: 'user', content: trimmed }]);
-    setSending(true);
+    setPhotos([]);
+    setMessages((m) => [...m, { role: 'user', content: trimmed, attachments }]);
+    setBusyLabel('Thinking…');
     try {
       const res = await sendMessage({
         conversationId,
-        familyId: family!.id,
-        text: trimmed,
+        text: trimmed || 'Here are some photos.',
+        attachments: pendingPhotos.map((p) => ({
+          kind: 'photo',
+          s3Key: p.s3Key,
+          mimeType: p.mimeType,
+          bytes: p.bytes,
+        })),
       });
       setConversationId(res.conversationId);
       setMessages((m) => [
         ...m,
-        { role: 'assistant', content: res.reply, proposal: res.proposal },
+        { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
       ]);
     } catch {
+      pushError();
+    } finally {
+      setBusyLabel(null);
+    }
+  }
+
+  async function pickPhotos(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const chosen = Array.from(files).slice(0, 20);
+    try {
+      const uploaded = await Promise.all(
+        chosen.map(async (file) => ({
+          s3Key: await uploadBlob('photo', file, file.type, file.name),
+          mimeType: file.type,
+          bytes: file.size,
+          previewUrl: URL.createObjectURL(file),
+        })),
+      );
+      setPhotos((p) => [...p, ...uploaded].slice(0, 20));
+    } catch {
+      pushError();
+    }
+  }
+
+  async function sendRecording() {
+    if (!recorded || sending) return;
+    const audio = recorded;
+    const previewUrl = URL.createObjectURL(audio.blob);
+    setRecording(false);
+    setRecorded(null);
+    setBusyLabel('Transcribing…');
+    try {
+      const s3Key = await uploadBlob('audio', audio.blob, audio.mimeType, `note.${audio.mimeType.includes('mp4') ? 'mp4' : 'webm'}`);
+      const res = await sendVoiceMessage({
+        conversationId,
+        s3Key,
+        mimeType: audio.mimeType,
+        bytes: audio.blob.size,
+        durationSec: audio.durationSec,
+      });
+      setConversationId(res.conversationId);
       setMessages((m) => [
         ...m,
-        { role: 'assistant', content: 'Sorry — something went wrong. Please try again.' },
+        { role: 'user', content: res.transcript, attachments: [{ kind: 'audio', url: previewUrl }] },
+        { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
+      ]);
+    } catch (err) {
+      setMessages((m) => [
+        ...m,
+        {
+          role: 'assistant',
+          content: err instanceof Error ? err.message : 'Sorry — something went wrong.',
+        },
       ]);
     } finally {
-      setSending(false);
+      setBusyLabel(null);
     }
   }
 
@@ -101,6 +170,7 @@ export function ChatView({
   }
 
   const empty = messages.length === 0;
+  const suggestions = family ? FAMILY_SUGGESTIONS : SETUP_SUGGESTIONS;
 
   return (
     <Box
@@ -113,13 +183,17 @@ export function ChatView({
         {empty ? (
           <Stack gap="lg" mt="xl">
             <Stack gap={4}>
-              <Title order={2}>What would you like to do?</Title>
+              <Title order={2}>
+                {family ? 'What would you like to do?' : 'Welcome — let’s begin your chronicle'}
+              </Title>
               <Text c="dimmed">
-                Talk to me — I&apos;ll write stories and grow your family tree.
+                {family
+                  ? "Talk or type — I’ll write stories and grow your family tree."
+                  : "Tell me about your family and I’ll set it up, then we can start collecting memories."}
               </Text>
             </Stack>
             <Group gap="sm">
-              {SUGGESTIONS.map((s) => (
+              {suggestions.map((s) => (
                 <Button key={s} variant="light" size="xs" radius="xl" onClick={() => send(s)}>
                   {s}
                 </Button>
@@ -132,16 +206,15 @@ export function ChatView({
               <MessageRow
                 key={i}
                 msg={m}
-                family={family!}
                 conversationId={conversationId}
                 onResult={(r) => setResult(i, r)}
               />
             ))}
-            {sending && (
+            {busyLabel && (
               <Group justify="flex-start">
                 <Paper bg="slate.1" p="sm" radius="md">
                   <Text size="sm" c="dimmed">
-                    Thinking…
+                    {busyLabel}
                   </Text>
                 </Paper>
               </Group>
@@ -152,6 +225,55 @@ export function ChatView({
       </Box>
 
       <Box pb="md">
+        {recording && (
+          <Card withBorder radius="md" p="sm" mb="xs">
+            <Group justify="space-between" mb="xs">
+              <Text size="sm" fw={600}>
+                Voice message
+              </Text>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                onClick={() => {
+                  setRecording(false);
+                  setRecorded(null);
+                }}
+                aria-label="Cancel recording"
+              >
+                <IconX size={16} />
+              </ActionIcon>
+            </Group>
+            <AudioRecorder onChange={setRecorded} />
+            {recorded && (
+              <Button size="xs" mt="sm" onClick={sendRecording} loading={sending}>
+                Send voice message
+              </Button>
+            )}
+          </Card>
+        )}
+
+        {photos.length > 0 && (
+          <Group gap="xs" mb="xs">
+            {photos.map((p, i) => (
+              <Box key={p.s3Key} pos="relative">
+                <Image src={p.previewUrl} radius="sm" h={56} w={56} fit="cover" alt="" />
+                <ActionIcon
+                  size="xs"
+                  color="dark"
+                  variant="filled"
+                  pos="absolute"
+                  top={2}
+                  right={2}
+                  onClick={() => setPhotos((ps) => ps.filter((_, j) => j !== i))}
+                  aria-label="Remove photo"
+                >
+                  <IconX size={12} />
+                </ActionIcon>
+              </Box>
+            ))}
+          </Group>
+        )}
+
         <Group
           gap="xs"
           align="flex-end"
@@ -162,6 +284,39 @@ export function ChatView({
             background: '#fff',
           }}
         >
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              void pickPhotos(e.currentTarget.files);
+              e.currentTarget.value = '';
+            }}
+          />
+          <ActionIcon
+            size={36}
+            radius="md"
+            variant="subtle"
+            color="gray"
+            disabled={sending}
+            onClick={() => fileRef.current?.click()}
+            aria-label="Add photos"
+          >
+            <IconPhoto size={18} />
+          </ActionIcon>
+          <ActionIcon
+            size={36}
+            radius="md"
+            variant={recording ? 'filled' : 'subtle'}
+            color="gray"
+            disabled={sending}
+            onClick={() => setRecording((r) => !r)}
+            aria-label="Record voice message"
+          >
+            <IconMicrophone size={18} />
+          </ActionIcon>
           <Textarea
             flex={1}
             variant="unstyled"
@@ -181,7 +336,7 @@ export function ChatView({
           <ActionIcon
             size={36}
             radius="md"
-            disabled={!input.trim() || sending}
+            disabled={(!input.trim() && photos.length === 0) || sending}
             onClick={() => send(input)}
             aria-label="Send"
           >
@@ -190,250 +345,5 @@ export function ChatView({
         </Group>
       </Box>
     </Box>
-  );
-}
-
-function MessageRow({
-  msg,
-  family,
-  conversationId,
-  onResult,
-}: {
-  msg: Msg;
-  family: { id: string; name: string };
-  conversationId: string | null;
-  onResult: (r: Msg['result']) => void;
-}) {
-  if (msg.role === 'user') {
-    return (
-      <Group justify="flex-end">
-        <Paper bg="brand.6" c="white" p="sm" radius="md" maw="80%">
-          <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-            {msg.content}
-          </Text>
-        </Paper>
-      </Group>
-    );
-  }
-
-  return (
-    <Stack gap="xs" align="flex-start">
-      <Paper bg="slate.1" p="sm" radius="md" maw="80%">
-        <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-          {msg.content}
-        </Text>
-      </Paper>
-      {msg.result?.kind === 'story' && (
-        <Badge
-          color="green"
-          variant="light"
-          leftSection={<IconCheck size={12} />}
-          component={Link}
-          href={`/stories/${msg.result.storyId}`}
-          style={{ cursor: 'pointer' }}
-        >
-          Saved to {family.name} — View story
-        </Badge>
-      )}
-      {msg.result?.kind === 'tree' && (
-        <Badge color="green" variant="light" leftSection={<IconCheck size={12} />}>
-          Added {msg.result.name} to the tree
-        </Badge>
-      )}
-      {msg.proposal && !msg.result && (
-        <ProposalCard
-          proposal={msg.proposal}
-          family={family}
-          conversationId={conversationId}
-          onResult={onResult}
-        />
-      )}
-    </Stack>
-  );
-}
-
-function ProposalCard({
-  proposal,
-  family,
-  conversationId,
-  onResult,
-}: {
-  proposal: Proposal;
-  family: { id: string; name: string };
-  conversationId: string | null;
-  onResult: (r: Msg['result']) => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [discarded, setDiscarded] = useState(false);
-  if (discarded) return null;
-
-  if (proposal.kind === 'story') {
-    return (
-      <StoryDraftCard
-        proposal={proposal}
-        family={family}
-        conversationId={conversationId}
-        busy={busy}
-        setBusy={setBusy}
-        onDiscard={() => setDiscarded(true)}
-        onResult={onResult}
-      />
-    );
-  }
-  return (
-    <TreeChangeCard
-      proposal={proposal}
-      family={family}
-      busy={busy}
-      setBusy={setBusy}
-      onDiscard={() => setDiscarded(true)}
-      onResult={onResult}
-    />
-  );
-}
-
-function StoryDraftCard({
-  proposal,
-  family,
-  conversationId,
-  busy,
-  setBusy,
-  onDiscard,
-  onResult,
-}: {
-  proposal: StoryProposal;
-  family: { id: string; name: string };
-  conversationId: string | null;
-  busy: boolean;
-  setBusy: (b: boolean) => void;
-  onDiscard: () => void;
-  onResult: (r: Msg['result']) => void;
-}) {
-  const [title, setTitle] = useState(proposal.title);
-  const [body, setBody] = useState(proposal.body);
-  const [year, setYear] = useState(proposal.eventYear ? String(proposal.eventYear) : '');
-
-  async function accept() {
-    setBusy(true);
-    try {
-      const res = await acceptStory({
-        conversationId: conversationId ?? '',
-        familyId: family.id,
-        proposal: {
-          ...proposal,
-          title,
-          body,
-          eventYear: year ? Number(year) : null,
-        },
-      });
-      onResult({ kind: 'story', storyId: res.storyId });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card withBorder radius="md" p="md" maw={560} w="100%">
-      <Group gap={6} mb="xs">
-        <IconSparkles size={15} color="var(--mantine-color-brand-6)" />
-        <Text size="xs" fw={600} c="brand.7" tt="uppercase">
-          Story draft · {family.name}
-        </Text>
-      </Group>
-      <TextInput
-        label="Title"
-        value={title}
-        onChange={(e) => setTitle(e.currentTarget.value)}
-        mb="xs"
-      />
-      {proposal.summary && (
-        <Text size="sm" c="dimmed" mb="xs">
-          {proposal.summary}
-        </Text>
-      )}
-      <Textarea
-        label="Story"
-        value={body}
-        onChange={(e) => setBody(e.currentTarget.value)}
-        autosize
-        minRows={4}
-        maxRows={14}
-        mb="xs"
-      />
-      <TextInput
-        label="Year (optional)"
-        value={year}
-        onChange={(e) => setYear(e.currentTarget.value.replace(/[^0-9]/g, ''))}
-        w={140}
-        mb="md"
-      />
-      <Group gap="xs">
-        <Button size="xs" onClick={accept} loading={busy}>
-          Accept &amp; save
-        </Button>
-        <Button size="xs" variant="default" onClick={onDiscard} disabled={busy}>
-          Discard
-        </Button>
-      </Group>
-    </Card>
-  );
-}
-
-function TreeChangeCard({
-  proposal,
-  family,
-  busy,
-  setBusy,
-  onDiscard,
-  onResult,
-}: {
-  proposal: TreeProposal;
-  family: { id: string; name: string };
-  busy: boolean;
-  setBusy: (b: boolean) => void;
-  onDiscard: () => void;
-  onResult: (r: Msg['result']) => void;
-}) {
-  async function accept() {
-    setBusy(true);
-    try {
-      await acceptTree({ familyId: family.id, proposal });
-      onResult({ kind: 'tree', name: proposal.personName });
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const rel =
-    proposal.relativeName && proposal.relation
-      ? `${proposal.relation} of ${proposal.relativeName}`
-      : 'new person';
-  const years =
-    proposal.bornYear || proposal.diedYear
-      ? ` · ${proposal.bornYear ?? ''}–${proposal.diedYear ?? ''}`
-      : '';
-
-  return (
-    <Card withBorder radius="md" p="md" maw={480} w="100%">
-      <Group gap={6} mb="xs">
-        <IconSparkles size={15} color="var(--mantine-color-brand-6)" />
-        <Text size="xs" fw={600} c="brand.7" tt="uppercase">
-          Tree change · {family.name}
-        </Text>
-      </Group>
-      <Text fw={600}>{proposal.personName}</Text>
-      <Text size="sm" c="dimmed" mb="md">
-        {rel}
-        {years}
-      </Text>
-      <Group gap="xs">
-        <Button size="xs" onClick={accept} loading={busy}>
-          Add to tree
-        </Button>
-        <Button size="xs" variant="default" onClick={onDiscard} disabled={busy}>
-          Not now
-        </Button>
-      </Group>
-    </Card>
   );
 }

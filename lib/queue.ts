@@ -3,14 +3,8 @@ import { env } from '@/lib/env';
 
 /** Job queue names. */
 export const QUEUES = {
-  transcribe: 'transcribe',
   style: 'style',
 } as const;
-
-export interface TranscribeJob {
-  storyId: string;
-  assetId: string;
-}
 
 export interface StyleJob {
   storyId: string;
@@ -37,11 +31,6 @@ export async function getBoss(): Promise<PgBoss> {
     })();
   }
   return globalForBoss.__boss;
-}
-
-export async function enqueueTranscribe(data: TranscribeJob): Promise<void> {
-  const boss = await getBoss();
-  await boss.send(QUEUES.transcribe, data);
 }
 
 export async function enqueueStyle(data: StyleJob): Promise<void> {

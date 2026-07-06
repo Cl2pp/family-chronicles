@@ -1,6 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { familyMembers, memberships, people, relationships } from '@/db/schema';
+import { canContribute, type AccessRole } from '@/lib/permissions';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -75,6 +76,56 @@ export async function addPersonToFamily(familyId: string, personId: string) {
     .onConflictDoNothing();
 }
 
+export async function getPerson(id: string) {
+  return db.query.people.findFirst({ where: eq(people.id, id) });
+}
+
+export async function isPersonInFamily(familyId: string, personId: string): Promise<boolean> {
+  const row = await db.query.familyMembers.findFirst({
+    where: and(eq(familyMembers.familyId, familyId), eq(familyMembers.personId, personId)),
+  });
+  return Boolean(row);
+}
+
+/** True if the user contributes to at least one family this person is a tree node of. */
+export async function canUserEditPerson(userId: string, personId: string): Promise<boolean> {
+  const rows = await db
+    .select({ role: memberships.accessRole })
+    .from(familyMembers)
+    .innerJoin(memberships, eq(familyMembers.familyId, memberships.familyId))
+    .where(and(eq(familyMembers.personId, personId), eq(memberships.userId, userId)));
+  return rows.some((r) => canContribute(r.role as AccessRole));
+}
+
+/**
+ * Delete a person globally. Their kinship edges, family memberships, and story links
+ * are removed by ON DELETE CASCADE. No-op if the person no longer exists.
+ */
+export async function deletePerson(personId: string) {
+  await db.delete(people).where(eq(people.id, personId));
+}
+
+/** Remove a single kinship edge (spouse edges are canonicalised, matching connectPeople). */
+export async function removeRelationship(input: {
+  type: RelationshipType;
+  personFromId: string;
+  personToId: string;
+}) {
+  let { personFromId, personToId } = input;
+  if (input.type === 'spouse' && personFromId > personToId) {
+    [personFromId, personToId] = [personToId, personFromId];
+  }
+  await db
+    .delete(relationships)
+    .where(
+      and(
+        eq(relationships.type, input.type),
+        eq(relationships.personFromId, personFromId),
+        eq(relationships.personToId, personToId),
+      ),
+    );
+}
+
 /** Create a global kinship edge. parent: from=parent,to=child. spouse: symmetric. */
 export async function connectPeople(input: {
   type: RelationshipType;
@@ -127,7 +178,7 @@ export interface FamilyTree {
  * them, plus the global kinship edges connecting two such people. Each person
  * carries the subset of `familyIds` (from the scope) they belong to.
  */
-export async function getTreeForFamilies(familyIds: string[]): Promise<FamilyTree> {
+async function getTreeForFamilies(familyIds: string[]): Promise<FamilyTree> {
   if (familyIds.length === 0) return { people: [], edges: [] };
 
   const fmRows = await db
@@ -202,17 +253,3 @@ export async function listFamilyPeople(familyId: string) {
     .orderBy(people.displayName);
 }
 
-export async function getPerson(personId: string) {
-  return db.query.people.findFirst({ where: eq(people.id, personId) });
-}
-
-/** Is the person a member of any family the user can access? (authz for person view) */
-export async function personVisibleToUser(personId: string, userId: string) {
-  const rows = await db
-    .select({ id: familyMembers.id })
-    .from(familyMembers)
-    .innerJoin(memberships, eq(familyMembers.familyId, memberships.familyId))
-    .where(and(eq(familyMembers.personId, personId), eq(memberships.userId, userId)))
-    .limit(1);
-  return rows.length > 0;
-}

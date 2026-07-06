@@ -5,21 +5,17 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/session';
 import { createFamily, requireContributor, requireOwner, updateFamily } from '@/lib/families';
-import { addPersonToFamily, connectPeople, createPerson } from '@/lib/people';
+import {
+  addPersonToFamily,
+  connectPeople,
+  createPerson,
+  deletePerson,
+  getPerson,
+  isPersonInFamily,
+} from '@/lib/people';
 import { createInvitation } from '@/lib/invitations';
 import type { AccessRole } from '@/lib/permissions';
-
-/** Build a Jan-1 UTC date from a 4-digit year (precision 'year'). */
-function yearToDate(year: number): Date {
-  return new Date(Date.UTC(year, 0, 1));
-}
-
-function parseYear(value: unknown): number | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  const n = Number(value);
-  if (!Number.isInteger(n) || n < 0 || n > 9999) return undefined;
-  return n;
-}
+import { parseYear, yearToDate } from '@/lib/dates';
 
 /** Create a family, make it active, and go to the family screen. */
 export async function createFamilyAction(formData: FormData) {
@@ -111,6 +107,27 @@ export async function addPersonAction(input: AddPersonInput) {
 
   revalidatePath('/family');
   return { id: person.id };
+}
+
+/** Delete a person from this family's tree (and their relationships). Contributor+. */
+export async function deletePersonAction(input: { familyId: string; personId: string }) {
+  const user = await requireUser();
+  await requireContributor(input.familyId, user.id);
+
+  const person = await getPerson(input.personId);
+  if (!person) {
+    revalidatePath('/family');
+    return;
+  }
+  if (person.userId) {
+    throw new Error('This person is linked to an account and cannot be deleted here.');
+  }
+  if (!(await isPersonInFamily(input.familyId, input.personId))) {
+    throw new Error('That person is not in this family.');
+  }
+
+  await deletePerson(input.personId);
+  revalidatePath('/family');
 }
 
 /** Create an invitation and return its shareable token. */

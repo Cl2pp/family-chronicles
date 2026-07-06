@@ -1,0 +1,32 @@
+name: Deploy to Coolify
+
+# Push-to-deploy without relying on Coolify's GitHub-App webhook (whose HMAC
+# signature validation proved unreliable). On every push to main we call
+# Coolify's authenticated deploy API for both apps (web + worker), which share
+# one image. Auth is a Bearer token (GitHub secret COOLIFY_TOKEN), not an HMAC.
+#
+# The web container runs `npm run db:migrate` on boot (docker-entrypoint.sh),
+# so migrations apply automatically as part of the deploy — nothing to do here.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # allow manual "Run workflow" from the Actions tab
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Coolify deploy (web + worker)
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          # web = lfezes7na9u52r8ka10dh57e, worker = jopm4dv6n3x5uhygcixtalhl
+          UUIDS: lfezes7na9u52r8ka10dh57e,jopm4dv6n3x5uhygcixtalhl
+        run: |
+          curl --fail-with-body -sS \
+            -H "Authorization: Bearer ${COOLIFY_TOKEN}" \
+            "https://admin.clepp.de/api/v1/deploy?uuid=${UUIDS}&force=false"
