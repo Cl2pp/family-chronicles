@@ -77,6 +77,7 @@ export const relationshipType = pgEnum('relationship_type', ['parent', 'spouse']
 export const inputType = pgEnum('input_type', ['text', 'voice', 'chat']);
 export const storyStatus = pgEnum('story_status', ['draft', 'processing', 'ready', 'failed']);
 export const datePrecision = pgEnum('date_precision', ['day', 'month', 'year', 'circa']);
+export const gender = pgEnum('gender', ['male', 'female']);
 export const assetKind = pgEnum('asset_kind', ['audio', 'photo']);
 export const messageRole = pgEnum('message_role', ['user', 'assistant', 'system', 'tool']);
 
@@ -95,6 +96,7 @@ export const people = pgTable(
     familyName: text('family_name'),
     /** Optional link to an app account (most people never log in). */
     userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
+    gender: gender('gender'),
     bornOn: timestamp('born_on'),
     bornPrecision: datePrecision('born_precision'),
     diedOn: timestamp('died_on'),

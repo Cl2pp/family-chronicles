@@ -1,6 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from 'react';
 import {
   Avatar,
   Box,
@@ -9,17 +17,25 @@ import {
   Drawer,
   Group,
   Paper,
+  Select,
   Stack,
   Text,
   Title,
 } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import {
   IconArrowDown,
   IconArrowUp,
+  IconGenderFemale,
+  IconGenderMale,
   IconHeart,
+  IconLink,
+  IconPencil,
   IconPlus,
 } from '@tabler/icons-react';
-import type { TreeEdge, TreePerson } from '@/lib/people';
+import type { Gender, PersonRelation, TreeEdge, TreePerson } from '@/lib/people';
+import { relatePeopleAction } from './actions';
+import { DeletePersonButton } from './delete-person-button';
 import type { AddTarget } from './types';
 
 const CARD_WIDTH = 150;
@@ -39,6 +55,20 @@ function lifeSpan(person: TreePerson): string {
   if (died) return `–${died}`;
   return '';
 }
+
+function GenderIcon({ gender, size = 14 }: { gender: Gender; size?: number }) {
+  return gender === 'male' ? (
+    <IconGenderMale size={size} color="var(--mantine-color-blue-6)" aria-label="Male" />
+  ) : (
+    <IconGenderFemale size={size} color="var(--mantine-color-pink-6)" aria-label="Female" />
+  );
+}
+
+const LINK_RELATIONS: { value: PersonRelation; label: string }[] = [
+  { value: 'parent', label: 'is a parent of' },
+  { value: 'child', label: 'is a child of' },
+  { value: 'partner', label: 'is a partner of' },
+];
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -68,8 +98,10 @@ export interface FamilyTreeProps {
   edges: TreeEdge[];
   colorByFamily: Record<string, string>;
   currentUserId: string;
+  activeFamilyId: string;
   canEdit: boolean;
   onAddPerson: (target?: AddTarget) => void;
+  onEditPerson: (person: TreePerson) => void;
 }
 
 export function FamilyTree({
@@ -77,13 +109,18 @@ export function FamilyTree({
   edges,
   colorByFamily,
   currentUserId,
+  activeFamilyId,
   canEdit,
   onAddPerson,
+  onEditPerson,
 }: FamilyTreeProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [connectors, setConnectors] = useState<Connectors | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [linkRelation, setLinkRelation] = useState<PersonRelation>('parent');
+  const [linkPersonId, setLinkPersonId] = useState<string | null>(null);
+  const [linking, startLinking] = useTransition();
 
   const peopleById = useMemo(() => {
     const m = new Map<string, TreePerson>();
@@ -262,6 +299,49 @@ export function FamilyTree({
   }, [measure]);
 
   const selected = selectedId ? peopleById.get(selectedId) : undefined;
+  // Edits/links act on the active family, so the person must be one of its members.
+  const canEditSelected =
+    canEdit && !!selected && selected.familyIds.includes(activeFamilyId);
+  const linkCandidates = useMemo(
+    () =>
+      selected
+        ? people
+            .filter((p) => p.id !== selected.id && p.familyIds.includes(activeFamilyId))
+            .map((p) => ({ value: p.id, label: p.displayName }))
+        : [],
+    [people, selected, activeFamilyId],
+  );
+
+  function selectPerson(id: string | null) {
+    setSelectedId(id);
+    setLinkRelation('parent');
+    setLinkPersonId(null);
+  }
+
+  function handleLink() {
+    if (!selected || !linkPersonId) return;
+    const relativeName = peopleById.get(linkPersonId)?.displayName ?? 'them';
+    startLinking(async () => {
+      try {
+        await relatePeopleAction({
+          familyId: activeFamilyId,
+          personId: selected.id,
+          relativeId: linkPersonId,
+          relation: linkRelation,
+        });
+        const label = LINK_RELATIONS.find((r) => r.value === linkRelation)?.label;
+        notifications.show({
+          message: `Linked: ${selected.displayName} ${label} ${relativeName}.`,
+        });
+        setLinkPersonId(null);
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : 'Could not link those people',
+        });
+      }
+    });
+  }
 
   return (
     <Stack gap="md">
@@ -336,8 +416,9 @@ export function FamilyTree({
                       withBorder
                       radius="md"
                       padding="sm"
-                      onClick={() => setSelectedId(id)}
+                      onClick={() => selectPerson(id)}
                       style={{
+                        position: 'relative',
                         width: CARD_WIDTH,
                         flex: '0 0 auto',
                         cursor: 'pointer',
@@ -346,6 +427,18 @@ export function FamilyTree({
                         boxShadow: isMe ? '0 0 0 2px var(--mantine-color-brand-1)' : undefined,
                       }}
                     >
+                      {person.gender && (
+                        <Box
+                          style={{
+                            position: 'absolute',
+                            top: 6,
+                            right: 6,
+                            display: 'flex',
+                          }}
+                        >
+                          <GenderIcon gender={person.gender} />
+                        </Box>
+                      )}
                       <Stack align="center" gap={6}>
                         <Avatar radius="xl" size={48} color={isMe ? 'brand' : 'slate'}>
                           {initials(person.displayName)}
@@ -386,29 +479,41 @@ export function FamilyTree({
 
       <Drawer
         opened={!!selected}
-        onClose={() => setSelectedId(null)}
+        onClose={() => selectPerson(null)}
         position="right"
         title="Person"
         padding="lg"
       >
         {selected && (
           <Stack>
-            <Group>
-              <Avatar
-                radius="xl"
-                size={56}
-                color={selected.userId === currentUserId ? 'brand' : 'slate'}
-              >
-                {initials(selected.displayName)}
-              </Avatar>
-              <div>
-                <Title order={4}>{selected.displayName}</Title>
-                {lifeSpan(selected) && (
-                  <Text size="sm" c="dimmed">
-                    {lifeSpan(selected)}
-                  </Text>
-                )}
-              </div>
+            <Group justify="space-between" align="flex-start" wrap="nowrap">
+              <Group wrap="nowrap">
+                <Avatar
+                  radius="xl"
+                  size={56}
+                  color={selected.userId === currentUserId ? 'brand' : 'slate'}
+                >
+                  {initials(selected.displayName)}
+                </Avatar>
+                <div>
+                  <Group gap={6} wrap="nowrap">
+                    <Title order={4}>{selected.displayName}</Title>
+                    {selected.gender && <GenderIcon gender={selected.gender} size={18} />}
+                  </Group>
+                  {lifeSpan(selected) && (
+                    <Text size="sm" c="dimmed">
+                      {lifeSpan(selected)}
+                    </Text>
+                  )}
+                </div>
+              </Group>
+              {canEditSelected && !selected.userId && (
+                <DeletePersonButton
+                  familyId={activeFamilyId}
+                  personId={selected.id}
+                  name={selected.displayName}
+                />
+              )}
             </Group>
 
             {selected.familyName && (
@@ -425,7 +530,21 @@ export function FamilyTree({
               </Text>
             )}
 
-            {canEdit && (
+            {canEditSelected && (
+              <Button
+                variant="default"
+                leftSection={<IconPencil size={16} />}
+                onClick={() => {
+                  const person = selected;
+                  selectPerson(null);
+                  onEditPerson(person);
+                }}
+              >
+                Edit details
+              </Button>
+            )}
+
+            {canEditSelected && (
               <Stack gap="xs" mt="md">
                 <Text size="sm" fw={600}>
                   Connect a new person
@@ -468,6 +587,42 @@ export function FamilyTree({
                   }
                 >
                   Add partner
+                </Button>
+              </Stack>
+            )}
+
+            {canEditSelected && linkCandidates.length > 0 && (
+              <Stack gap="xs" mt="md">
+                <Text size="sm" fw={600}>
+                  Link to an existing person
+                </Text>
+                <Select
+                  aria-label="Relationship"
+                  data={LINK_RELATIONS.map((r) => ({
+                    value: r.value,
+                    label: `${selected.displayName} ${r.label}…`,
+                  }))}
+                  value={linkRelation}
+                  onChange={(v) => v && setLinkRelation(v as PersonRelation)}
+                  allowDeselect={false}
+                  comboboxProps={{ withinPortal: false }}
+                />
+                <Select
+                  aria-label="Person to link"
+                  placeholder="Choose a person"
+                  searchable
+                  data={linkCandidates}
+                  value={linkPersonId}
+                  onChange={setLinkPersonId}
+                  comboboxProps={{ withinPortal: false }}
+                />
+                <Button
+                  leftSection={<IconLink size={16} />}
+                  disabled={!linkPersonId}
+                  loading={linking}
+                  onClick={handleLink}
+                >
+                  Link people
                 </Button>
               </Stack>
             )}
