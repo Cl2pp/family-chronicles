@@ -215,6 +215,7 @@ export async function listChronicleStoryTexts(chronicleId: string) {
       bodyOriginal: stories.bodyOriginal,
       bodyStyled: stories.bodyStyled,
       eventDate: stories.eventDate,
+      submittedBy: stories.submittedBy,
     })
     .from(storyChronicles)
     .innerJoin(stories, eq(storyChronicles.storyId, stories.id))

@@ -19,6 +19,14 @@ function tokenSet(s: string): Set<string> {
   return new Set(normalizeText(s).split(' ').filter(Boolean));
 }
 
+function sharedTokenCount(a: string, b: string): number {
+  const ta = tokenSet(a);
+  const tb = tokenSet(b);
+  let shared = 0;
+  for (const t of ta) if (tb.has(t)) shared++;
+  return shared;
+}
+
 /**
  * Token containment: shared tokens over the SMALLER set (not the union), so a
  * short title/summary still scores high against a longer retelling of it.
@@ -69,8 +77,14 @@ export function findLikelyDuplicates(
     const yearsConflict =
       draft.eventYear != null && c.eventYear != null && draft.eventYear !== c.eventYear;
 
+    // A short title that is a subset of a longer one ("Weihnachten" vs "Weihnachten
+    // bei Oma Else") scores 1.0 on containment — the strong branch needs at least two
+    // shared title tokens. One-word matches fall through to the weak branch, which
+    // demands real content overlap too.
+    const titleCorroborated = sharedTokenCount(draft.title, c.title) >= 2;
+
     let reason: string | null = null;
-    if (!yearsConflict && titleSim >= TITLE_STRONG) {
+    if (!yearsConflict && titleSim >= TITLE_STRONG && titleCorroborated) {
       reason = 'nearly identical title';
     } else if (!yearsConflict && titleSim >= TITLE_WEAK && bodySim >= BODY_WEAK) {
       reason = 'similar title and overlapping content';

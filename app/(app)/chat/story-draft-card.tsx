@@ -29,10 +29,21 @@ export function StoryDraftCard({
   const [body, setBody] = useState(proposal.body);
   const [year, setYear] = useState(proposal.eventYear ? String(proposal.eventYear) : '');
 
-  function discard() {
+  async function discard() {
+    // Tell the conversation first so the note can't race the user's next message;
+    // discard locally even if it fails. Use the draft's original title so the note
+    // matches the "card is showing" one.
+    if (conversationId) {
+      setBusy(true);
+      try {
+        await discardStoryDraft({ conversationId, title: proposal.title });
+      } catch {
+        // best-effort — the local discard still applies
+      } finally {
+        setBusy(false);
+      }
+    }
     onDiscard();
-    // Best-effort: tell the conversation the card was discarded so the agent knows.
-    if (conversationId) void discardStoryDraft({ conversationId, title });
   }
 
   async function accept() {

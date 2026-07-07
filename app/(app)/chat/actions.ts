@@ -116,7 +116,9 @@ async function respondAndStore(
       conversationId,
       'system',
       `[A story draft card "${draftTitle}" is now showing. Only the user can save or discard it ` +
-        'on the card; a note will appear here once they do. Do not draft it again or offer to save it.]',
+        'on the card; a note will appear here once they do. Do not draft it again or offer to save it. ' +
+        'Exception: if no saved/discarded note ever appears and the user asks about this story again, ' +
+        'the card was lost (e.g. page reload) — draft it afresh then.]',
     );
   }
 
@@ -236,11 +238,16 @@ export async function acceptStory(input: {
   await assertContributor(input.chronicleId, user.id);
   const p = input.proposal;
 
-  // Idempotency guard: an identical story in this chronicle means this exact draft
-  // was already accepted (e.g. a re-shown card) — return it instead of duplicating.
+  // Only trust the conversation id if that conversation belongs to the caller.
+  const convo = input.conversationId ? await getConversation(input.conversationId) : null;
+  const conversationId = convo && convo.userId === user.id ? convo.id : null;
+
+  // Idempotency guard: an identical story of mine in this chronicle means this exact
+  // draft was already accepted (e.g. a re-shown card) — return it instead of duplicating.
   const existing = await listChronicleStoryTexts(input.chronicleId);
   const duplicate = existing.find(
     (s) =>
+      s.submittedBy === user.id &&
       normalizeText(s.title) === normalizeText(p.title || 'Untitled story') &&
       normalizeText(s.bodyStyled ?? s.bodyOriginal ?? '') === normalizeText(p.body),
   );
@@ -266,17 +273,17 @@ export async function acceptStory(input: {
     status: 'ready',
     eventDate: yearToDate(p.eventYear),
     eventDatePrecision: p.eventYear ? 'year' : null,
-    conversationId: input.conversationId,
+    conversationId,
     chronicleIds: [input.chronicleId],
     personIds,
   });
 
   // Carry the chat's raw uploads (voice + photos) onto the story for traceability.
-  if (input.conversationId) {
-    const attachments = await listConversationAttachments(input.conversationId);
+  if (conversationId) {
+    const attachments = await listConversationAttachments(conversationId);
     await addStoryAssets(story.id, attachments);
     await addMessage(
-      input.conversationId,
+      conversationId,
       'system',
       `[The user accepted the draft card and saved "${story.title}" as a story (id ${story.id}). ` +
         'It is already stored — do not draft or save it again.]',
@@ -305,9 +312,11 @@ export async function applyStoryUpdate(input: {
   });
   if (!result.ok) throw new Error(result.error);
 
-  if (input.conversationId) {
+  // Only write the note if the conversation belongs to the caller.
+  const convo = input.conversationId ? await getConversation(input.conversationId) : null;
+  if (convo && convo.userId === user.id) {
     await addMessage(
-      input.conversationId,
+      convo.id,
       'system',
       `[The user accepted the revision card — the story "${p.title}" (id ${input.storyId}) is updated.]`,
     );
