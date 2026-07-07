@@ -255,6 +255,8 @@ export const en = {
     acceptSave: 'Accept & save',
     discard: 'Discard',
     couldNotUndo: 'Could not undo that. Please try again.',
+    addStoryPrompt:
+      'I’d like to add a new story to the chronicle. Please ask me what story I want to tell.',
   },
   recorder: {
     start: 'Start recording',
@@ -276,8 +278,10 @@ export const en = {
     undated: 'Undated',
     storyCount: (n: number) => (n === 1 ? '1 story' : `${n} stories`),
     by: (name: string) => `By ${name}`,
+    addStory: 'Add story',
   },
   story: {
+    backToStories: 'Back to stories',
     families: 'Families',
     sharedWith: 'Shared with',
     failedTitle: 'Something went wrong retelling this story',
@@ -297,6 +301,12 @@ export const en = {
     editStoryDescription: 'Edits change the retold story; the original transcript stays untouched.',
     editYearLabel: 'Year (optional)',
     sharePlaceholder: 'Share to another chronicle…',
+    addPhotos: 'Add photos',
+    photoUploadFailed: 'Upload failed. Please try again.',
+    deleteStory: 'Delete story',
+    deleteConfirmText: 'Delete this story for everyone? This cannot be undone.',
+    deletePermanently: 'Delete permanently',
+    keepStory: 'Keep story',
   },
   status: {
     processing: 'Retelling…',

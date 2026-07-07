@@ -1,9 +1,11 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import {
   Badge,
   Box,
+  Button,
   Card,
   Chip,
   Group,
@@ -14,7 +16,7 @@ import {
   Title,
   UnstyledButton,
 } from '@mantine/core';
-import { IconMicrophone, IconPhoto, IconUsers } from '@tabler/icons-react';
+import { IconMicrophone, IconPhoto, IconPlus, IconUsers } from '@tabler/icons-react';
 import { formatEventDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
 import { useI18n } from '@/lib/i18n/client';
@@ -266,14 +268,24 @@ export function StoriesView({ stories }: { stories: StoryListItem[] }) {
     <Stack gap="lg">
       <Group justify="space-between" align="center">
         <Title order={1}>{t.stories.title}</Title>
-        <SegmentedControl
-          value={view}
-          onChange={(v) => setView(v as ViewMode)}
-          data={[
-            { label: t.stories.viewTimeline, value: 'timeline' },
-            { label: t.stories.viewBubbles, value: 'bubbles' },
-          ]}
-        />
+        <Group gap="sm">
+          <Button
+            component={Link}
+            href="/chat?intent=add-story"
+            size="xs"
+            leftSection={<IconPlus size={14} />}
+          >
+            {t.stories.addStory}
+          </Button>
+          <SegmentedControl
+            value={view}
+            onChange={(v) => setView(v as ViewMode)}
+            data={[
+              { label: t.stories.viewTimeline, value: 'timeline' },
+              { label: t.stories.viewBubbles, value: 'bubbles' },
+            ]}
+          />
+        </Group>
       </Group>
 
       {tagOptions.length > 1 && (

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   ActionIcon,
   Box,
@@ -49,10 +50,13 @@ export function ChatView({
   conversationId: initialConversationId,
   initialMessages,
   chronicle,
+  autoPrompt,
 }: {
   conversationId: string | null;
   initialMessages: Msg[];
   chronicle?: { id: string; name: string };
+  /** Message sent on the user's behalf right after mount (e.g. "Add story" entry point). */
+  autoPrompt?: string;
 }) {
   const { t } = useI18n();
   const [conversationId, setConversationId] = useState(initialConversationId);
@@ -64,12 +68,24 @@ export function ChatView({
   const [recorded, setRecorded] = useState<RecordedAudio | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const autoPromptSent = useRef(false);
+  const router = useRouter();
 
   const sending = busyLabel !== null;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busyLabel]);
+
+  // Entry points like the "Add story" button open the chat with a ready-made
+  // opener; send it once, then drop the query param so a reload won't repeat it.
+  useEffect(() => {
+    if (!autoPrompt || autoPromptSent.current) return;
+    autoPromptSent.current = true;
+    router.replace('/chat');
+    void send(autoPrompt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPrompt]);
 
   function pushError() {
     setMessages((m) => [...m, { role: 'assistant', content: t.chat.somethingWentWrong }]);

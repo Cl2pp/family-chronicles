@@ -1,11 +1,11 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { Alert, Button, Card, Group, TextInput, Textarea } from '@mantine/core';
-import { IconPencil } from '@tabler/icons-react';
+import { Alert, Button, Card, Divider, Group, Text, TextInput, Textarea } from '@mantine/core';
+import { IconPencil, IconTrash } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { useI18n } from '@/lib/i18n/client';
-import { updateStoryDetails } from './actions';
+import { deleteStory, updateStoryDetails } from './actions';
 
 /** Inline edit form for a story's title, summary, retold text and year. */
 export function EditControl({
@@ -23,7 +23,9 @@ export function EditControl({
   const [body, setBody] = useState(initial.body);
   const [year, setYear] = useState(initial.eventYear ? String(initial.eventYear) : '');
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [deleting, startDeleteTransition] = useTransition();
 
   if (!open) {
     return (
@@ -56,6 +58,19 @@ export function EditControl({
       }
       setOpen(false);
       router.refresh();
+    });
+  }
+
+  function remove() {
+    setError(null);
+    startDeleteTransition(async () => {
+      const res = await deleteStory(storyId);
+      if (!res.ok) {
+        setError(res.error);
+        setConfirmDelete(false);
+        return;
+      }
+      router.push('/stories');
     });
   }
 
@@ -103,6 +118,37 @@ export function EditControl({
           {t.common.cancel}
         </Button>
       </Group>
+
+      <Divider my="md" />
+      {confirmDelete ? (
+        <Group gap="xs">
+          <Text size="sm" c="red.8">
+            {t.story.deleteConfirmText}
+          </Text>
+          <Button size="xs" color="red" onClick={remove} loading={deleting}>
+            {t.story.deletePermanently}
+          </Button>
+          <Button
+            size="xs"
+            variant="default"
+            onClick={() => setConfirmDelete(false)}
+            disabled={deleting}
+          >
+            {t.story.keepStory}
+          </Button>
+        </Group>
+      ) : (
+        <Button
+          size="xs"
+          color="red"
+          variant="subtle"
+          leftSection={<IconTrash size={14} />}
+          onClick={() => setConfirmDelete(true)}
+          disabled={pending}
+        >
+          {t.story.deleteStory}
+        </Button>
+      )}
     </Card>
   );
 }
