@@ -19,11 +19,11 @@ export interface StoryProposal {
   people: string[];
 }
 
-/** A story draft handed to the client for review, bound to its target family. */
+/** A story draft handed to the client for review, bound to its target chronicle. */
 export interface StoryDraft {
   proposal: StoryProposal;
-  familyId: string;
-  familyName: string;
+  chronicleId: string;
+  chronicleName: string;
   /** When set, accepting updates this existing story instead of creating one. */
   updateStoryId?: string;
 }
@@ -44,16 +44,16 @@ export interface Receipt {
 }
 
 /**
- * Per-turn context handed to every tool. `activeFamilyId` is MUTABLE — creating a
- * family mid-turn calls `setActiveFamily` so later tools in the same turn target it.
- * The server action persists the final value to the `activeFamilyId` cookie.
+ * Per-turn context handed to every tool. `activeChronicleId` is MUTABLE — creating a
+ * chronicle mid-turn calls `setActiveChronicle` so later tools in the same turn target it.
+ * The server action persists the final value to the `activeChronicleId` cookie.
  */
 export interface ToolContext {
   userId: string;
   userName: string;
-  activeFamilyId: string | null;
-  activeFamilyName: string | null;
-  setActiveFamily(id: string, name: string): void;
+  activeChronicleId: string | null;
+  activeChronicleName: string | null;
+  setActiveChronicle(id: string, name: string): void;
 }
 
 export type ToolResult =

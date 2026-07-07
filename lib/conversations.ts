@@ -15,10 +15,10 @@ export interface AttachmentInput {
   durationSec?: number | null;
 }
 
-export async function createConversation(userId: string, familyId?: string | null) {
+export async function createConversation(userId: string, chronicleId?: string | null) {
   const [created] = await db
     .insert(conversations)
-    .values({ userId, familyId: familyId ?? null })
+    .values({ userId, chronicleId: chronicleId ?? null })
     .returning();
   return created;
 }

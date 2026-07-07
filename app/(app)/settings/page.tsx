@@ -1,17 +1,17 @@
 import { cookies } from 'next/headers';
 import { Anchor, Box, Card, Group, Stack, Text, Title } from '@mantine/core';
 import { requireUser } from '@/lib/session';
-import { resolveActiveFamily } from '@/lib/families';
+import { resolveActiveChronicle } from '@/lib/chronicles';
 import type { AccessRole } from '@/lib/permissions';
-import { FamiliesCard } from './families-card';
+import { ChroniclesCard } from './chronicles-card';
 import pkg from '@/package.json';
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const activeCookie = (await cookies()).get('activeFamilyId')?.value;
-  const { families, active } = await resolveActiveFamily(user.id, activeCookie);
+  const activeCookie = (await cookies()).get('activeChronicleId')?.value;
+  const { chronicles, active } = await resolveActiveChronicle(user.id, activeCookie);
 
-  const rows = families.map((f) => ({
+  const rows = chronicles.map((f) => ({
     id: f.id,
     name: f.name,
     description: f.description,
@@ -32,12 +32,12 @@ export default async function SettingsPage() {
       <Stack gap="lg">
         <Box>
           <Title order={3} mb="xs">
-            My families
+            My chronicles
           </Title>
           <Text size="sm" c="dimmed" mb="md">
-            The selected family is the one Chat, Stories and Family open with.
+            The selected chronicle is the one Chat, Stories and Tree open with.
           </Text>
-          <FamiliesCard families={rows} activeId={active?.id ?? null} />
+          <ChroniclesCard chronicles={rows} activeId={active?.id ?? null} />
         </Box>
 
         <Box>

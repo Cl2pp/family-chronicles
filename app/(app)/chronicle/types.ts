@@ -7,7 +7,7 @@ export interface AddTarget {
   relation: PersonRelation;
 }
 
-export interface FamilyRow {
+export interface ChronicleRow {
   id: string;
   name: string;
   description: string | null;

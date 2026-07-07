@@ -1,24 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Box, Group, Paper, Select, Stack, Tabs, Text, Title } from '@mantine/core';
 import { IconBinaryTree2, IconSettings, IconUsers } from '@tabler/icons-react';
 import type { FamilyTree as MergedTree, TreePerson } from '@/lib/people';
-import { canContribute, canManage, roleLabel, type AccessRole } from '@/lib/permissions';
+import { canContribute, canManage, type AccessRole } from '@/lib/permissions';
 import { FamilyTree } from './family-tree';
 import { AddPersonModal } from './add-person-modal';
 import { EditPersonModal } from './edit-person-modal';
 import { AccessTab } from './access-tab';
 import { SettingsTab } from './settings-tab';
-import type { AddTarget, FamilyRow, InviteRow, MemberRow, PersonRow } from './types';
+import type { AddTarget, ChronicleRow, InviteRow, MemberRow, PersonRow } from './types';
 
 const PALETTE = ['brand', 'grape', 'teal', 'orange', 'pink', 'cyan', 'lime', 'violet', 'red'];
 
-interface FamilyTabsProps {
-  active: FamilyRow;
+interface ChronicleTabsProps {
+  active: ChronicleRow;
   role: AccessRole;
-  families: FamilyRow[];
+  chronicles: ChronicleRow[];
   tree: MergedTree;
   members: MemberRow[];
   invites: InviteRow[];
@@ -26,16 +26,16 @@ interface FamilyTabsProps {
   styleGuide: string;
 }
 
-export function FamilyTabs({
+export function ChronicleTabs({
   active,
   role,
-  families,
+  chronicles,
   tree,
   members,
   invites,
   currentUserId,
   styleGuide,
-}: FamilyTabsProps) {
+}: ChronicleTabsProps) {
   const router = useRouter();
   const [addState, setAddState] = useState<{ opened: boolean; target?: AddTarget }>({
     opened: false,
@@ -45,19 +45,27 @@ export function FamilyTabs({
     person: null,
   });
 
-  function switchFamily(id: string) {
-    document.cookie = `activeFamilyId=${id}; path=/; max-age=31536000; samesite=lax`;
+  function switchChronicle(id: string) {
+    document.cookie = `activeChronicleId=${id}; path=/; max-age=31536000; samesite=lax`;
     router.refresh();
   }
 
-  // Map each family id -> a stable palette color (by families list order).
-  const colorByFamily: Record<string, string> = {};
-  families.forEach((f, i) => {
-    colorByFamily[f.id] = `var(--mantine-color-${PALETTE[i % PALETTE.length]}-6)`;
-  });
+  // Families are derived, not configured: collect every tag on the tree's people,
+  // biggest family first, and give each a stable palette color.
+  const familyTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of tree.people as TreePerson[]) {
+      for (const tag of p.familyTags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+  }, [tree.people]);
 
-  const nameCounts = new Map<string, number>();
-  for (const f of families) nameCounts.set(f.name, (nameCounts.get(f.name) ?? 0) + 1);
+  const colorByTag: Record<string, string> = {};
+  familyTags.forEach((t, i) => {
+    colorByTag[t.tag] = `var(--mantine-color-${PALETTE[i % PALETTE.length]}-6)`;
+  });
 
   const openAdd = (target?: AddTarget) => setAddState({ opened: true, target });
   const closeAdd = () => setAddState((s) => ({ ...s, opened: false }));
@@ -73,14 +81,14 @@ export function FamilyTabs({
             </Text>
           )}
         </div>
-        {families.length > 1 && (
+        {chronicles.length > 1 && (
           <Select
-            aria-label="Active family"
+            aria-label="Active chronicle"
             w={200}
             allowDeselect={false}
             value={active.id}
-            onChange={(id) => id && switchFamily(id)}
-            data={families.map((f) => ({ value: f.id, label: f.name }))}
+            onChange={(id) => id && switchChronicle(id)}
+            data={chronicles.map((f) => ({ value: f.id, label: f.name }))}
             comboboxProps={{ withinPortal: true }}
           />
         )}
@@ -102,38 +110,43 @@ export function FamilyTabs({
         {/* ── Tree ─────────────────────────────────────────────────────── */}
         <Tabs.Panel value="tree" pt="lg">
           <Stack gap="md">
-            <Paper withBorder radius="md" p="md">
-              <Text size="sm" fw={600} mb="xs">
-                Families
-              </Text>
-              <Group gap="lg">
-                {families.map((f) => (
-                  <Group key={f.id} gap={8} wrap="nowrap">
-                    <Box
-                      w={12}
-                      h={12}
-                      style={{ borderRadius: '50%', background: colorByFamily[f.id] }}
-                    />
-                    <Text size="sm">
-                      {f.name}
-                      {(nameCounts.get(f.name) ?? 0) > 1 && (
+            {familyTags.length > 0 && (
+              <Paper withBorder radius="md" p="md">
+                <Group justify="space-between" align="baseline" mb="xs">
+                  <Text size="sm" fw={600}>
+                    Families
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    Detected automatically from last names, ancestry, and marriages
+                  </Text>
+                </Group>
+                <Group gap="lg">
+                  {familyTags.map(({ tag, count }) => (
+                    <Group key={tag} gap={8} wrap="nowrap">
+                      <Box
+                        w={12}
+                        h={12}
+                        style={{ borderRadius: '50%', background: colorByTag[tag] }}
+                      />
+                      <Text size="sm">
+                        {tag}
                         <Text span c="dimmed" size="sm">
                           {' '}
-                          — {f.description || roleLabel(f.role)}
+                          · {count}
                         </Text>
-                      )}
-                    </Text>
-                  </Group>
-                ))}
-              </Group>
-            </Paper>
+                      </Text>
+                    </Group>
+                  ))}
+                </Group>
+              </Paper>
+            )}
 
             <FamilyTree
               people={tree.people as TreePerson[]}
               edges={tree.edges}
-              colorByFamily={colorByFamily}
+              colorByTag={colorByTag}
               currentUserId={currentUserId}
-              activeFamilyId={active.id}
+              activeChronicleId={active.id}
               canEdit={canContribute(role)}
               onAddPerson={openAdd}
               onEditPerson={(person) => setEditState({ opened: true, person })}
@@ -144,7 +157,7 @@ export function FamilyTabs({
         {/* ── Access ───────────────────────────────────────────────────── */}
         <Tabs.Panel value="access" pt="lg">
           <AccessTab
-            familyId={active.id}
+            chronicleId={active.id}
             members={members}
             invites={invites}
             canManage={canManage(role)}
@@ -154,7 +167,7 @@ export function FamilyTabs({
         {/* ── Settings ─────────────────────────────────────────────────── */}
         <Tabs.Panel value="settings" pt="lg">
           <SettingsTab
-            familyId={active.id}
+            chronicleId={active.id}
             name={active.name}
             description={active.description ?? ''}
             styleGuide={styleGuide}
@@ -164,14 +177,14 @@ export function FamilyTabs({
       </Tabs>
 
       <AddPersonModal
-        familyId={active.id}
+        chronicleId={active.id}
         opened={addState.opened}
         target={addState.target}
         onClose={closeAdd}
       />
 
       <EditPersonModal
-        familyId={active.id}
+        chronicleId={active.id}
         person={editState.person}
         opened={editState.opened}
         onClose={() => setEditState((s) => ({ ...s, opened: false }))}

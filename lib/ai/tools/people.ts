@@ -1,13 +1,13 @@
 import { z } from 'zod';
 import {
-  addPersonToFamily,
+  addPersonToChronicle,
   connectPeople,
   createPerson,
   deletePerson,
   edgeForRelation,
   getPerson,
-  getTreeForFamily,
-  isPersonInFamily,
+  getTreeForChronicle,
+  isPersonInChronicle,
   removeRelationship,
   updatePerson,
   type PersonPatch,
@@ -22,11 +22,11 @@ const relation = z
 
 const gender = z.enum(['male', 'female']).describe("The person's gender, if known.");
 
-/** add_person — create a person in the active family's tree, optionally connected to a relative. */
+/** add_person — create a person in the active chronicle's tree, optionally connected to a relative. */
 export const addPersonTool = defineTool({
   name: 'add_person',
   description:
-    "Add a person to the active family's tree. Optionally connect them to someone already in the " +
+    "Add a person to the active chronicle's tree. Optionally connect them to someone already in the " +
     'tree via relateTo. Check get_family_tree first if unsure who already exists. Contributor access required.',
   schema: z.object({
     displayName: z.string().min(1).describe('The name to show, e.g. "Maria" or "Maria Schmidt".'),
@@ -35,7 +35,7 @@ export const addPersonTool = defineTool({
     bornYear: z.number().int().nullish().describe('Birth year, if known.'),
     diedYear: z.number().int().nullish().describe('Death year, if known.'),
     relateTo: z
-      .object({ name: z.string().min(1).describe('An existing relative in this family.'), relation })
+      .object({ name: z.string().min(1).describe('An existing relative in this chronicle.'), relation })
       .nullish()
       .describe('Optionally connect the new person to an existing relative.'),
   }),
@@ -49,7 +49,7 @@ export const addPersonTool = defineTool({
     // Resolve the relative up-front so we fail before creating an orphan on a bad reference.
     let relative: { id: string; displayName: string } | null = null;
     if (args.relateTo) {
-      const found = await resolvePerson(gate.familyId, args.relateTo.name);
+      const found = await resolvePerson(gate.chronicleId, args.relateTo.name);
       if ('error' in found) return { ok: false, error: found.error };
       relative = found.person;
     }
@@ -66,9 +66,9 @@ export const addPersonTool = defineTool({
       diedOn: diedYear !== undefined ? yearToDate(diedYear) : null,
       diedPrecision: diedYear !== undefined ? 'year' : null,
       createdBy: ctx.userId,
-      familyId: gate.familyId,
+      chronicleId: gate.chronicleId,
     });
-    await addPersonToFamily(gate.familyId, person.id);
+    await addPersonToChronicle(gate.chronicleId, person.id);
 
     let detail: string | undefined;
     if (relative && args.relateTo) {
@@ -92,11 +92,11 @@ export const addPersonTool = defineTool({
   },
 });
 
-/** relate_people — connect two people already in the active family's tree. */
+/** relate_people — connect two people already in the active chronicle's tree. */
 export const relatePeopleTool = defineTool({
   name: 'relate_people',
   description:
-    "Create a relationship between two people who are already in the active family's tree. " +
+    "Create a relationship between two people who are already in the active chronicle's tree. " +
     'A person can have at most two parents — check get_family_tree for existing relationships ' +
     'before adding parent links. Contributor access required.',
   schema: z.object({
@@ -108,9 +108,9 @@ export const relatePeopleTool = defineTool({
     const gate = await ensureContributor(ctx);
     if ('error' in gate) return { ok: false, error: gate.error };
 
-    const subject = await resolvePerson(gate.familyId, args.personName);
+    const subject = await resolvePerson(gate.chronicleId, args.personName);
     if ('error' in subject) return { ok: false, error: subject.error };
-    const relative = await resolvePerson(gate.familyId, args.relativeName);
+    const relative = await resolvePerson(gate.chronicleId, args.relativeName);
     if ('error' in relative) return { ok: false, error: relative.error };
     if (subject.person.id === relative.person.id) {
       return { ok: false, error: 'A person cannot be related to themselves.' };
@@ -132,11 +132,11 @@ export const relatePeopleTool = defineTool({
   },
 });
 
-/** unrelate_people — remove a relationship between two people in the active family's tree. */
+/** unrelate_people — remove a relationship between two people in the active chronicle's tree. */
 export const unrelatePeopleTool = defineTool({
   name: 'unrelate_people',
   description:
-    "Remove an existing relationship between two people in the active family's tree — e.g. to fix " +
+    "Remove an existing relationship between two people in the active chronicle's tree — e.g. to fix " +
     'a wrongly linked parent or partner. The people themselves are kept. Contributor access required.',
   schema: z.object({
     personName: z.string().min(1).describe('The subject (must already exist in the tree).'),
@@ -147,9 +147,9 @@ export const unrelatePeopleTool = defineTool({
     const gate = await ensureContributor(ctx);
     if ('error' in gate) return { ok: false, error: gate.error };
 
-    const subject = await resolvePerson(gate.familyId, args.personName);
+    const subject = await resolvePerson(gate.chronicleId, args.personName);
     if ('error' in subject) return { ok: false, error: subject.error };
-    const relative = await resolvePerson(gate.familyId, args.relativeName);
+    const relative = await resolvePerson(gate.chronicleId, args.relativeName);
     if ('error' in relative) return { ok: false, error: relative.error };
 
     const edge = edgeForRelation(args.relation, subject.person.id, relative.person.id);
@@ -164,11 +164,11 @@ export const unrelatePeopleTool = defineTool({
   },
 });
 
-/** edit_person — fix the details of someone already in the active family's tree. */
+/** edit_person — fix the details of someone already in the active chronicle's tree. */
 export const editPersonTool = defineTool({
   name: 'edit_person',
   description:
-    "Update an existing person in the active family's tree — correct their name, surname, " +
+    "Update an existing person in the active chronicle's tree — correct their name, surname, " +
     'gender, or birth/death year. Pass only the fields to change; pass null to clear a field. ' +
     'Contributor access required.',
   schema: z.object({
@@ -183,7 +183,7 @@ export const editPersonTool = defineTool({
     const gate = await ensureContributor(ctx);
     if ('error' in gate) return { ok: false, error: gate.error };
 
-    const found = await resolvePerson(gate.familyId, args.name);
+    const found = await resolvePerson(gate.chronicleId, args.name);
     if ('error' in found) return { ok: false, error: found.error };
 
     const patch: PersonPatch = {};
@@ -218,11 +218,11 @@ export const editPersonTool = defineTool({
   },
 });
 
-/** delete_person — remove someone from the active family's tree (and their relationships). */
+/** delete_person — remove someone from the active chronicle's tree (and their relationships). */
 export const deletePersonTool = defineTool({
   name: 'delete_person',
   description:
-    "Delete a person from the active family's tree, along with their relationships. Use only when " +
+    "Delete a person from the active chronicle's tree, along with their relationships. Use only when " +
     'the user clearly asks to remove someone. Cannot delete a person linked to an app account. ' +
     'This is hard to undo — confirm with the user first. Contributor access required.',
   schema: z.object({
@@ -232,16 +232,16 @@ export const deletePersonTool = defineTool({
     const gate = await ensureContributor(ctx);
     if ('error' in gate) return { ok: false, error: gate.error };
 
-    const found = await resolvePerson(gate.familyId, args.name);
+    const found = await resolvePerson(gate.chronicleId, args.name);
     if ('error' in found) return { ok: false, error: found.error };
 
     const person = await getPerson(found.person.id);
-    if (!person) return { ok: false, error: `"${args.name}" is not in this family anymore.` };
+    if (!person) return { ok: false, error: `"${args.name}" is not in this chronicle anymore.` };
     if (person.userId) {
       return { ok: false, error: `${person.displayName} is linked to an app account and cannot be deleted.` };
     }
-    if (!(await isPersonInFamily(gate.familyId, person.id))) {
-      return { ok: false, error: `${person.displayName} is not in this family.` };
+    if (!(await isPersonInChronicle(gate.chronicleId, person.id))) {
+      return { ok: false, error: `${person.displayName} is not in this chronicle.` };
     }
 
     await deletePerson(person.id);
@@ -253,22 +253,22 @@ export const deletePersonTool = defineTool({
   },
 });
 
-/** get_family_tree — read tool: everyone in the active family and how they're connected. */
+/** get_family_tree — read tool: everyone in the active chronicle and how they're connected. */
 export const getFamilyTreeTool = defineTool({
   name: 'get_family_tree',
   description:
-    "List everyone in the active family's tree with their gender, birth/death years, and the " +
-    'kinship relationships between them. Use before adding or linking people to avoid duplicates, ' +
-    'wrong links, or giving someone a third parent.',
+    "List everyone in the active chronicle's tree with their gender, birth/death years, derived " +
+    'family tags, and the kinship relationships between them. Use before adding or linking people ' +
+    'to avoid duplicates, wrong links, or giving someone a third parent.',
   schema: z.object({}),
   async execute(_args, ctx) {
-    if (!ctx.activeFamilyId) {
+    if (!ctx.activeChronicleId) {
       return {
         ok: true,
-        message: JSON.stringify({ people: [], relationships: [], note: 'No active family yet.' }),
+        message: JSON.stringify({ people: [], relationships: [], note: 'No active chronicle yet.' }),
       };
     }
-    const tree = await getTreeForFamily(ctx.activeFamilyId);
+    const tree = await getTreeForChronicle(ctx.activeChronicleId);
     const nameOf = new Map(tree.people.map((p) => [p.id, p.displayName]));
     return {
       ok: true,
@@ -276,6 +276,7 @@ export const getFamilyTreeTool = defineTool({
         people: tree.people.map((p) => ({
           name: p.displayName,
           familyName: p.familyName,
+          familyTags: p.familyTags,
           gender: p.gender,
           born: p.bornOn ? new Date(p.bornOn).getUTCFullYear() : null,
           died: p.diedOn ? new Date(p.diedOn).getUTCFullYear() : null,

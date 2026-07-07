@@ -55,17 +55,11 @@ function groupByYear(stories: StoryListItem[]): YearGroup[] {
   return dated;
 }
 
-function StoryCard({
-  story,
-  familyNames,
-}: {
-  story: StoryListItem;
-  familyNames: Record<string, string>;
-}) {
+function StoryCard({ story }: { story: StoryListItem }) {
   const meta = storyStatusMeta(story.status);
   const date = formatEventDate(story.eventDate, story.eventDatePrecision);
   const excerpt = (story.summary ?? story.bodyStyled ?? story.bodyOriginal ?? '').slice(0, 160);
-  const shared = story.familyIds.length > 1;
+  const shared = story.chronicleIds.length > 1;
 
   return (
     <Card
@@ -104,7 +98,7 @@ function StoryCard({
             <Group gap={2} wrap="nowrap">
               <IconUsers size={15} />
               <Text size="xs" c="dimmed">
-                {story.familyIds.length}
+                {story.chronicleIds.length}
               </Text>
             </Group>
           )}
@@ -116,11 +110,11 @@ function StoryCard({
           </Text>
         )}
 
-        {shared && (
+        {story.familyTags.length > 0 && (
           <Group gap={6} mt={2}>
-            {story.familyIds.map((id) => (
-              <Badge key={id} variant="light" color="slate" size="sm" radius="sm">
-                {familyNames[id] ?? 'Family'}
+            {story.familyTags.map((tag) => (
+              <Badge key={tag} variant="light" color="slate" size="sm" radius="sm">
+                {tag}
               </Badge>
             ))}
           </Group>
@@ -130,13 +124,7 @@ function StoryCard({
   );
 }
 
-function Timeline({
-  groups,
-  familyNames,
-}: {
-  groups: YearGroup[];
-  familyNames: Record<string, string>;
-}) {
+function Timeline({ groups }: { groups: YearGroup[] }) {
   return (
     <Stack gap="xl">
       {groups.map((group) => (
@@ -155,7 +143,7 @@ function Timeline({
           >
             <Stack gap="md">
               {group.stories.map((story) => (
-                <StoryCard key={story.id} story={story} familyNames={familyNames} />
+                <StoryCard key={story.id} story={story} />
               ))}
             </Stack>
           </Box>
@@ -212,13 +200,7 @@ function YearBubble({
   );
 }
 
-function Bubbles({
-  groups,
-  familyNames,
-}: {
-  groups: YearGroup[];
-  familyNames: Record<string, string>;
-}) {
+function Bubbles({ groups }: { groups: YearGroup[] }) {
   const [selected, setSelected] = useState<string>(groups[0]?.label ?? '');
   const current = groups.find((g) => g.label === selected) ?? groups[0];
 
@@ -243,7 +225,7 @@ function Bubbles({
           </Title>
           <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
             {current.stories.map((story) => (
-              <StoryCard key={story.id} story={story} familyNames={familyNames} />
+              <StoryCard key={story.id} story={story} />
             ))}
           </SimpleGrid>
         </Box>
@@ -252,32 +234,25 @@ function Bubbles({
   );
 }
 
-export function StoriesView({
-  stories,
-  familyNames,
-}: {
-  stories: StoryListItem[];
-  familyNames: Record<string, string>;
-}) {
+export function StoriesView({ stories }: { stories: StoryListItem[] }) {
   const [view, setView] = useState<ViewMode>('timeline');
-  const [families, setFamilies] = useState<string[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
 
-  // Families that actually have stories — the ones worth offering as filters.
-  const familyOptions = useMemo(() => {
-    const ids = new Set<string>();
-    for (const s of stories) for (const id of s.familyIds) ids.add(id);
-    return [...ids]
-      .map((id) => ({ id, name: familyNames[id] ?? 'Family' }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [stories, familyNames]);
+  // Family tags that actually appear on stories — the ones worth offering as filters.
+  // Tags are derived from the people in each story, never configured.
+  const tagOptions = useMemo(() => {
+    const all = new Set<string>();
+    for (const s of stories) for (const tag of s.familyTags) all.add(tag);
+    return [...all].sort((a, b) => a.localeCompare(b));
+  }, [stories]);
 
-  // No filter selected → show all; otherwise keep stories in any selected family.
+  // No filter selected → show all; otherwise keep stories carrying any selected tag.
   const visible = useMemo(
     () =>
-      families.length === 0
+      tags.length === 0
         ? stories
-        : stories.filter((s) => s.familyIds.some((id) => families.includes(id))),
-    [stories, families],
+        : stories.filter((s) => s.familyTags.some((tag) => tags.includes(tag))),
+    [stories, tags],
   );
 
   const groups = useMemo(() => groupByYear(visible), [visible]);
@@ -296,24 +271,19 @@ export function StoriesView({
         />
       </Group>
 
-      {familyOptions.length > 1 && (
+      {tagOptions.length > 1 && (
         <Group gap="xs" align="center">
           <Text size="sm" c="dimmed">
             Show:
           </Text>
-          <Chip
-            size="sm"
-            variant="light"
-            checked={families.length === 0}
-            onClick={() => setFamilies([])}
-          >
+          <Chip size="sm" variant="light" checked={tags.length === 0} onClick={() => setTags([])}>
             All families
           </Chip>
-          <Chip.Group multiple value={families} onChange={setFamilies}>
+          <Chip.Group multiple value={tags} onChange={setTags}>
             <Group gap="xs">
-              {familyOptions.map((f) => (
-                <Chip key={f.id} value={f.id} size="sm" variant="light">
-                  {f.name}
+              {tagOptions.map((tag) => (
+                <Chip key={tag} value={tag} size="sm" variant="light">
+                  {tag}
                 </Chip>
               ))}
             </Group>
@@ -328,9 +298,9 @@ export function StoriesView({
           </Text>
         </Card>
       ) : view === 'timeline' ? (
-        <Timeline groups={groups} familyNames={familyNames} />
+        <Timeline groups={groups} />
       ) : (
-        <Bubbles groups={groups} familyNames={familyNames} />
+        <Bubbles groups={groups} />
       )}
     </Stack>
   );

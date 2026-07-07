@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { listFamiliesForUser } from '@/lib/families';
+import { listChroniclesForUser } from '@/lib/chronicles';
 import {
   canUserEditStory,
-  familiesForStory,
+  chroniclesForStory,
   listStoriesForUser,
-  shareStoryToFamily,
+  shareStoryToChronicle,
   type StoryListItem,
 } from '@/lib/stories';
 import { canContribute, type AccessRole } from '@/lib/permissions';
@@ -60,47 +60,47 @@ export const draftStoryTool = defineTool({
           eventYear: args.eventYear ?? null,
           people: args.people ?? [],
         },
-        familyId: gate.familyId,
-        familyName: ctx.activeFamilyName ?? 'your family',
+        chronicleId: gate.chronicleId,
+        chronicleName: ctx.activeChronicleName ?? 'your chronicle',
       },
     };
   },
 });
 
-/** share_story — also share an existing story into another of the user's families. */
+/** share_story — also share an existing story into another of the user's chronicles. */
 export const shareStoryTool = defineTool({
   name: 'share_story',
   description:
-    'Share an existing story into another family the user belongs to. Identify the story by its ' +
-    'title (or id) and the target family by name. Requires contributor access in the target family.',
+    'Share an existing story into another chronicle the user belongs to. Identify the story by its ' +
+    'title (or id) and the target chronicle by name. Requires contributor access in the target chronicle.',
   schema: z.object({
     story: z.string().min(1).describe('The story title (or id) to share.'),
-    familyName: z.string().min(1).describe('The family to share it into.'),
+    chronicleName: z.string().min(1).describe('The chronicle to share it into.'),
   }),
   async execute(args, ctx) {
     const found = await resolveStory(ctx, args.story);
     if ('error' in found) return { ok: false, error: found.error };
     const story = found.story;
 
-    const families = await listFamiliesForUser(ctx.userId);
-    const wantedFamily = args.familyName.trim().toLowerCase();
-    const familyMatches = families.filter((f) => f.name.toLowerCase() === wantedFamily);
-    if (familyMatches.length === 0) return { ok: false, error: `You are not in a family named "${args.familyName}".` };
-    if (familyMatches.length > 1) return { ok: false, error: `Several families are named "${args.familyName}" — be more specific.` };
-    const family = familyMatches[0];
+    const chronicles = await listChroniclesForUser(ctx.userId);
+    const wantedChronicle = args.chronicleName.trim().toLowerCase();
+    const chronicleMatches = chronicles.filter((f) => f.name.toLowerCase() === wantedChronicle);
+    if (chronicleMatches.length === 0) return { ok: false, error: `You are not in a chronicle named "${args.chronicleName}".` };
+    if (chronicleMatches.length > 1) return { ok: false, error: `Several chronicles are named "${args.chronicleName}" — be more specific.` };
+    const chronicle = chronicleMatches[0];
 
-    if (story.familyIds.includes(family.id)) {
-      return { ok: false, error: `"${story.title}" is already shared with ${family.name}.` };
+    if (story.chronicleIds.includes(chronicle.id)) {
+      return { ok: false, error: `"${story.title}" is already shared with ${chronicle.name}.` };
     }
-    if (!canContribute(family.role as AccessRole)) {
-      return { ok: false, error: `You need contributor access in ${family.name} to share into it.` };
+    if (!canContribute(chronicle.role as AccessRole)) {
+      return { ok: false, error: `You need contributor access in ${chronicle.name} to share into it.` };
     }
 
-    await shareStoryToFamily(story.id, family.id, ctx.userId);
+    await shareStoryToChronicle(story.id, chronicle.id, ctx.userId);
     return {
       ok: true,
-      message: `Shared "${story.title}" into ${family.name}.`,
-      receipt: { label: `Shared "${story.title}" with ${family.name}`, href: `/stories/${story.id}` },
+      message: `Shared "${story.title}" into ${chronicle.name}.`,
+      receipt: { label: `Shared "${story.title}" with ${chronicle.name}`, href: `/stories/${story.id}` },
     };
   },
 });
@@ -165,10 +165,10 @@ export const updateStoryTool = defineTool({
       return { ok: false, error: 'This story is still being processed — it can be edited once it is ready.' };
     }
     if (!(await canUserEditStory(s.id, ctx.userId))) {
-      return { ok: false, error: "Only the story's author or a family owner can edit it." };
+      return { ok: false, error: "Only the story's author or a chronicle owner can edit it." };
     }
 
-    const families = await familiesForStory(s.id);
+    const chronicles = await chroniclesForStory(s.id);
     return {
       ok: true,
       message: 'Revision prepared and shown to the user for review. Await their edits and acceptance.',
@@ -182,18 +182,18 @@ export const updateStoryTool = defineTool({
           eventYear: args.eventYear ?? (s.eventDate ? s.eventDate.getUTCFullYear() : null),
           people: [],
         },
-        familyId: families[0]?.id ?? '',
-        familyName: families[0]?.name ?? 'your family',
+        chronicleId: chronicles[0]?.id ?? '',
+        chronicleName: chronicles[0]?.name ?? 'your chronicle',
       },
     };
   },
 });
 
-/** list_stories — read tool: the user's recent stories across all their families. */
+/** list_stories — read tool: the user's recent stories across all their chronicles. */
 export const listStoriesTool = defineTool({
   name: 'list_stories',
   description:
-    'List the user\'s recent stories across all their families (title, status, id). Use to find a ' +
+    'List the user\'s recent stories across all their chronicles (title, status, id). Use to find a ' +
     'story to share or to answer questions about what has been recorded.',
   schema: z.object({}),
   async execute(_args, ctx) {

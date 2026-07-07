@@ -2,19 +2,12 @@ import { Box, Button, Card, Stack, Text, Title } from '@mantine/core';
 import { IconMessageCircle2 } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
 import { listStoriesForUser } from '@/lib/stories';
-import { listFamiliesForUser } from '@/lib/families';
 import { StoriesView } from './stories-view';
 
 export default async function StoriesPage() {
   const user = await requireUser();
 
-  const [stories, families] = await Promise.all([
-    listStoriesForUser(user.id),
-    listFamiliesForUser(user.id),
-  ]);
-
-  const familyNames: Record<string, string> = {};
-  for (const f of families) familyNames[f.id] = f.name;
+  const stories = await listStoriesForUser(user.id);
 
   if (stories.length === 0) {
     return (
@@ -47,7 +40,7 @@ export default async function StoriesPage() {
 
   return (
     <Box p="lg" maw={960} mx="auto">
-      <StoriesView stories={stories} familyNames={familyNames} />
+      <StoriesView stories={stories} />
     </Box>
   );
 }

@@ -14,8 +14,9 @@ import {
 } from '@mantine/core';
 import { IconAlertTriangle, IconMessageCircle2 } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
-import { canUserEditStory, familiesForStory, getStoryForUser, listAssets } from '@/lib/stories';
-import { listFamiliesForUser } from '@/lib/families';
+import { canUserEditStory, chroniclesForStory, getStoryForUser, listAssets } from '@/lib/stories';
+import { familyTagsByStory } from '@/lib/family-tags';
+import { listChroniclesForUser } from '@/lib/chronicles';
 import { formatEventDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
 import { presignGet } from '@/lib/s3';
@@ -40,15 +41,17 @@ export default async function StoryDetailPage({
   const story = await getStoryForUser(storyId, user.id);
   if (!story) notFound();
 
-  const [shareFamilies, assets, userFamilies, canEdit] = await Promise.all([
-    familiesForStory(storyId),
+  const [shareChronicles, assets, userChronicles, canEdit, tagsByStory] = await Promise.all([
+    chroniclesForStory(storyId),
     listAssets(storyId),
-    listFamiliesForUser(user.id),
+    listChroniclesForUser(user.id),
     canUserEditStory(storyId, user.id),
+    familyTagsByStory([storyId]),
   ]);
+  const familyTags = tagsByStory.get(storyId) ?? [];
 
-  const sharedIds = new Set(shareFamilies.map((f) => f.id));
-  const shareCandidates = userFamilies
+  const sharedIds = new Set(shareChronicles.map((f) => f.id));
+  const shareCandidates = userChronicles
     .filter((f) => !sharedIds.has(f.id))
     .map((f) => ({ id: f.id, name: f.name }));
 
@@ -85,13 +88,25 @@ export default async function StoryDetailPage({
             By {story.submitterName}
             {date ? ` · ${date}` : ''}
           </Text>
-          {shareFamilies.length > 0 && (
+          {familyTags.length > 0 && (
+            <Group gap="xs" align="center">
+              <Text size="sm" c="dimmed">
+                Families
+              </Text>
+              {familyTags.map((tag) => (
+                <Badge key={tag} variant="light" color="slate" radius="sm">
+                  {tag}
+                </Badge>
+              ))}
+            </Group>
+          )}
+          {shareChronicles.length > 1 && (
             <Group gap="xs" align="center">
               <Text size="sm" c="dimmed">
                 Shared with
               </Text>
-              {shareFamilies.map((f) => (
-                <Badge key={f.id} variant="light" color="slate" radius="sm">
+              {shareChronicles.map((f) => (
+                <Badge key={f.id} variant="outline" color="slate" radius="sm">
                   {f.name}
                 </Badge>
               ))}

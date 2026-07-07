@@ -24,12 +24,12 @@ import type { InviteRow, MemberRow } from './types';
 import { initials } from './utils';
 
 export function AccessTab({
-  familyId,
+  chronicleId,
   members,
   invites,
   canManage: manage,
 }: {
-  familyId: string;
+  chronicleId: string;
   members: MemberRow[];
   invites: InviteRow[];
   canManage: boolean;
@@ -53,7 +53,7 @@ export function AccessTab({
   function handleSubmit(values: typeof form.values) {
     startTransition(async () => {
       try {
-        const { token } = await invite({ familyId, email: values.email, role: values.role });
+        const { token } = await invite({ chronicleId, email: values.email, role: values.role });
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
         setLink(`${origin}/invite/${token}`);
         notifications.show({ message: 'Invitation created' });
@@ -137,7 +137,7 @@ export function AccessTab({
         </div>
       )}
 
-      <Modal opened={opened} onClose={() => setOpened(false)} title="Invite to family" radius="md">
+      <Modal opened={opened} onClose={() => setOpened(false)} title="Invite to chronicle" radius="md">
         {link ? (
           <Stack>
             <Text size="sm">Share this link with the person you invited:</Text>

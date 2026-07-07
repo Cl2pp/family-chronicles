@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { requireUser } from '@/lib/session';
-import { resolveActiveFamily } from '@/lib/families';
+import { resolveActiveChronicle } from '@/lib/chronicles';
 import { attachmentsByMessage, listMessages, resumableConversation } from '@/lib/conversations';
 import { presignGet } from '@/lib/s3';
 import type { Receipt } from '@/lib/ai/tools';
@@ -8,8 +8,8 @@ import { ChatView } from './chat-view';
 
 export default async function ChatPage() {
   const user = await requireUser();
-  const cookieValue = (await cookies()).get('activeFamilyId')?.value;
-  const { active } = await resolveActiveFamily(user.id, cookieValue);
+  const cookieValue = (await cookies()).get('activeChronicleId')?.value;
+  const { active } = await resolveActiveChronicle(user.id, cookieValue);
 
   const convo = await resumableConversation(user.id);
   const stored = convo ? await listMessages(convo.id) : [];
@@ -35,7 +35,7 @@ export default async function ChatPage() {
     <ChatView
       conversationId={convo?.id ?? null}
       initialMessages={initialMessages}
-      family={active ? { id: active.id, name: active.name } : undefined}
+      chronicle={active ? { id: active.id, name: active.name } : undefined}
     />
   );
 }

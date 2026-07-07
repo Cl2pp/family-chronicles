@@ -2,13 +2,14 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   assets,
-  families,
+  chronicles,
   memberships,
   stories,
-  storyFamilies,
+  storyChronicles,
   storyPeople,
   user,
 } from '@/db/schema';
+import { familyTagsByStory } from '@/lib/family-tags';
 import { yearToDate } from '@/lib/dates';
 
 export type DatePrecision = 'day' | 'month' | 'year' | 'circa';
@@ -17,17 +18,17 @@ export type StoryStatus = 'draft' | 'processing' | 'ready' | 'failed';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-async function linkFamiliesAndPeople(
+async function linkChroniclesAndPeople(
   tx: Tx,
   storyId: string,
   userId: string,
-  familyIds: string[],
+  chronicleIds: string[],
   personIds: string[],
 ) {
-  if (familyIds.length) {
+  if (chronicleIds.length) {
     await tx
-      .insert(storyFamilies)
-      .values(familyIds.map((familyId) => ({ storyId, familyId, sharedBy: userId })))
+      .insert(storyChronicles)
+      .values(chronicleIds.map((chronicleId) => ({ storyId, chronicleId, sharedBy: userId })))
       .onConflictDoNothing();
   }
   if (personIds.length) {
@@ -38,7 +39,7 @@ async function linkFamiliesAndPeople(
   }
 }
 
-/** Create a story shared into one or more families. */
+/** Create a story shared into one or more chronicles. */
 export async function createStory(input: {
   userId: string;
   title: string;
@@ -50,7 +51,7 @@ export async function createStory(input: {
   eventDate?: Date | null;
   eventDatePrecision?: DatePrecision | null;
   conversationId?: string | null;
-  familyIds: string[];
+  chronicleIds: string[];
   personIds?: string[];
 }) {
   return db.transaction(async (tx) => {
@@ -69,22 +70,22 @@ export async function createStory(input: {
         conversationId: input.conversationId ?? null,
       })
       .returning();
-    await linkFamiliesAndPeople(
+    await linkChroniclesAndPeople(
       tx,
       created.id,
       input.userId,
-      input.familyIds,
+      input.chronicleIds,
       input.personIds ?? [],
     );
     return created;
   });
 }
 
-/** Share an existing story into another family. */
-export async function shareStoryToFamily(storyId: string, familyId: string, userId: string) {
+/** Share an existing story into another chronicle. */
+export async function shareStoryToChronicle(storyId: string, chronicleId: string, userId: string) {
   await db
-    .insert(storyFamilies)
-    .values({ storyId, familyId, sharedBy: userId })
+    .insert(storyChronicles)
+    .values({ storyId, chronicleId, sharedBy: userId })
     .onConflictDoNothing();
 }
 
@@ -145,25 +146,27 @@ export interface StoryListItem {
   eventDatePrecision: DatePrecision | null;
   createdAt: Date;
   submitterName: string;
-  familyIds: string[];
+  chronicleIds: string[];
+  /** Derived family tags: the union of the tags of everyone in the story. */
+  familyTags: string[];
   photoCount: number;
 }
 
-type StoryRow = Omit<StoryListItem, 'familyIds' | 'photoCount'>;
+type StoryRow = Omit<StoryListItem, 'chronicleIds' | 'familyTags' | 'photoCount'>;
 
 async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
   const ids = rows.map((r) => r.id);
   if (ids.length === 0) return [];
 
   const fam = await db
-    .select({ storyId: storyFamilies.storyId, familyId: storyFamilies.familyId })
-    .from(storyFamilies)
-    .where(inArray(storyFamilies.storyId, ids));
-  const famByStory = new Map<string, string[]>();
+    .select({ storyId: storyChronicles.storyId, chronicleId: storyChronicles.chronicleId })
+    .from(storyChronicles)
+    .where(inArray(storyChronicles.storyId, ids));
+  const chronByStory = new Map<string, string[]>();
   for (const f of fam) {
-    const arr = famByStory.get(f.storyId) ?? [];
-    arr.push(f.familyId);
-    famByStory.set(f.storyId, arr);
+    const arr = chronByStory.get(f.storyId) ?? [];
+    arr.push(f.chronicleId);
+    chronByStory.set(f.storyId, arr);
   }
 
   const photos = await db
@@ -173,42 +176,45 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
     .groupBy(assets.storyId);
   const photoByStory = new Map(photos.map((p) => [p.storyId, p.count]));
 
+  const tagsByStory = await familyTagsByStory(ids);
+
   return rows.map((r) => ({
     ...r,
-    familyIds: famByStory.get(r.id) ?? [],
+    chronicleIds: chronByStory.get(r.id) ?? [],
+    familyTags: tagsByStory.get(r.id) ?? [],
     photoCount: photoByStory.get(r.id) ?? 0,
   }));
 }
 
-/** Stories across every family the user belongs to (deduped). */
+/** Stories across every chronicle the user belongs to (deduped). */
 export async function listStoriesForUser(userId: string): Promise<StoryListItem[]> {
   const fams = await db
-    .select({ familyId: memberships.familyId })
+    .select({ chronicleId: memberships.chronicleId })
     .from(memberships)
     .where(eq(memberships.userId, userId));
-  const familyIds = fams.map((f) => f.familyId);
-  if (familyIds.length === 0) return [];
+  const chronicleIds = fams.map((f) => f.chronicleId);
+  if (chronicleIds.length === 0) return [];
 
   const rows = (await db
     .selectDistinct(storyListColumns)
-    .from(storyFamilies)
-    .innerJoin(stories, eq(storyFamilies.storyId, stories.id))
+    .from(storyChronicles)
+    .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
     .innerJoin(user, eq(stories.submittedBy, user.id))
-    .where(inArray(storyFamilies.familyId, familyIds))
+    .where(inArray(storyChronicles.chronicleId, chronicleIds))
     .orderBy(desc(stories.createdAt))) as StoryRow[];
   return decorateStories(rows);
 }
 
-/** Families a story is shared into (id + name), for chips. */
-export async function familiesForStory(storyId: string) {
+/** Chronicles a story is shared into (id + name), for chips. */
+export async function chroniclesForStory(storyId: string) {
   return db
-    .select({ id: families.id, name: families.name })
-    .from(storyFamilies)
-    .innerJoin(families, eq(storyFamilies.familyId, families.id))
-    .where(eq(storyFamilies.storyId, storyId));
+    .select({ id: chronicles.id, name: chronicles.name })
+    .from(storyChronicles)
+    .innerJoin(chronicles, eq(storyChronicles.chronicleId, chronicles.id))
+    .where(eq(storyChronicles.storyId, storyId));
 }
 
-/** A story with submitter, gated to users who can access ≥1 of its families. */
+/** A story with submitter, gated to users who can access ≥1 of its chronicles. */
 export async function getStoryForUser(storyId: string, userId: string) {
   const rows = await db
     .select({
@@ -225,17 +231,17 @@ export async function getStoryForUser(storyId: string, userId: string) {
   if (!story) return null;
 
   const access = await db
-    .select({ id: storyFamilies.id })
-    .from(storyFamilies)
-    .innerJoin(memberships, eq(storyFamilies.familyId, memberships.familyId))
-    .where(and(eq(storyFamilies.storyId, storyId), eq(memberships.userId, userId)))
+    .select({ id: storyChronicles.id })
+    .from(storyChronicles)
+    .innerJoin(memberships, eq(storyChronicles.chronicleId, memberships.chronicleId))
+    .where(and(eq(storyChronicles.storyId, storyId), eq(memberships.userId, userId)))
     .limit(1);
   if (access.length === 0) return null;
 
   return story;
 }
 
-/** Whether the user may edit a story: its submitter, or an owner of a family it's shared into. */
+/** Whether the user may edit a story: its submitter, or an owner of a chronicle it's shared into. */
 export async function canUserEditStory(storyId: string, userId: string): Promise<boolean> {
   const rows = await db
     .select({ submittedBy: stories.submittedBy })
@@ -247,12 +253,12 @@ export async function canUserEditStory(storyId: string, userId: string): Promise
   if (story.submittedBy === userId) return true;
 
   const owner = await db
-    .select({ id: storyFamilies.id })
-    .from(storyFamilies)
-    .innerJoin(memberships, eq(storyFamilies.familyId, memberships.familyId))
+    .select({ id: storyChronicles.id })
+    .from(storyChronicles)
+    .innerJoin(memberships, eq(storyChronicles.chronicleId, memberships.chronicleId))
     .where(
       and(
-        eq(storyFamilies.storyId, storyId),
+        eq(storyChronicles.storyId, storyId),
         eq(memberships.userId, userId),
         eq(memberships.accessRole, 'owner'),
       ),
@@ -275,7 +281,7 @@ export async function applyStoryEdit(input: {
   eventYear: number | null;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!(await canUserEditStory(input.storyId, input.userId))) {
-    return { ok: false, error: "Only the story's author or a family owner can edit it." };
+    return { ok: false, error: "Only the story's author or a chronicle owner can edit it." };
   }
   const story = await getStoryForUser(input.storyId, input.userId);
   if (!story) return { ok: false, error: 'Story not found.' };
@@ -305,14 +311,14 @@ export async function resetStoryForRetry(storyId: string) {
     .where(eq(stories.id, storyId));
 }
 
-/** The styleGuide to use when styling a story: the first family it's shared into. */
+/** The styleGuide to use when styling a story: the first chronicle it's shared into. */
 export async function styleGuideForStory(storyId: string): Promise<string | null> {
   const rows = await db
-    .select({ styleGuide: families.styleGuide })
-    .from(storyFamilies)
-    .innerJoin(families, eq(storyFamilies.familyId, families.id))
-    .where(eq(storyFamilies.storyId, storyId))
-    .orderBy(storyFamilies.sharedAt)
+    .select({ styleGuide: chronicles.styleGuide })
+    .from(storyChronicles)
+    .innerJoin(chronicles, eq(storyChronicles.chronicleId, chronicles.id))
+    .where(eq(storyChronicles.storyId, storyId))
+    .orderBy(storyChronicles.sharedAt)
     .limit(1);
   return rows[0]?.styleGuide ?? null;
 }

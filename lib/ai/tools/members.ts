@@ -4,11 +4,11 @@ import { createInvitation } from '@/lib/invitations';
 import { defineTool } from './types';
 import { ensureOwner } from './util';
 
-/** invite_member — create a shareable invitation link for the active family. Owner only. */
+/** invite_member — create a shareable invitation link for the active chronicle. Owner only. */
 export const inviteMemberTool = defineTool({
   name: 'invite_member',
   description:
-    'Invite someone to the active family by email, returning a shareable invite link. The email ' +
+    'Invite someone to the active chronicle by email, returning a shareable invite link. The email ' +
     'is not sent automatically — give the user the link to pass on. Owner only.',
   schema: z.object({
     email: z.string().min(1).describe("The invitee's email address."),
@@ -27,7 +27,7 @@ export const inviteMemberTool = defineTool({
     }
 
     const invite = await createInvitation({
-      familyId: gate.familyId,
+      chronicleId: gate.chronicleId,
       email,
       role: args.role,
       invitedBy: ctx.userId,

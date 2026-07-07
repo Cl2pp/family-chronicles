@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 import {
-  createFamilyTool,
-  listFamiliesTool,
-  switchFamilyTool,
-  updateFamilySettingsTool,
-} from './families';
+  createChronicleTool,
+  listChroniclesTool,
+  switchChronicleTool,
+  updateChronicleSettingsTool,
+} from './chronicles';
 import {
   addPersonTool,
   deletePersonTool,
@@ -29,19 +29,19 @@ export * from './types';
 /** Every tool the chat agent can call, in a sensible presentation order. */
 export const tools: Tool[] = [
   // read
-  listFamiliesTool,
+  listChroniclesTool,
   getFamilyTreeTool,
   listStoriesTool,
   getStoryTool,
   // setup / structure (execute directly)
-  createFamilyTool,
-  switchFamilyTool,
+  createChronicleTool,
+  switchChronicleTool,
   addPersonTool,
   relatePeopleTool,
   unrelatePeopleTool,
   editPersonTool,
   deletePersonTool,
-  updateFamilySettingsTool,
+  updateChronicleSettingsTool,
   inviteMemberTool,
   shareStoryTool,
   // review-then-save

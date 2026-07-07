@@ -1,6 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
-import { familyMembers, memberships, people, relationships } from '@/db/schema';
+import { chronicleMembers, memberships, people, relationships } from '@/db/schema';
+import { familyTagsByPerson } from '@/lib/family-tags';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -57,7 +58,7 @@ export interface NewPerson {
 
 /** Create a person and (optionally) add them to a family's tree. */
 export async function createPerson(
-  input: NewPerson & { createdBy: string; familyId?: string },
+  input: NewPerson & { createdBy: string; chronicleId?: string },
 ) {
   return db.transaction(async (tx) => {
     const [person] = await tx
@@ -76,20 +77,20 @@ export async function createPerson(
       })
       .returning();
 
-    if (input.familyId) {
+    if (input.chronicleId) {
       await tx
-        .insert(familyMembers)
-        .values({ familyId: input.familyId, personId: person.id })
+        .insert(chronicleMembers)
+        .values({ chronicleId: input.chronicleId, personId: person.id })
         .onConflictDoNothing();
     }
     return person;
   });
 }
 
-export async function addPersonToFamily(familyId: string, personId: string) {
+export async function addPersonToChronicle(chronicleId: string, personId: string) {
   await db
-    .insert(familyMembers)
-    .values({ familyId, personId })
+    .insert(chronicleMembers)
+    .values({ chronicleId, personId })
     .onConflictDoNothing();
 }
 
@@ -117,25 +118,25 @@ export async function updatePerson(id: string, patch: PersonPatch) {
     .where(eq(people.id, id));
 }
 
-export async function isPersonInFamily(familyId: string, personId: string): Promise<boolean> {
-  const row = await db.query.familyMembers.findFirst({
-    where: and(eq(familyMembers.familyId, familyId), eq(familyMembers.personId, personId)),
+export async function isPersonInChronicle(chronicleId: string, personId: string): Promise<boolean> {
+  const row = await db.query.chronicleMembers.findFirst({
+    where: and(eq(chronicleMembers.chronicleId, chronicleId), eq(chronicleMembers.personId, personId)),
   });
   return Boolean(row);
 }
 
-/** True if the user contributes to at least one family this person is a tree node of. */
+/** True if the user contributes to at least one chronicle this person is a tree node of. */
 export async function canUserEditPerson(userId: string, personId: string): Promise<boolean> {
   const rows = await db
     .select({ role: memberships.accessRole })
-    .from(familyMembers)
-    .innerJoin(memberships, eq(familyMembers.familyId, memberships.familyId))
-    .where(and(eq(familyMembers.personId, personId), eq(memberships.userId, userId)));
+    .from(chronicleMembers)
+    .innerJoin(memberships, eq(chronicleMembers.chronicleId, memberships.chronicleId))
+    .where(and(eq(chronicleMembers.personId, personId), eq(memberships.userId, userId)));
   return rows.some((r) => canContribute(r.role as AccessRole));
 }
 
 /**
- * Delete a person globally. Their kinship edges, family memberships, and story links
+ * Delete a person globally. Their kinship edges, chronicle memberships, and story links
  * are removed by ON DELETE CASCADE. No-op if the person no longer exists.
  */
 export async function deletePerson(personId: string) {
@@ -224,8 +225,10 @@ export interface TreePerson {
   bornPrecision: string | null;
   diedOn: Date | null;
   diedPrecision: string | null;
-  /** Family ids (within scope) this person belongs to — for colored dots. */
-  familyIds: string[];
+  /** Chronicle ids (within scope) this person is a tree node of — gates editing. */
+  chronicleIds: string[];
+  /** Derived family tags (own/ancestor/spouse surnames) — for colored dots. */
+  familyTags: string[];
 }
 
 export interface TreeEdge {
@@ -240,25 +243,25 @@ export interface FamilyTree {
 }
 
 /**
- * Merged tree across the given families: every person who is a member of any of
+ * Merged tree across the given chronicles: every person who is a member of any of
  * them, plus the global kinship edges connecting two such people. Each person
- * carries the subset of `familyIds` (from the scope) they belong to.
+ * carries the subset of `chronicleIds` (from the scope) they belong to.
  */
-async function getTreeForFamilies(familyIds: string[]): Promise<FamilyTree> {
-  if (familyIds.length === 0) return { people: [], edges: [] };
+async function getTreeForChronicles(chronicleIds: string[]): Promise<FamilyTree> {
+  if (chronicleIds.length === 0) return { people: [], edges: [] };
 
   const fmRows = await db
-    .select({ familyId: familyMembers.familyId, personId: familyMembers.personId })
-    .from(familyMembers)
-    .where(inArray(familyMembers.familyId, familyIds));
+    .select({ chronicleId: chronicleMembers.chronicleId, personId: chronicleMembers.personId })
+    .from(chronicleMembers)
+    .where(inArray(chronicleMembers.chronicleId, chronicleIds));
 
-  const familyIdsByPerson = new Map<string, string[]>();
+  const chronicleIdsByPerson = new Map<string, string[]>();
   for (const r of fmRows) {
-    const arr = familyIdsByPerson.get(r.personId) ?? [];
-    arr.push(r.familyId);
-    familyIdsByPerson.set(r.personId, arr);
+    const arr = chronicleIdsByPerson.get(r.personId) ?? [];
+    arr.push(r.chronicleId);
+    chronicleIdsByPerson.set(r.personId, arr);
   }
-  const personIds = [...familyIdsByPerson.keys()];
+  const personIds = [...chronicleIdsByPerson.keys()];
   if (personIds.length === 0) return { people: [], edges: [] };
 
   const personRows = await db
@@ -276,9 +279,11 @@ async function getTreeForFamilies(familyIds: string[]): Promise<FamilyTree> {
     .from(people)
     .where(inArray(people.id, personIds));
 
+  const tagsByPerson = await familyTagsByPerson(personIds);
   const treePeople: TreePerson[] = personRows.map((p) => ({
     ...p,
-    familyIds: familyIdsByPerson.get(p.id) ?? [],
+    chronicleIds: chronicleIdsByPerson.get(p.id) ?? [],
+    familyTags: tagsByPerson.get(p.id) ?? [],
   }));
 
   // Edges where BOTH endpoints are in scope.
@@ -294,22 +299,22 @@ async function getTreeForFamilies(familyIds: string[]): Promise<FamilyTree> {
   return { people: treePeople, edges };
 }
 
-/** One family's tree: its people plus the kinship edges between them. */
-export async function getTreeForFamily(familyId: string): Promise<FamilyTree> {
-  return getTreeForFamilies([familyId]);
+/** One chronicle's tree: its people plus the kinship edges between them. */
+export async function getTreeForChronicle(chronicleId: string): Promise<FamilyTree> {
+  return getTreeForChronicles([chronicleId]);
 }
 
-/** The merged tree across every family a user belongs to. */
+/** The merged tree across every chronicle a user belongs to. */
 export async function getMergedTreeForUser(userId: string): Promise<FamilyTree> {
   const fams = await db
-    .select({ familyId: memberships.familyId })
+    .select({ chronicleId: memberships.chronicleId })
     .from(memberships)
     .where(eq(memberships.userId, userId));
-  return getTreeForFamilies(fams.map((f) => f.familyId));
+  return getTreeForChronicles(fams.map((f) => f.chronicleId));
 }
 
-/** People in one family's tree (for pickers / People tab). */
-export async function listFamilyPeople(familyId: string) {
+/** People in one chronicle's tree (for pickers / People tab). */
+export async function listChroniclePeople(chronicleId: string) {
   return db
     .select({
       id: people.id,
@@ -320,9 +325,9 @@ export async function listFamilyPeople(familyId: string) {
       bornOn: people.bornOn,
       diedOn: people.diedOn,
     })
-    .from(familyMembers)
-    .innerJoin(people, eq(familyMembers.personId, people.id))
-    .where(eq(familyMembers.familyId, familyId))
+    .from(chronicleMembers)
+    .innerJoin(people, eq(chronicleMembers.personId, people.id))
+    .where(eq(chronicleMembers.chronicleId, chronicleId))
     .orderBy(people.displayName);
 }
 

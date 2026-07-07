@@ -1,10 +1,10 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { applyStoryEdit, resetStoryForRetry, shareStoryToFamily } from '@/lib/stories';
+import { applyStoryEdit, resetStoryForRetry, shareStoryToChronicle } from '@/lib/stories';
 import { enqueueStyle } from '@/lib/queue';
 import { requireUser } from '@/lib/session';
-import { getMembership } from '@/lib/families';
+import { getMembership } from '@/lib/chronicles';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 
 /** Re-queue a failed story for styling and refresh its detail page. */
@@ -38,13 +38,13 @@ export async function updateStoryDetails(input: {
   return result;
 }
 
-/** Share an existing story into another family (requires contributor+ in the target). */
-export async function shareStory(storyId: string, familyId: string) {
+/** Share an existing story into another chronicle (requires contributor+ in the target). */
+export async function shareStory(storyId: string, chronicleId: string) {
   const user = await requireUser();
-  const membership = await getMembership(familyId, user.id);
+  const membership = await getMembership(chronicleId, user.id);
   if (!membership || !canContribute(membership.accessRole as AccessRole)) {
-    throw new Error('You cannot share into that family.');
+    throw new Error('You cannot share into that chronicle.');
   }
-  await shareStoryToFamily(storyId, familyId, user.id);
+  await shareStoryToChronicle(storyId, chronicleId, user.id);
   revalidatePath(`/stories/${storyId}`);
 }
