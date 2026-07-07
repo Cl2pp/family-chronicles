@@ -25,7 +25,8 @@ const schema = z.object({
   // AI — transcription via Groq Whisper
   GROQ_API_KEY: z.string().min(1),
   TRANSCRIBE_MODEL: z.string().default('whisper-large-v3-turbo'),
-  GROQ_BASE_URL: z.string().url().default('https://api.groq.com/openai/v1'),
+  // Root URL only — groq-sdk appends /openai/v1 to its request paths itself.
+  GROQ_BASE_URL: z.string().url().default('https://api.groq.com'),
 
   // Object storage (S3-compatible)
   S3_ENDPOINT: z.string().url(),
