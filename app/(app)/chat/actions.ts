@@ -3,7 +3,7 @@
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/session';
-import { resolveActiveChronicle, getMembership } from '@/lib/chronicles';
+import { resolveActiveChronicle, getChronicle, getMembership } from '@/lib/chronicles';
 import {
   addAttachments,
   addMessage,
@@ -15,7 +15,8 @@ import {
 } from '@/lib/conversations';
 import { runAgent, type ChatTurn } from '@/lib/ai/agent';
 import type { Receipt, StoryDraft, StoryProposal, ToolContext, UndoAction } from '@/lib/ai/tools';
-import { addStoryAssets, applyStoryEdit, createStory } from '@/lib/stories';
+import { addStoryAssets, applyStoryEdit, createStory, listChronicleStoryTexts } from '@/lib/stories';
+import { normalizeText } from '@/lib/story-similarity';
 import {
   canUserEditPerson,
   deletePerson,
@@ -100,13 +101,26 @@ async function respondAndStore(
 ): Promise<SendResult> {
   const stored = await listMessages(conversationId);
   const history: ChatTurn[] = stored
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+    .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
+    .map((m) => ({ role: m.role as ChatTurn['role'], content: m.content }));
 
   const result = await runAgent(history, ctx);
   // Persist receipts on the assistant message so the ✓ chips survive a reload.
   const metadata = result.receipts.length ? { receipts: result.receipts } : undefined;
   await addMessage(conversationId, 'assistant', result.reply, metadata);
+  // Record the draft card as a system event so later turns know it exists and
+  // that only the user can act on it (prevents "should I save it?" re-drafts).
+  if (result.storyDraft) {
+    const draftTitle = result.storyDraft.proposal.title;
+    await addMessage(
+      conversationId,
+      'system',
+      `[A story draft card "${draftTitle}" is now showing. Only the user can save or discard it ` +
+        'on the card; a note will appear here once they do. Do not draft it again or offer to save it. ' +
+        'Exception: if no saved/discarded note ever appears and the user asks about this story again, ' +
+        'the card was lost (e.g. page reload) — draft it afresh then.]',
+    );
+  }
 
   // A tool may have created/switched the active chronicle — persist it to the cookie.
   if (ctx.activeChronicleId && ctx.activeChronicleId !== previousChronicleId) {
@@ -224,6 +238,21 @@ export async function acceptStory(input: {
   await assertContributor(input.chronicleId, user.id);
   const p = input.proposal;
 
+  // Only trust the conversation id if that conversation belongs to the caller.
+  const convo = input.conversationId ? await getConversation(input.conversationId) : null;
+  const conversationId = convo && convo.userId === user.id ? convo.id : null;
+
+  // Idempotency guard: an identical story of mine in this chronicle means this exact
+  // draft was already accepted (e.g. a re-shown card) — return it instead of duplicating.
+  const existing = await listChronicleStoryTexts(input.chronicleId);
+  const duplicate = existing.find(
+    (s) =>
+      s.submittedBy === user.id &&
+      normalizeText(s.title) === normalizeText(p.title || 'Untitled story') &&
+      normalizeText(s.bodyStyled ?? s.bodyOriginal ?? '') === normalizeText(p.body),
+  );
+  if (duplicate) return { storyId: duplicate.id };
+
   // Resolve any named people to existing tree members in this chronicle (best-effort).
   let personIds: string[] = [];
   if (p.people?.length) {
@@ -244,15 +273,29 @@ export async function acceptStory(input: {
     status: 'ready',
     eventDate: yearToDate(p.eventYear),
     eventDatePrecision: p.eventYear ? 'year' : null,
-    conversationId: input.conversationId,
+    conversationId,
     chronicleIds: [input.chronicleId],
     personIds,
   });
 
   // Carry the chat's raw uploads (voice + photos) onto the story for traceability.
-  if (input.conversationId) {
-    const attachments = await listConversationAttachments(input.conversationId);
+  if (conversationId) {
+    const attachments = await listConversationAttachments(conversationId);
     await addStoryAssets(story.id, attachments);
+    // The receipt on the note renders as a persistent ✓ chip in the chat.
+    const chronicle = await getChronicle(input.chronicleId);
+    const receipt: Receipt = {
+      label: `Saved "${story.title}"${chronicle ? ` to ${chronicle.name}` : ''}`,
+      detail: 'View story',
+      href: `/stories/${story.id}`,
+    };
+    await addMessage(
+      conversationId,
+      'system',
+      `[The user accepted the draft card and saved "${story.title}" as a story (id ${story.id}). ` +
+        'It is already stored — do not draft or save it again.]',
+      { receipts: [receipt] },
+    );
   }
 
   revalidatePath('/stories');
@@ -263,6 +306,7 @@ export async function acceptStory(input: {
 export async function applyStoryUpdate(input: {
   storyId: string;
   proposal: StoryProposal;
+  conversationId?: string | null;
 }): Promise<{ storyId: string }> {
   const user = await requireUser();
   const p = input.proposal;
@@ -276,7 +320,39 @@ export async function applyStoryUpdate(input: {
   });
   if (!result.ok) throw new Error(result.error);
 
+  // Only write the note if the conversation belongs to the caller.
+  const convo = input.conversationId ? await getConversation(input.conversationId) : null;
+  if (convo && convo.userId === user.id) {
+    const receipt: Receipt = {
+      label: `Updated "${p.title}"`,
+      detail: 'View story',
+      href: `/stories/${input.storyId}`,
+    };
+    await addMessage(
+      convo.id,
+      'system',
+      `[The user accepted the revision card — the story "${p.title}" (id ${input.storyId}) is updated.]`,
+      { receipts: [receipt] },
+    );
+  }
+
   revalidatePath('/stories');
   revalidatePath(`/stories/${input.storyId}`);
   return { storyId: input.storyId };
+}
+
+/** Record that the user discarded a draft card, so the agent doesn't assume it was saved. */
+export async function discardStoryDraft(input: {
+  conversationId: string;
+  title: string;
+}): Promise<void> {
+  const user = await requireUser();
+  const convo = await getConversation(input.conversationId);
+  if (!convo || convo.userId !== user.id) return;
+  await addMessage(
+    input.conversationId,
+    'system',
+    `[The user discarded the story draft card "${input.title}" without saving. Do not save it; ` +
+      'if they want a story about this later, draft a fresh card.]',
+  );
 }

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Button, Card, Group, Text, TextInput, Textarea } from '@mantine/core';
 import { IconSparkles } from '@tabler/icons-react';
 import type { StoryDraft } from '@/lib/ai/tools';
-import { acceptStory, applyStoryUpdate } from './actions';
+import { acceptStory, applyStoryUpdate, discardStoryDraft } from './actions';
 import type { MsgResult } from './types';
 
 /** Editable story draft (new or a revision) proposed by the assistant, with accept/discard. */
@@ -29,20 +29,37 @@ export function StoryDraftCard({
   const [body, setBody] = useState(proposal.body);
   const [year, setYear] = useState(proposal.eventYear ? String(proposal.eventYear) : '');
 
+  async function discard() {
+    // Tell the conversation first so the note can't race the user's next message;
+    // discard locally even if it fails. Use the draft's original title so the note
+    // matches the "card is showing" one.
+    if (conversationId) {
+      setBusy(true);
+      try {
+        await discardStoryDraft({ conversationId, title: proposal.title });
+      } catch {
+        // best-effort — the local discard still applies
+      } finally {
+        setBusy(false);
+      }
+    }
+    onDiscard();
+  }
+
   async function accept() {
     setBusy(true);
     try {
       const edited = { ...proposal, title, body, eventYear: year ? Number(year) : null };
       if (updateStoryId) {
-        const res = await applyStoryUpdate({ storyId: updateStoryId, proposal: edited });
-        onResult({ kind: 'story-update', storyId: res.storyId, chronicleName });
+        const res = await applyStoryUpdate({ storyId: updateStoryId, proposal: edited, conversationId });
+        onResult({ kind: 'story-update', storyId: res.storyId, chronicleName, title });
       } else {
         const res = await acceptStory({
           conversationId: conversationId ?? '',
           chronicleId,
           proposal: edited,
         });
-        onResult({ kind: 'story', storyId: res.storyId, chronicleName });
+        onResult({ kind: 'story', storyId: res.storyId, chronicleName, title });
       }
     } finally {
       setBusy(false);
@@ -88,7 +105,7 @@ export function StoryDraftCard({
         <Button size="xs" onClick={accept} loading={busy}>
           {isUpdate ? 'Save changes' : 'Accept & save'}
         </Button>
-        <Button size="xs" variant="default" onClick={onDiscard} disabled={busy}>
+        <Button size="xs" variant="default" onClick={discard} disabled={busy}>
           Discard
         </Button>
       </Group>
