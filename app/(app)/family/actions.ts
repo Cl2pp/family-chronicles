@@ -7,12 +7,14 @@ import { requireUser } from '@/lib/session';
 import { createFamily, requireContributor, requireOwner, updateFamily } from '@/lib/families';
 import {
   addPersonToFamily,
+  canUserEditPerson,
   connectPeople,
   createPerson,
   deletePerson,
   edgeForRelation,
   getPerson,
   isPersonInFamily,
+  removeRelationship,
   updatePerson,
   type Gender,
   type PersonRelation,
@@ -127,6 +129,28 @@ export async function editPersonAction(input: {
     diedPrecision: diedYear !== undefined ? 'year' : null,
   });
 
+  revalidatePath('/family');
+}
+
+/** Remove a single kinship edge between two people the user may edit. Contributor+. */
+export async function removeRelationshipAction(input: {
+  type: 'parent' | 'spouse';
+  personFromId: string;
+  personToId: string;
+}) {
+  const user = await requireUser();
+
+  // The tree is merged across families, so authorize per person: the user must be
+  // able to contribute to a family containing each endpoint.
+  const [canFrom, canTo] = await Promise.all([
+    canUserEditPerson(user.id, input.personFromId),
+    canUserEditPerson(user.id, input.personToId),
+  ]);
+  if (!canFrom || !canTo) {
+    throw new Error('You do not have permission to change this connection.');
+  }
+
+  await removeRelationship(input);
   revalidatePath('/family');
 }
 

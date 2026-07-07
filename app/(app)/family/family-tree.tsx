@@ -10,6 +10,7 @@ import {
   useTransition,
 } from 'react';
 import {
+  ActionIcon,
   Avatar,
   Box,
   Button,
@@ -32,9 +33,10 @@ import {
   IconLink,
   IconPencil,
   IconPlus,
+  IconUnlink,
 } from '@tabler/icons-react';
 import type { Gender, PersonRelation, TreeEdge, TreePerson } from '@/lib/people';
-import { relatePeopleAction } from './actions';
+import { relatePeopleAction, removeRelationshipAction } from './actions';
 import { DeletePersonButton } from './delete-person-button';
 import type { AddTarget } from './types';
 
@@ -129,7 +131,7 @@ export function FamilyTree({
   }, [people]);
 
   // Build adjacency + generation layout.
-  const { rows, validEdges } = useMemo(() => {
+  const { rows, validEdges, margins } = useMemo(() => {
     const ids = new Set(people.map((p) => p.id));
     const parentsOf = new Map<string, string[]>();
     const spousesOf = new Map<string, string[]>();
@@ -182,6 +184,7 @@ export function FamilyTree({
 
     const sortedGens = [...new Set([...gen.values()])].sort((a, b) => a - b);
     const genOrder = new Map<number, string[]>();
+    const compsByGen = new Map<number, string[][]>();
     const nameOf = (id: string) => peopleById.get(id)?.displayName ?? '';
 
     for (const g of sortedGens) {
@@ -218,11 +221,56 @@ export function FamilyTree({
         comp.sort((a, b) => keyOf(a) - keyOf(b) || nameOf(a).localeCompare(nameOf(b)));
         comps.push(comp);
       }
-      const compKey = (comp: string[]) => Math.min(...comp.map(keyOf));
+      // Order groups by the barycenter (average) of their members' parent positions.
+      // Using the minimum instead would let a couple that straddles two families
+      // claim the leftmost slot and push a sibling in between another family's
+      // children, making the connector lines cross.
+      const compKey = (comp: string[]) => {
+        const keys = comp.map(keyOf).filter((k) => k < 1e9);
+        return keys.length ? keys.reduce((s, v) => s + v, 0) / keys.length : 1e9;
+      };
       comps.sort(
         (a, b) => compKey(a) - compKey(b) || nameOf(a[0]).localeCompare(nameOf(b[0])),
       );
+      compsByGen.set(g, comps);
       genOrder.set(g, comps.flat());
+    }
+
+    // Horizontal placement: rows are NOT centered independently — that would put a
+    // lone child in the middle of the page instead of below their parents. Each
+    // spouse-group is placed under the average position of its members' parents,
+    // greedily left-to-right so row order and minimum spacing are preserved. The
+    // resulting offsets are applied as marginLeft on the cards.
+    const H_GAP = 24;
+    const colW = CARD_WIDTH + H_GAP;
+    const centerXById = new Map<string, number>();
+    const marginById = new Map<string, number>();
+    for (const g of sortedGens) {
+      let cursor = 0; // minimum left edge for the next group
+      let flow = 0; // left edge the next card would get with zero margins
+      for (const comp of compsByGen.get(g) ?? []) {
+        const desires: number[] = [];
+        comp.forEach((id, k) => {
+          const ps = (parentsOf.get(id) ?? [])
+            .map((pid) => centerXById.get(pid))
+            .filter((v): v is number => v !== undefined);
+          if (ps.length) {
+            const want = ps.reduce((s, v) => s + v, 0) / ps.length;
+            desires.push(want - (k * colW + CARD_WIDTH / 2));
+          }
+        });
+        const desired = desires.length
+          ? desires.reduce((s, v) => s + v, 0) / desires.length
+          : cursor;
+        const start = Math.max(cursor, desired);
+        comp.forEach((id, k) => {
+          const left = start + k * colW;
+          centerXById.set(id, left + CARD_WIDTH / 2);
+          marginById.set(id, left - flow);
+          flow = left + CARD_WIDTH;
+        });
+        cursor = start + comp.length * colW;
+      }
     }
 
     const builtRows = sortedGens.map((g) => ({
@@ -230,7 +278,7 @@ export function FamilyTree({
       ids: genOrder.get(g) ?? [],
     }));
 
-    return { rows: builtRows, validEdges: valid };
+    return { rows: builtRows, validEdges: valid, margins: marginById };
   }, [people, edges, peopleById]);
 
   const measure = useCallback(() => {
@@ -256,17 +304,42 @@ export function FamilyTree({
 
     const parents: string[] = [];
     const spouses: { x1: number; x2: number; y: number }[] = [];
+    const parentPosOfChild = new Map<string, Pos[]>();
     for (const e of validEdges) {
       const a = pos.get(e.from);
       const b = pos.get(e.to);
       if (!a || !b) continue;
       if (e.type === 'parent') {
-        const midY = (a.bottom + b.top) / 2;
-        parents.push(`M ${a.cx} ${a.bottom} V ${midY} H ${b.cx} V ${b.top}`);
+        const arr = parentPosOfChild.get(e.to) ?? [];
+        arr.push(a);
+        parentPosOfChild.set(e.to, arr);
       } else {
         const [l, r] = a.cx <= b.cx ? [a, b] : [b, a];
         const y = (l.midY + r.midY) / 2;
         spouses.push({ x1: l.right, x2: r.left, y });
+      }
+    }
+
+    // Parent connectors. When both parents sit side by side, drop ONE line from
+    // the middle of the couple (the spouse bar) — two separate elbows read as if
+    // the child descended from several couples at once.
+    for (const [childId, pps] of parentPosOfChild) {
+      const child = pos.get(childId);
+      if (!child) continue;
+      const sideBySide =
+        pps.length === 2 &&
+        Math.abs(pps[0].midY - pps[1].midY) < 4 &&
+        Math.abs(pps[0].cx - pps[1].cx) < CARD_WIDTH * 2;
+      if (sideBySide) {
+        const x = (pps[0].cx + pps[1].cx) / 2;
+        const startY = (pps[0].midY + pps[1].midY) / 2;
+        const busY = (Math.max(pps[0].bottom, pps[1].bottom) + child.top) / 2;
+        parents.push(`M ${x} ${startY} V ${busY} H ${child.cx} V ${child.top}`);
+      } else {
+        for (const p of pps) {
+          const busY = (p.bottom + child.top) / 2;
+          parents.push(`M ${p.cx} ${p.bottom} V ${busY} H ${child.cx} V ${child.top}`);
+        }
       }
     }
 
@@ -299,6 +372,7 @@ export function FamilyTree({
   }, [measure]);
 
   const selected = selectedId ? peopleById.get(selectedId) : undefined;
+  const [unlinking, startUnlink] = useTransition();
   // Edits/links act on the active family, so the person must be one of its members.
   const canEditSelected =
     canEdit && !!selected && selected.familyIds.includes(activeFamilyId);
@@ -312,10 +386,57 @@ export function FamilyTree({
     [people, selected, activeFamilyId],
   );
 
+  // The selected person's existing edges, labelled from their point of view.
+  const connections = useMemo(() => {
+    if (!selectedId) return [];
+    const rows: { label: string; other: TreePerson; edge: TreeEdge }[] = [];
+    for (const e of validEdges) {
+      let label: string | null = null;
+      let otherId: string | null = null;
+      if (e.type === 'parent' && e.to === selectedId) {
+        label = 'Parent';
+        otherId = e.from;
+      } else if (e.type === 'parent' && e.from === selectedId) {
+        label = 'Child';
+        otherId = e.to;
+      } else if (e.type === 'spouse' && (e.from === selectedId || e.to === selectedId)) {
+        label = 'Partner';
+        otherId = e.from === selectedId ? e.to : e.from;
+      }
+      const other = otherId ? peopleById.get(otherId) : undefined;
+      if (label && other) rows.push({ label, other, edge: e });
+    }
+    const order: Record<string, number> = { Parent: 0, Partner: 1, Child: 2 };
+    rows.sort(
+      (a, b) =>
+        (order[a.label] ?? 9) - (order[b.label] ?? 9) ||
+        a.other.displayName.localeCompare(b.other.displayName),
+    );
+    return rows;
+  }, [selectedId, validEdges, peopleById]);
+
   function selectPerson(id: string | null) {
     setSelectedId(id);
     setLinkRelation('parent');
     setLinkPersonId(null);
+  }
+
+  function handleUnlink(edge: TreeEdge) {
+    startUnlink(async () => {
+      try {
+        await removeRelationshipAction({
+          type: edge.type,
+          personFromId: edge.from,
+          personToId: edge.to,
+        });
+        notifications.show({ message: 'Connection removed' });
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : 'Could not remove the connection',
+        });
+      }
+    });
   }
 
   function handleLink() {
@@ -399,9 +520,18 @@ export function FamilyTree({
             </svg>
           )}
 
-          <Stack gap={56} style={{ position: 'relative', zIndex: 1, minWidth: 'fit-content' }}>
+          <Stack
+            gap={56}
+            style={{
+              position: 'relative',
+              zIndex: 1,
+              minWidth: 'fit-content',
+              width: 'fit-content',
+              margin: '0 auto',
+            }}
+          >
             {rows.map((row) => (
-              <Group key={row.gen} justify="center" gap="lg" wrap="nowrap" align="flex-start">
+              <Group key={row.gen} gap={0} wrap="nowrap" align="flex-start">
                 {row.ids.map((id) => {
                   const person = peopleById.get(id);
                   if (!person) return null;
@@ -421,6 +551,7 @@ export function FamilyTree({
                         position: 'relative',
                         width: CARD_WIDTH,
                         flex: '0 0 auto',
+                        marginLeft: margins.get(id) ?? 0,
                         cursor: 'pointer',
                         borderColor: isMe ? 'var(--mantine-color-brand-6)' : undefined,
                         borderWidth: isMe ? 2 : undefined,
@@ -544,6 +675,39 @@ export function FamilyTree({
               </Button>
             )}
 
+            {connections.length > 0 && (
+              <Stack gap="xs" mt="md">
+                <Text size="sm" fw={600}>
+                  Connections
+                </Text>
+                {connections.map(({ label, other, edge }) => (
+                  <Group
+                    key={`${edge.type}-${edge.from}-${edge.to}-${label}`}
+                    justify="space-between"
+                    wrap="nowrap"
+                  >
+                    <Text size="sm">
+                      <Text span c="dimmed">
+                        {label}:{' '}
+                      </Text>
+                      {other.displayName}
+                    </Text>
+                    {canEditSelected && (
+                      <ActionIcon
+                        variant="subtle"
+                        color="red"
+                        aria-label={`Remove ${label.toLowerCase()} connection to ${other.displayName}`}
+                        loading={unlinking}
+                        onClick={() => handleUnlink(edge)}
+                      >
+                        <IconUnlink size={16} />
+                      </ActionIcon>
+                    )}
+                  </Group>
+                ))}
+              </Stack>
+            )}
+
             {canEditSelected && (
               <Stack gap="xs" mt="md">
                 <Text size="sm" fw={600}>
@@ -552,6 +716,7 @@ export function FamilyTree({
                 <Button
                   variant="light"
                   leftSection={<IconArrowUp size={16} />}
+                  disabled={connections.filter((c) => c.label === 'Parent').length >= 2}
                   onClick={() =>
                     onAddPerson({
                       personId: selected.id,
@@ -562,6 +727,11 @@ export function FamilyTree({
                 >
                   Add parent
                 </Button>
+                {connections.filter((c) => c.label === 'Parent').length >= 2 && (
+                  <Text size="xs" c="dimmed">
+                    Both parents are set — remove one above to change them.
+                  </Text>
+                )}
                 <Button
                   variant="light"
                   leftSection={<IconArrowDown size={16} />}

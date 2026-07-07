@@ -172,18 +172,46 @@ export async function connectPeople(input: {
 }) {
   // Canonicalise spouse edges (smaller id first) to dedupe symmetric pairs.
   let { personFromId, personToId } = input;
+  if (personFromId === personToId) {
+    throw new Error('A person cannot be related to themselves.');
+  }
   if (input.type === 'spouse' && personFromId > personToId) {
     [personFromId, personToId] = [personToId, personFromId];
   }
-  await db
-    .insert(relationships)
-    .values({
-      type: input.type,
-      personFromId,
-      personToId,
-      createdBy: input.createdBy,
-    })
-    .onConflictDoNothing();
+
+  await db.transaction(async (tx) => {
+    const existing = await tx.query.relationships.findFirst({
+      where: and(
+        eq(relationships.type, input.type),
+        eq(relationships.personFromId, personFromId),
+        eq(relationships.personToId, personToId),
+      ),
+    });
+    if (existing) return; // idempotent — the edge is already there
+
+    if (input.type === 'parent') {
+      const parents = await tx
+        .select({ id: relationships.personFromId })
+        .from(relationships)
+        .where(and(eq(relationships.type, 'parent'), eq(relationships.personToId, personToId)));
+      if (parents.length >= 2) {
+        const child = await tx.query.people.findFirst({ where: eq(people.id, personToId) });
+        throw new Error(
+          `${child?.displayName ?? 'This person'} already has two parents — remove one of the existing parent links first.`,
+        );
+      }
+    }
+
+    await tx
+      .insert(relationships)
+      .values({
+        type: input.type,
+        personFromId,
+        personToId,
+        createdBy: input.createdBy,
+      })
+      .onConflictDoNothing();
+  });
 }
 
 export interface TreePerson {

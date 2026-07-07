@@ -12,6 +12,7 @@ import {
   editPersonTool,
   getFamilyTreeTool,
   relatePeopleTool,
+  unrelatePeopleTool,
 } from './people';
 import {
   draftStoryTool,
@@ -37,6 +38,7 @@ export const tools: Tool[] = [
   switchFamilyTool,
   addPersonTool,
   relatePeopleTool,
+  unrelatePeopleTool,
   editPersonTool,
   deletePersonTool,
   updateFamilySettingsTool,
