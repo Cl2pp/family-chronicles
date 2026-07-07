@@ -35,6 +35,7 @@ export function AddPersonModal({
     initialValues: {
       displayName: '',
       familyName: '',
+      birthFamilyName: '',
       gender: null as Gender | null,
       bornYear: '',
       diedYear: '',
@@ -60,6 +61,7 @@ export function AddPersonModal({
           chronicleId,
           displayName: values.displayName,
           familyName: values.familyName || undefined,
+          birthFamilyName: values.birthFamilyName || undefined,
           gender: values.gender,
           bornYear: values.bornYear ? Number(values.bornYear) : undefined,
           diedYear: values.diedYear ? Number(values.diedYear) : undefined,
@@ -92,6 +94,11 @@ export function AddPersonModal({
             label="Family name (surname)"
             placeholder="Optional"
             {...form.getInputProps('familyName')}
+          />
+          <TextInput
+            label="Birth name (surname at birth)"
+            placeholder="Optional — if it changed, e.g. at marriage"
+            {...form.getInputProps('birthFamilyName')}
           />
           <Select
             label="Gender"

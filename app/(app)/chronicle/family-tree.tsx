@@ -37,6 +37,7 @@ import {
   IconUnlink,
 } from '@tabler/icons-react';
 import type { Gender, PersonRelation, TreeEdge, TreePerson } from '@/lib/people';
+import { birthSurname, personFullName } from '@/lib/person-name';
 import { relatePeopleAction, removeRelationshipAction } from './actions';
 import { DeletePersonButton } from './delete-person-button';
 import type { AddTarget } from './types';
@@ -383,7 +384,7 @@ export function FamilyTree({
       selected
         ? people
             .filter((p) => p.id !== selected.id && p.chronicleIds.includes(activeChronicleId))
-            .map((p) => ({ value: p.id, label: p.displayName }))
+            .map((p) => ({ value: p.id, label: personFullName(p) }))
         : [],
     [people, selected, activeChronicleId],
   );
@@ -443,7 +444,8 @@ export function FamilyTree({
 
   function handleLink() {
     if (!selected || !linkPersonId) return;
-    const relativeName = peopleById.get(linkPersonId)?.displayName ?? 'them';
+    const relative = peopleById.get(linkPersonId);
+    const relativeName = relative ? personFullName(relative) : 'them';
     startLinking(async () => {
       try {
         await relatePeopleAction({
@@ -454,7 +456,7 @@ export function FamilyTree({
         });
         const label = LINK_RELATIONS.find((r) => r.value === linkRelation)?.label;
         notifications.show({
-          message: `Linked: ${selected.displayName} ${label} ${relativeName}.`,
+          message: `Linked: ${personFullName(selected)} ${label} ${relativeName}.`,
         });
         setLinkPersonId(null);
       } catch (e) {
@@ -574,11 +576,16 @@ export function FamilyTree({
                       )}
                       <Stack align="center" gap={6}>
                         <Avatar radius="xl" size={48} color={isMe ? 'brand' : 'slate'}>
-                          {initials(person.displayName)}
+                          {initials(personFullName(person))}
                         </Avatar>
                         <Text fw={600} size="sm" ta="center" lineClamp={2}>
-                          {person.displayName}
+                          {personFullName(person)}
                         </Text>
+                        {birthSurname(person) && (
+                          <Text size="xs" c="dimmed" fs="italic" ta="center">
+                            (born {birthSurname(person)})
+                          </Text>
+                        )}
                         {lifeSpan(person) && (
                           <Text size="xs" c="dimmed">
                             {lifeSpan(person)}
@@ -627,13 +634,18 @@ export function FamilyTree({
                   size={56}
                   color={selected.userId === currentUserId ? 'brand' : 'slate'}
                 >
-                  {initials(selected.displayName)}
+                  {initials(personFullName(selected))}
                 </Avatar>
                 <div>
                   <Group gap={6} wrap="nowrap">
-                    <Title order={4}>{selected.displayName}</Title>
+                    <Title order={4}>{personFullName(selected)}</Title>
                     {selected.gender && <GenderIcon gender={selected.gender} size={18} />}
                   </Group>
+                  {birthSurname(selected) && (
+                    <Text size="sm" c="dimmed" fs="italic">
+                      born {birthSurname(selected)}
+                    </Text>
+                  )}
                   {lifeSpan(selected) && (
                     <Text size="sm" c="dimmed">
                       {lifeSpan(selected)}
@@ -645,7 +657,7 @@ export function FamilyTree({
                 <DeletePersonButton
                   chronicleId={activeChronicleId}
                   personId={selected.id}
-                  name={selected.displayName}
+                  name={personFullName(selected)}
                 />
               )}
             </Group>
@@ -656,6 +668,14 @@ export function FamilyTree({
                   Family name:{' '}
                 </Text>
                 {selected.familyName}
+              </Text>
+            )}
+            {birthSurname(selected) && (
+              <Text size="sm">
+                <Text span c="dimmed">
+                  Birth name:{' '}
+                </Text>
+                {birthSurname(selected)}
               </Text>
             )}
             {selected.familyTags.length > 0 && (
@@ -723,13 +743,13 @@ export function FamilyTree({
                       <Text span c="dimmed">
                         {label}:{' '}
                       </Text>
-                      {other.displayName}
+                      {personFullName(other)}
                     </Text>
                     {canEditSelected && (
                       <ActionIcon
                         variant="subtle"
                         color="red"
-                        aria-label={`Remove ${label.toLowerCase()} connection to ${other.displayName}`}
+                        aria-label={`Remove ${label.toLowerCase()} connection to ${personFullName(other)}`}
                         loading={unlinking}
                         onClick={() => handleUnlink(edge)}
                       >
@@ -753,7 +773,7 @@ export function FamilyTree({
                   onClick={() =>
                     onAddPerson({
                       personId: selected.id,
-                      personName: selected.displayName,
+                      personName: personFullName(selected),
                       relation: 'parent',
                     })
                   }
@@ -771,7 +791,7 @@ export function FamilyTree({
                   onClick={() =>
                     onAddPerson({
                       personId: selected.id,
-                      personName: selected.displayName,
+                      personName: personFullName(selected),
                       relation: 'child',
                     })
                   }
@@ -784,7 +804,7 @@ export function FamilyTree({
                   onClick={() =>
                     onAddPerson({
                       personId: selected.id,
-                      personName: selected.displayName,
+                      personName: personFullName(selected),
                       relation: 'partner',
                     })
                   }
@@ -803,7 +823,7 @@ export function FamilyTree({
                   aria-label="Relationship"
                   data={LINK_RELATIONS.map((r) => ({
                     value: r.value,
-                    label: `${selected.displayName} ${r.label}…`,
+                    label: `${personFullName(selected)} ${r.label}…`,
                   }))}
                   value={linkRelation}
                   onChange={(v) => v && setLinkRelation(v as PersonRelation)}

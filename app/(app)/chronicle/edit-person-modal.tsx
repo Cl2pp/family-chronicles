@@ -32,6 +32,7 @@ export function EditPersonModal({
     initialValues: {
       displayName: '',
       familyName: '',
+      birthFamilyName: '',
       gender: null as Gender | null,
       bornYear: '',
       diedYear: '',
@@ -48,6 +49,7 @@ export function EditPersonModal({
       form.setValues({
         displayName: person.displayName,
         familyName: person.familyName ?? '',
+        birthFamilyName: person.birthFamilyName ?? '',
         gender: person.gender,
         bornYear: yearOf(person.bornOn),
         diedYear: yearOf(person.diedOn),
@@ -65,6 +67,7 @@ export function EditPersonModal({
           personId: person.id,
           displayName: values.displayName,
           familyName: values.familyName.trim() || null,
+          birthFamilyName: values.birthFamilyName.trim() || null,
           gender: values.gender,
           bornYear: values.bornYear ? Number(values.bornYear) : null,
           diedYear: values.diedYear ? Number(values.diedYear) : null,
@@ -89,6 +92,11 @@ export function EditPersonModal({
             label="Family name (surname)"
             placeholder="Optional"
             {...form.getInputProps('familyName')}
+          />
+          <TextInput
+            label="Birth name (surname at birth)"
+            placeholder="Optional — if it changed, e.g. at marriage"
+            {...form.getInputProps('birthFamilyName')}
           />
           <Select
             label="Gender"
