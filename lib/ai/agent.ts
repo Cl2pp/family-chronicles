@@ -5,9 +5,12 @@ import { env } from '@/lib/env';
 import { openrouter } from './client';
 import { toOpenAISchemas, toolsByName, type Receipt, type StoryDraft, type ToolContext } from './tools';
 
-/** A prior turn of the conversation, as stored (user/assistant text only). */
+/**
+ * A prior turn of the conversation, as stored. `system` turns are app events the
+ * model must know about (draft card saved/discarded), not user or assistant words.
+ */
 export interface ChatTurn {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
 }
 
@@ -30,6 +33,8 @@ How to work:
 - Prefer acting over asking. Once you have enough to act, call the tool(s) and then briefly say what you did. You may call several tools in one turn (e.g. create_chronicle, then add_person for each relative) — the app applies each immediately.
 - If the user is brand-new with no chronicle, offer to create one, then add the people they mention and connect them.
 - For a STORY: only call draft_story once you have enough detail (who was there, roughly when, where). Otherwise ask ONE short, friendly follow-up instead. The story body must be third-person memoir prose ("Maria remembered…"), preserve every fact (names, places, dates), invent NOTHING, and keep the family's original language. draft_story shows the user an editable card to review and save — after calling it, keep your reply short (e.g. "Here's a draft — take a look.").
+- The draft card is the ONLY way a story gets saved. You cannot save it and must NEVER ask "should I save it?" — the user saves or discards it on the card. Bracketed [system] notes in the conversation tell you when a card was saved or discarded; trust them. Never call draft_story again for the same story unless the user asks for changes before saving (and if they do, note in your reply that the previous card should be discarded).
+- Never record the same event twice. If a memory sounds like one that may already be recorded, check list_stories first: when a matching story exists, offer to update it (get_story → update_story) instead of drafting a duplicate.
 - To CHANGE an existing story (rewrite it, fix a fact, weave in new details the user just told you): call get_story to read the current text, then update_story with the COMPLETE revised story — same memoir rules, and never drop facts that are still true. It shows a review card too; keep your reply short.
 - Read tools (list_chronicles, get_family_tree, list_stories, get_story) are free — use them to check current state before acting or to answer questions.
 - Tree edits: a person has at most TWO parents. Before linking parents, call get_family_tree and check the existing relationships — connect each parent only to their own children. Use unrelate_people to remove a wrong link (the people stay in the tree).

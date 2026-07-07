@@ -3,10 +3,12 @@ import { listChroniclesForUser } from '@/lib/chronicles';
 import {
   canUserEditStory,
   chroniclesForStory,
+  listChronicleStoryTexts,
   listStoriesForUser,
   shareStoryToChronicle,
   type StoryListItem,
 } from '@/lib/stories';
+import { findLikelyDuplicates } from '@/lib/story-similarity';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { defineTool, type ToolContext } from './types';
 import { ensureContributor } from './util';
@@ -35,7 +37,8 @@ export const draftStoryTool = defineTool({
     'Prepare a story draft for the user to review and save. Only call this once you have enough ' +
     'detail (who, roughly when, where). The body MUST be third-person memoir prose ("Maria ' +
     'remembered…"), preserve every fact (names, places, dates), invent NOTHING, and keep the ' +
-    "family's original language. This shows an editable card — it does not save. Keep your reply " +
+    "family's original language. This shows an editable card — it does not save; only the user " +
+    'can save it from the card, so never offer to save it yourself. Keep your reply ' +
     'short afterwards (e.g. "Here\'s a draft — take a look.").',
   schema: z.object({
     title: z.string().min(1).describe('A short, specific title.'),
@@ -43,10 +46,46 @@ export const draftStoryTool = defineTool({
     body: z.string().min(1).describe('The third-person memoir prose.'),
     eventYear: z.number().int().nullish().describe('The year the events happened, if known.'),
     people: z.array(z.string()).describe('Names of people featured in the story.'),
+    confirmedNew: z
+      .boolean()
+      .nullish()
+      .describe(
+        'Set true ONLY after the user has explicitly confirmed this is a separate story, even ' +
+          'though a similar one already exists.',
+      ),
   }),
   async execute(args, ctx) {
     const gate = await ensureContributor(ctx);
     if ('error' in gate) return { ok: false, error: gate.error };
+
+    // Guard against recording the same memory twice: compare against every story
+    // already in this chronicle before showing a new draft card.
+    if (!args.confirmedNew) {
+      const existing = await listChronicleStoryTexts(gate.chronicleId);
+      const duplicates = findLikelyDuplicates(
+        { title: args.title, body: `${args.summary ?? ''} ${args.body}`, eventYear: args.eventYear ?? null },
+        existing.map((s) => ({
+          id: s.id,
+          title: s.title,
+          summary: s.summary,
+          body: s.bodyStyled ?? s.bodyOriginal,
+          eventYear: s.eventDate ? s.eventDate.getUTCFullYear() : null,
+        })),
+      );
+      if (duplicates.length) {
+        const list = duplicates
+          .map((d) => `"${d.title}" (${d.eventYear ?? 'year unknown'}, id ${d.id}) — ${d.reason}`)
+          .join('; ');
+        return {
+          ok: false,
+          error:
+            `This event may already be recorded in this chronicle: ${list}. ` +
+            'Ask the user: if they are adding details or corrections to that story, use get_story ' +
+            'then update_story instead. Only if they confirm it is a genuinely different story, ' +
+            'call draft_story again with confirmedNew: true.',
+        };
+      }
+    }
 
     return {
       ok: true,
@@ -193,15 +232,22 @@ export const updateStoryTool = defineTool({
 export const listStoriesTool = defineTool({
   name: 'list_stories',
   description:
-    'List the user\'s recent stories across all their chronicles (title, status, id). Use to find a ' +
-    'story to share or to answer questions about what has been recorded.',
+    "List the user's recent stories across all their chronicles (title, summary, year, status, id). " +
+    'Use to find a story to share, to answer questions about what has been recorded, or to check ' +
+    'whether an event is already recorded before drafting a new story about it.',
   schema: z.object({}),
   async execute(_args, ctx) {
     const stories = await listStoriesForUser(ctx.userId);
     return {
       ok: true,
       message: JSON.stringify(
-        stories.slice(0, 25).map((s) => ({ id: s.id, title: s.title, status: s.status })),
+        stories.slice(0, 25).map((s) => ({
+          id: s.id,
+          title: s.title,
+          summary: s.summary,
+          eventYear: s.eventDate ? s.eventDate.getUTCFullYear() : null,
+          status: s.status,
+        })),
       ),
     };
   },

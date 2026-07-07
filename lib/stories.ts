@@ -205,6 +205,22 @@ export async function listStoriesForUser(userId: string): Promise<StoryListItem[
   return decorateStories(rows);
 }
 
+/** Lightweight text of every story shared into a chronicle, for duplicate checks. */
+export async function listChronicleStoryTexts(chronicleId: string) {
+  return db
+    .select({
+      id: stories.id,
+      title: stories.title,
+      summary: stories.summary,
+      bodyOriginal: stories.bodyOriginal,
+      bodyStyled: stories.bodyStyled,
+      eventDate: stories.eventDate,
+    })
+    .from(storyChronicles)
+    .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
+    .where(eq(storyChronicles.chronicleId, chronicleId));
+}
+
 /** Chronicles a story is shared into (id + name), for chips. */
 export async function chroniclesForStory(storyId: string) {
   return db

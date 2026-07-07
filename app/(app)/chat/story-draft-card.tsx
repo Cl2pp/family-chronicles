@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Button, Card, Group, Text, TextInput, Textarea } from '@mantine/core';
 import { IconSparkles } from '@tabler/icons-react';
 import type { StoryDraft } from '@/lib/ai/tools';
-import { acceptStory, applyStoryUpdate } from './actions';
+import { acceptStory, applyStoryUpdate, discardStoryDraft } from './actions';
 import type { MsgResult } from './types';
 
 /** Editable story draft (new or a revision) proposed by the assistant, with accept/discard. */
@@ -29,12 +29,18 @@ export function StoryDraftCard({
   const [body, setBody] = useState(proposal.body);
   const [year, setYear] = useState(proposal.eventYear ? String(proposal.eventYear) : '');
 
+  function discard() {
+    onDiscard();
+    // Best-effort: tell the conversation the card was discarded so the agent knows.
+    if (conversationId) void discardStoryDraft({ conversationId, title });
+  }
+
   async function accept() {
     setBusy(true);
     try {
       const edited = { ...proposal, title, body, eventYear: year ? Number(year) : null };
       if (updateStoryId) {
-        const res = await applyStoryUpdate({ storyId: updateStoryId, proposal: edited });
+        const res = await applyStoryUpdate({ storyId: updateStoryId, proposal: edited, conversationId });
         onResult({ kind: 'story-update', storyId: res.storyId, chronicleName });
       } else {
         const res = await acceptStory({
@@ -88,7 +94,7 @@ export function StoryDraftCard({
         <Button size="xs" onClick={accept} loading={busy}>
           {isUpdate ? 'Save changes' : 'Accept & save'}
         </Button>
-        <Button size="xs" variant="default" onClick={onDiscard} disabled={busy}>
+        <Button size="xs" variant="default" onClick={discard} disabled={busy}>
           Discard
         </Button>
       </Group>
