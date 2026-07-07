@@ -32,6 +32,7 @@ export interface PersonRow {
   id: string;
   displayName: string;
   familyName: string | null;
+  birthFamilyName: string | null;
   userId: string | null;
   gender: Gender | null;
   bornOn: Date | string | null;

@@ -73,14 +73,7 @@ export function ChronicleTabs({
   return (
     <Stack gap="lg">
       <Group justify="space-between" align="flex-start">
-        <div>
-          <Title order={2}>{active.name}</Title>
-          {active.description && (
-            <Text c="dimmed" mt={4}>
-              {active.description}
-            </Text>
-          )}
-        </div>
+        <Title order={2}>Family Tree</Title>
         {chronicles.length > 1 && (
           <Select
             aria-label="Active chronicle"

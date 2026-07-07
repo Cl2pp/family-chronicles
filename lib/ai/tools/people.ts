@@ -31,6 +31,10 @@ export const addPersonTool = defineTool({
   schema: z.object({
     displayName: z.string().min(1).describe('The name to show, e.g. "Maria" or "Maria Schmidt".'),
     familyName: z.string().nullish().describe('Optional surname.'),
+    birthFamilyName: z
+      .string()
+      .nullish()
+      .describe('Surname at birth, if it differs from the current surname (e.g. maiden name).'),
     gender: gender.nullish(),
     bornYear: z.number().int().nullish().describe('Birth year, if known.'),
     diedYear: z.number().int().nullish().describe('Death year, if known.'),
@@ -60,6 +64,7 @@ export const addPersonTool = defineTool({
     const person = await createPerson({
       displayName,
       familyName: args.familyName?.trim() || null,
+      birthFamilyName: args.birthFamilyName?.trim() || null,
       gender: args.gender ?? null,
       bornOn: bornYear !== undefined ? yearToDate(bornYear) : null,
       bornPrecision: bornYear !== undefined ? 'year' : null,
@@ -169,12 +174,16 @@ export const editPersonTool = defineTool({
   name: 'edit_person',
   description:
     "Update an existing person in the active chronicle's tree — correct their name, surname, " +
-    'gender, or birth/death year. Pass only the fields to change; pass null to clear a field. ' +
-    'Contributor access required.',
+    'birth name, gender, or birth/death year. Pass only the fields to change; pass null to ' +
+    'clear a field. Contributor access required.',
   schema: z.object({
     name: z.string().min(1).describe('The person to edit (their current name in the tree).'),
     newName: z.string().min(1).nullish().describe('A corrected display name.'),
     familyName: z.string().nullish().describe('A corrected surname (null to clear).'),
+    birthFamilyName: z
+      .string()
+      .nullish()
+      .describe('The surname at birth, e.g. a maiden name (null to clear).'),
     gender: gender.nullish().describe("The person's gender (null to clear)."),
     bornYear: z.number().int().nullish().describe('Corrected birth year (null to clear).'),
     diedYear: z.number().int().nullish().describe('Corrected death year (null to clear).'),
@@ -193,6 +202,9 @@ export const editPersonTool = defineTool({
       patch.displayName = trimmed;
     }
     if (args.familyName !== undefined) patch.familyName = args.familyName?.trim() || null;
+    if (args.birthFamilyName !== undefined) {
+      patch.birthFamilyName = args.birthFamilyName?.trim() || null;
+    }
     if (args.gender !== undefined) patch.gender = args.gender;
     if (args.bornYear !== undefined) {
       const y = parseYear(args.bornYear);
@@ -276,6 +288,7 @@ export const getFamilyTreeTool = defineTool({
         people: tree.people.map((p) => ({
           name: p.displayName,
           familyName: p.familyName,
+          birthFamilyName: p.birthFamilyName,
           familyTags: p.familyTags,
           gender: p.gender,
           born: p.bornOn ? new Date(p.bornOn).getUTCFullYear() : null,

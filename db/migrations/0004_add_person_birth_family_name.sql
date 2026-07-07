@@ -1,0 +1,1 @@
+ALTER TABLE "people" ADD COLUMN "birth_family_name" text;

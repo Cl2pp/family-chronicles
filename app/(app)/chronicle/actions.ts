@@ -50,6 +50,7 @@ export interface AddPersonInput {
   chronicleId: string;
   displayName: string;
   familyName?: string;
+  birthFamilyName?: string;
   gender?: Gender | null;
   bornYear?: number;
   diedYear?: number;
@@ -72,6 +73,7 @@ export async function addPersonAction(input: AddPersonInput) {
   const person = await createPerson({
     displayName,
     familyName: input.familyName?.trim() || null,
+    birthFamilyName: input.birthFamilyName?.trim() || null,
     gender: input.gender ?? null,
     bornOn: bornYear !== undefined ? yearToDate(bornYear) : null,
     bornPrecision: bornYear !== undefined ? 'year' : null,
@@ -103,6 +105,7 @@ export async function editPersonAction(input: {
   personId: string;
   displayName: string;
   familyName?: string | null;
+  birthFamilyName?: string | null;
   gender?: Gender | null;
   bornYear?: number | null;
   diedYear?: number | null;
@@ -122,6 +125,7 @@ export async function editPersonAction(input: {
   await updatePerson(input.personId, {
     displayName,
     familyName: input.familyName?.trim() || null,
+    birthFamilyName: input.birthFamilyName?.trim() || null,
     gender: input.gender ?? null,
     bornOn: bornYear !== undefined ? yearToDate(bornYear) : null,
     bornPrecision: bornYear !== undefined ? 'year' : null,

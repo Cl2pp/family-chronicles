@@ -29,6 +29,13 @@
       "when": 1783424849773,
       "tag": "0003_rename_families_to_chronicles",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783436574127,
+      "tag": "0004_add_person_birth_family_name",
+      "breakpoints": true
     }
   ]
 }

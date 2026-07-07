@@ -94,6 +94,8 @@ export const people = pgTable(
     givenName: text('given_name'),
     /** Surname — the source of derived family tags (see lib/family-tags.ts). */
     familyName: text('family_name'),
+    /** Surname at birth, when it differs from familyName (e.g. name taken at marriage). */
+    birthFamilyName: text('birth_family_name'),
     /** Optional link to an app account (most people never log in). */
     userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
     gender: gender('gender'),

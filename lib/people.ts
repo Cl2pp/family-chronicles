@@ -48,6 +48,7 @@ export interface NewPerson {
   displayName: string;
   givenName?: string | null;
   familyName?: string | null;
+  birthFamilyName?: string | null;
   gender?: Gender | null;
   bornOn?: Date | null;
   bornPrecision?: 'day' | 'month' | 'year' | 'circa' | null;
@@ -67,6 +68,7 @@ export async function createPerson(
         displayName: input.displayName,
         givenName: input.givenName ?? null,
         familyName: input.familyName ?? null,
+        birthFamilyName: input.birthFamilyName ?? null,
         gender: input.gender ?? null,
         bornOn: input.bornOn ?? null,
         bornPrecision: input.bornPrecision ?? null,
@@ -101,6 +103,7 @@ export async function getPerson(id: string) {
 export interface PersonPatch {
   displayName?: string;
   familyName?: string | null;
+  birthFamilyName?: string | null;
   gender?: Gender | null;
   bornOn?: Date | null;
   bornPrecision?: 'day' | 'month' | 'year' | 'circa' | null;
@@ -219,6 +222,7 @@ export interface TreePerson {
   id: string;
   displayName: string;
   familyName: string | null;
+  birthFamilyName: string | null;
   userId: string | null;
   gender: Gender | null;
   bornOn: Date | null;
@@ -269,6 +273,7 @@ async function getTreeForChronicles(chronicleIds: string[]): Promise<FamilyTree>
       id: people.id,
       displayName: people.displayName,
       familyName: people.familyName,
+      birthFamilyName: people.birthFamilyName,
       userId: people.userId,
       gender: people.gender,
       bornOn: people.bornOn,
@@ -320,6 +325,7 @@ export async function listChroniclePeople(chronicleId: string) {
       id: people.id,
       displayName: people.displayName,
       familyName: people.familyName,
+      birthFamilyName: people.birthFamilyName,
       userId: people.userId,
       gender: people.gender,
       bornOn: people.bornOn,
