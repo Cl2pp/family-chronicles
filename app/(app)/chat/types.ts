@@ -6,7 +6,8 @@ export interface ChatAttachment {
 }
 
 export interface Msg {
-  role: 'user' | 'assistant';
+  /** `system` rows carry only receipts (persistent ✓ chips) — no bubble text. */
+  role: 'user' | 'assistant' | 'system';
   content: string;
   attachments?: ChatAttachment[];
   /** Actions the assistant applied this turn (shown as ✓ chips). */
@@ -14,7 +15,7 @@ export interface Msg {
   /** A story draft awaiting the user's review + save. */
   storyDraft?: StoryDraft | null;
   /** Set once a draft on this message has been saved (created or updated). */
-  result?: { kind: 'story' | 'story-update'; storyId: string; chronicleName: string };
+  result?: { kind: 'story' | 'story-update'; storyId: string; chronicleName: string; title: string };
 }
 
 export type MsgResult = Msg['result'];

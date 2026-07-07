@@ -3,7 +3,7 @@
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/session';
-import { resolveActiveChronicle, getMembership } from '@/lib/chronicles';
+import { resolveActiveChronicle, getChronicle, getMembership } from '@/lib/chronicles';
 import {
   addAttachments,
   addMessage,
@@ -282,11 +282,19 @@ export async function acceptStory(input: {
   if (conversationId) {
     const attachments = await listConversationAttachments(conversationId);
     await addStoryAssets(story.id, attachments);
+    // The receipt on the note renders as a persistent ✓ chip in the chat.
+    const chronicle = await getChronicle(input.chronicleId);
+    const receipt: Receipt = {
+      label: `Saved "${story.title}"${chronicle ? ` to ${chronicle.name}` : ''}`,
+      detail: 'View story',
+      href: `/stories/${story.id}`,
+    };
     await addMessage(
       conversationId,
       'system',
       `[The user accepted the draft card and saved "${story.title}" as a story (id ${story.id}). ` +
         'It is already stored — do not draft or save it again.]',
+      { receipts: [receipt] },
     );
   }
 
@@ -315,10 +323,16 @@ export async function applyStoryUpdate(input: {
   // Only write the note if the conversation belongs to the caller.
   const convo = input.conversationId ? await getConversation(input.conversationId) : null;
   if (convo && convo.userId === user.id) {
+    const receipt: Receipt = {
+      label: `Updated "${p.title}"`,
+      detail: 'View story',
+      href: `/stories/${input.storyId}`,
+    };
     await addMessage(
       convo.id,
       'system',
       `[The user accepted the revision card — the story "${p.title}" (id ${input.storyId}) is updated.]`,
+      { receipts: [receipt] },
     );
   }
 

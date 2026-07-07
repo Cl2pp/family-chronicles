@@ -13,14 +13,21 @@ export default async function ChatPage() {
 
   const convo = await resumableConversation(user.id);
   const stored = convo ? await listMessages(convo.id) : [];
-  const visible = stored.filter((m) => m.role === 'user' || m.role === 'assistant');
+  // System rows are agent-only notes — except ones carrying receipts, which render
+  // as persistent ✓ chips (e.g. "Saved <story>"); their note text stays hidden.
+  const visible = stored.filter(
+    (m) =>
+      m.role === 'user' ||
+      m.role === 'assistant' ||
+      (m.role === 'system' && (m.metadata as { receipts?: Receipt[] } | null)?.receipts?.length),
+  );
 
   // Resolve in-chat uploads to presigned URLs so history renders audio/photos.
   const attachMap = await attachmentsByMessage(visible.map((m) => m.id));
   const initialMessages = await Promise.all(
     visible.map(async (m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
+      role: m.role as 'user' | 'assistant' | 'system',
+      content: m.role === 'system' ? '' : m.content,
       receipts: (m.metadata as { receipts?: Receipt[] } | null)?.receipts ?? undefined,
       attachments: await Promise.all(
         (attachMap.get(m.id) ?? []).map(async (a) => ({

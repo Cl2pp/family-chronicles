@@ -1,9 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
-import { Badge, Group, Paper, Stack, Text } from '@mantine/core';
-import { IconCheck } from '@tabler/icons-react';
+import { Group, Paper, Stack, Text } from '@mantine/core';
 import { ActionReceipts } from './action-receipts';
 import { MessageAttachments } from './message-attachments';
 import { StoryDraftCard } from './story-draft-card';
@@ -51,18 +49,18 @@ export function MessageRow({
       {msg.receipts?.length ? <ActionReceipts receipts={msg.receipts} /> : null}
 
       {msg.result && (
-        <Badge
-          color="green"
-          variant="light"
-          leftSection={<IconCheck size={12} />}
-          component={Link}
-          href={`/stories/${msg.result.storyId}`}
-          style={{ cursor: 'pointer' }}
-        >
-          {msg.result.kind === 'story-update'
-            ? 'Story updated — View story'
-            : `Saved to ${msg.result.chronicleName} — View story`}
-        </Badge>
+        <ActionReceipts
+          receipts={[
+            {
+              label:
+                msg.result.kind === 'story-update'
+                  ? `Updated "${msg.result.title}"`
+                  : `Saved "${msg.result.title}" to ${msg.result.chronicleName}`,
+              detail: 'View story',
+              href: `/stories/${msg.result.storyId}`,
+            },
+          ]}
+        />
       )}
 
       {msg.storyDraft && !msg.result && !discarded && (

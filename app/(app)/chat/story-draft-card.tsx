@@ -52,14 +52,14 @@ export function StoryDraftCard({
       const edited = { ...proposal, title, body, eventYear: year ? Number(year) : null };
       if (updateStoryId) {
         const res = await applyStoryUpdate({ storyId: updateStoryId, proposal: edited, conversationId });
-        onResult({ kind: 'story-update', storyId: res.storyId, chronicleName });
+        onResult({ kind: 'story-update', storyId: res.storyId, chronicleName, title });
       } else {
         const res = await acceptStory({
           conversationId: conversationId ?? '',
           chronicleId,
           proposal: edited,
         });
-        onResult({ kind: 'story', storyId: res.storyId, chronicleName });
+        onResult({ kind: 'story', storyId: res.storyId, chronicleName, title });
       }
     } finally {
       setBusy(false);
