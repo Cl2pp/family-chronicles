@@ -8,14 +8,7 @@ import type { Gender } from '@/lib/people';
 import { useI18n } from '@/lib/i18n/client';
 import type { Dictionary } from '@/lib/i18n';
 import { addPersonAction } from './actions';
-import type { AddTarget } from './types';
-
-export function genderOptions(t: Dictionary) {
-  return [
-    { value: 'male', label: t.person.male },
-    { value: 'female', label: t.person.female },
-  ];
-}
+import { genderOptions, type AddTarget } from './types';
 
 const RELATION_TITLE: Record<AddTarget['relation'], (t: Dictionary, name: string) => string> = {
   parent: (t, n) => t.person.addTitleParent(n),

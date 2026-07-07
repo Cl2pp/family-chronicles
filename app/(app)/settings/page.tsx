@@ -4,6 +4,7 @@ import { requireUser } from '@/lib/session';
 import { getChronicle, resolveActiveChronicle } from '@/lib/chronicles';
 import { canManage, type AccessRole } from '@/lib/permissions';
 import { getI18n } from '@/lib/i18n/server';
+import { LOCALE_BCP47 } from '@/lib/i18n/config';
 import { ChroniclesCard } from './chronicles-card';
 import { ChronicleSettingsCard } from './chronicle-settings-card';
 import { LanguageCard } from './language-card';
@@ -21,7 +22,7 @@ export default async function SettingsPage() {
     name: f.name,
     description: f.description,
     role: f.role as AccessRole,
-    createdLabel: f.createdAt.toLocaleDateString(locale === 'de' ? 'de-DE' : 'en-GB', {
+    createdLabel: f.createdAt.toLocaleDateString(LOCALE_BCP47[locale], {
       day: 'numeric',
       month: 'long',
       year: 'numeric',

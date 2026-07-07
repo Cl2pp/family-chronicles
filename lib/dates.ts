@@ -1,5 +1,5 @@
 import type { DatePrecision } from '@/lib/stories';
-import { DEFAULT_LOCALE, type Locale } from '@/lib/i18n/config';
+import { LOCALE_BCP47, type Locale } from '@/lib/i18n/config';
 import { getDictionary } from '@/lib/i18n';
 
 /** A Jan-1 UTC date from a 4-digit year (precision 'year'); null for missing years. */
@@ -20,27 +20,28 @@ export function parseYear(value: unknown): number | undefined {
 export function formatEventDate(
   date: Date | string | null | undefined,
   precision: DatePrecision | null | undefined,
-  locale: Locale = DEFAULT_LOCALE,
+  locale: Locale,
 ): string | null {
   if (!date || !precision) return null;
   const d = typeof date === 'string' ? new Date(date) : date;
   if (Number.isNaN(d.getTime())) return null;
 
+  const tag = LOCALE_BCP47[locale];
   switch (precision) {
     case 'year':
-      return new Intl.DateTimeFormat(locale, { year: 'numeric', timeZone: 'UTC' }).format(d);
+      return new Intl.DateTimeFormat(tag, { year: 'numeric', timeZone: 'UTC' }).format(d);
     case 'circa':
       return getDictionary(locale).dates.circa(
-        new Intl.DateTimeFormat(locale, { year: 'numeric', timeZone: 'UTC' }).format(d),
+        new Intl.DateTimeFormat(tag, { year: 'numeric', timeZone: 'UTC' }).format(d),
       );
     case 'month':
-      return new Intl.DateTimeFormat(locale, {
+      return new Intl.DateTimeFormat(tag, {
         month: 'long',
         year: 'numeric',
         timeZone: 'UTC',
       }).format(d);
     case 'day':
-      return new Intl.DateTimeFormat(locale, {
+      return new Intl.DateTimeFormat(tag, {
         day: 'numeric',
         month: 'long',
         year: 'numeric',

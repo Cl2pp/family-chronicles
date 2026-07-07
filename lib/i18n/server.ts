@@ -8,8 +8,16 @@ export async function getLocale(): Promise<Locale> {
   if (isLocale(cookieValue)) return cookieValue;
 
   const acceptLanguage = (await headers()).get('accept-language') ?? '';
-  for (const part of acceptLanguage.split(',')) {
-    const lang = part.split(';')[0]?.trim().toLowerCase().split('-')[0];
+  const candidates = acceptLanguage
+    .split(',')
+    .map((part) => {
+      const [tag, ...params] = part.trim().split(';');
+      const qParam = params.find((p) => p.trim().startsWith('q='));
+      const q = qParam ? Number(qParam.trim().slice(2)) : 1;
+      return { lang: tag?.trim().toLowerCase().split('-')[0], q: Number.isNaN(q) ? 0 : q };
+    })
+    .sort((a, b) => b.q - a.q);
+  for (const { lang } of candidates) {
     if (isLocale(lang)) return lang;
   }
   return DEFAULT_LOCALE;

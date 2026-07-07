@@ -4,6 +4,15 @@ import { db } from '@/db';
 import { chronicles, chronicleMembers, memberships, user } from '@/db/schema';
 import { type AccessRole, canContribute, canManage } from '@/lib/permissions';
 import { ensurePersonForUser } from '@/lib/people';
+import { isLocale, type Locale } from '@/lib/i18n/config';
+
+/**
+ * Normalize any story-language input to its stored form: a supported locale
+ * stays as-is; 'auto', null, or junk becomes null (= keep the submission's language).
+ */
+export function normalizeStoryLanguage(value: string | null | undefined): Locale | null {
+  return isLocale(value) ? value : null;
+}
 
 /** Chronicles the user belongs to (access), with their role. */
 export async function listChroniclesForUser(userId: string) {

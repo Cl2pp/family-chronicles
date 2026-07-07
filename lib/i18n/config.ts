@@ -16,3 +16,9 @@ export const LOCALE_NAMES: Record<Locale, string> = {
   en: 'English',
   de: 'Deutsch',
 };
+
+/** Full BCP 47 tags for Intl date/number formatting. */
+export const LOCALE_BCP47: Record<Locale, string> = {
+  en: 'en-GB',
+  de: 'de-DE',
+};

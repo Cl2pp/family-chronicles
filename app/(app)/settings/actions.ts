@@ -2,8 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/session';
-import { requireOwner, updateChronicle } from '@/lib/chronicles';
-import { isLocale } from '@/lib/i18n/config';
+import { normalizeStoryLanguage, requireOwner, updateChronicle } from '@/lib/chronicles';
+import type { Locale } from '@/lib/i18n/config';
 
 /** Update a chronicle's name, description, writing-style guide, and story language. */
 export async function saveChronicleSettings(input: {
@@ -12,7 +12,7 @@ export async function saveChronicleSettings(input: {
   description: string;
   styleGuide: string;
   /** 'auto' = keep each submission's language. */
-  storyLanguage: string;
+  storyLanguage: Locale | 'auto';
 }) {
   const user = await requireUser();
   await requireOwner(input.chronicleId, user.id);
@@ -26,7 +26,7 @@ export async function saveChronicleSettings(input: {
     name,
     description: input.description.trim() || null,
     styleGuide: input.styleGuide.trim() || null,
-    storyLanguage: isLocale(input.storyLanguage) ? input.storyLanguage : null,
+    storyLanguage: normalizeStoryLanguage(input.storyLanguage),
   });
 
   revalidatePath('/settings');

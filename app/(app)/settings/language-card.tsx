@@ -1,19 +1,19 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { Card, Select } from '@mantine/core';
 import { useI18n, setLocaleCookie } from '@/lib/i18n/client';
 import { isLocale, LOCALES, LOCALE_NAMES } from '@/lib/i18n/config';
 
-/** UI-language picker; persists to the locale cookie and re-renders the app. */
+/** UI-language picker; persists to the locale cookie and reloads the app. */
 export function LanguageCard() {
-  const router = useRouter();
   const { locale, t } = useI18n();
 
   function changeLocale(value: string | null) {
     if (!isLocale(value) || value === locale) return;
     setLocaleCookie(value);
-    router.refresh();
+    // Full reload rather than router.refresh(): it clears the client router
+    // cache, so previously visited routes can't flash old-language payloads.
+    window.location.reload();
   }
 
   return (

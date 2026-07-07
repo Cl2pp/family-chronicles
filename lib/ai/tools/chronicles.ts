@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { createChronicle, listChroniclesForUser, updateChronicle } from '@/lib/chronicles';
+import {
+  createChronicle,
+  listChroniclesForUser,
+  normalizeStoryLanguage,
+  updateChronicle,
+} from '@/lib/chronicles';
 import { defineTool } from './types';
 import { ensureOwner } from './util';
 
@@ -78,7 +83,7 @@ export const updateChronicleSettingsTool = defineTool({
     if (args.description != null) patch.description = args.description.trim() || null;
     if (args.styleGuide != null) patch.styleGuide = args.styleGuide.trim() || null;
     if (args.storyLanguage != null) {
-      patch.storyLanguage = args.storyLanguage === 'auto' ? null : args.storyLanguage;
+      patch.storyLanguage = normalizeStoryLanguage(args.storyLanguage);
     }
     if (Object.keys(patch).length === 0) {
       return {

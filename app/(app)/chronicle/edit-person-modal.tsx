@@ -7,8 +7,7 @@ import { notifications } from '@mantine/notifications';
 import type { Gender } from '@/lib/people';
 import { useI18n } from '@/lib/i18n/client';
 import { editPersonAction } from './actions';
-import { genderOptions } from './add-person-modal';
-import type { PersonRow } from './types';
+import { genderOptions, type PersonRow } from './types';
 
 function yearOf(d: Date | string | null | undefined): string {
   if (!d) return '';

@@ -62,8 +62,8 @@ export function ChronicleTabs({
   }, [tree.people]);
 
   const colorByTag: Record<string, string> = {};
-  familyTags.forEach((t2, i) => {
-    colorByTag[t2.tag] = `var(--mantine-color-${PALETTE[i % PALETTE.length]}-6)`;
+  familyTags.forEach((family, i) => {
+    colorByTag[family.tag] = `var(--mantine-color-${PALETTE[i % PALETTE.length]}-6)`;
   });
 
   const openAdd = (target?: AddTarget) => setAddState({ opened: true, target });

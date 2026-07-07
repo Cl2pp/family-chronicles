@@ -5,7 +5,7 @@ import { Button, Card, Group, Select, Stack, Text, Textarea, TextInput } from '@
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
-import { LOCALE_NAMES, LOCALES } from '@/lib/i18n/config';
+import { isLocale, LOCALE_NAMES, LOCALES, type Locale } from '@/lib/i18n/config';
 import { saveChronicleSettings } from './actions';
 
 /** Settings of the active chronicle: name, description, writing style, story language. */
@@ -27,7 +27,12 @@ export function ChronicleSettingsCard({
   const { t } = useI18n();
   const [pending, startTransition] = useTransition();
   const form = useForm({
-    initialValues: { name, description, styleGuide, storyLanguage: storyLanguage ?? 'auto' },
+    initialValues: {
+      name,
+      description,
+      styleGuide,
+      storyLanguage: (isLocale(storyLanguage) ? storyLanguage : 'auto') as Locale | 'auto',
+    },
     validate: { name: (v) => (v.trim() ? null : t.settings.chronicleNameRequired) },
   });
 
