@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { Button, Group, Select } from '@mantine/core';
 import { IconShare } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
+import { useI18n } from '@/lib/i18n/client';
 import { shareStory } from './actions';
 
 /** Lets a contributor share this story into another of their chronicles. */
@@ -15,6 +16,7 @@ export function ShareControl({
   candidates: { id: string; name: string }[];
 }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [value, setValue] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -33,7 +35,7 @@ export function ShareControl({
     <Group gap="xs" align="flex-end">
       <Select
         size="xs"
-        placeholder="Share to another chronicle…"
+        placeholder={t.story.sharePlaceholder}
         data={candidates.map((c) => ({ value: c.id, label: c.name }))}
         value={value}
         onChange={setValue}
@@ -48,7 +50,7 @@ export function ShareControl({
         loading={pending}
         disabled={!value}
       >
-        Share
+        {t.common.share}
       </Button>
     </Group>
   );

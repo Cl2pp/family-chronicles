@@ -1,19 +1,18 @@
 import type { Metadata } from 'next';
 import { Center, Container, Paper, Stack, Text, Title } from '@mantine/core';
+import { getI18n } from '@/lib/i18n/server';
 
 export const metadata: Metadata = { title: 'Offline · Family Chronicle' };
 
-export default function OfflinePage() {
+export default async function OfflinePage() {
+  const { t } = await getI18n();
   return (
     <Center mih="100dvh">
       <Container size={420} w="100%" py="xl">
         <Paper withBorder p="xl" radius="md">
           <Stack gap="sm">
-            <Title order={3}>You&rsquo;re offline</Title>
-            <Text c="dimmed">
-              Family Chronicle needs a connection for this page. Check your network and try again —
-              your stories are safe and will be here when you&rsquo;re back.
-            </Text>
+            <Title order={3}>{t.offline.title}</Title>
+            <Text c="dimmed">{t.offline.text}</Text>
           </Stack>
         </Paper>
       </Container>

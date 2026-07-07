@@ -2,10 +2,12 @@ import { Box, Button, Card, Stack, Text, Title } from '@mantine/core';
 import { IconMessageCircle2 } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
 import { listStoriesForUser } from '@/lib/stories';
+import { getI18n } from '@/lib/i18n/server';
 import { StoriesView } from './stories-view';
 
 export default async function StoriesPage() {
   const user = await requireUser();
+  const { t } = await getI18n();
 
   const stories = await listStoriesForUser(user.id);
 
@@ -13,16 +15,15 @@ export default async function StoriesPage() {
     return (
       <Box p="lg" maw={960} mx="auto">
         <Title order={1} mb="lg">
-          Stories
+          {t.stories.title}
         </Title>
         <Card withBorder radius="md" p="xl">
           <Stack align="center" gap="sm" py="lg">
             <Text fw={600} size="lg">
-              No stories yet
+              {t.stories.noStoriesYet}
             </Text>
             <Text c="dimmed" ta="center" maw={420}>
-              Head to Chat to tell your first one — we&apos;ll transcribe it and weave it into
-              your family memoir.
+              {t.stories.noStoriesHint}
             </Text>
             <Button
               component="a"
@@ -30,7 +31,7 @@ export default async function StoriesPage() {
               mt="sm"
               leftSection={<IconMessageCircle2 size={18} />}
             >
-              Go to Chat
+              {t.stories.goToChat}
             </Button>
           </Stack>
         </Card>

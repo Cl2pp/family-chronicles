@@ -16,9 +16,11 @@ import {
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { authClient } from '@/lib/auth-client';
+import { useI18n } from '@/lib/i18n/client';
 
 function LoginForm() {
   const router = useRouter();
+  const { t } = useI18n();
   const params = useSearchParams();
   const next = params.get('next') || '/chat';
   const [loading, setLoading] = useState(false);
@@ -26,8 +28,8 @@ function LoginForm() {
   const form = useForm({
     initialValues: { email: '', password: '' },
     validate: {
-      email: (v) => (/^\S+@\S+\.\S+$/.test(v) ? null : 'Enter a valid email'),
-      password: (v) => (v.length >= 8 ? null : 'At least 8 characters'),
+      email: (v) => (/^\S+@\S+\.\S+$/.test(v) ? null : t.auth.enterValidEmail),
+      password: (v) => (v.length >= 8 ? null : t.auth.atLeast8Chars),
     },
   });
 
@@ -39,7 +41,7 @@ function LoginForm() {
     });
     setLoading(false);
     if (error) {
-      notifications.show({ color: 'red', message: error.message ?? 'Sign in failed' });
+      notifications.show({ color: 'red', message: error.message ?? t.auth.signInFailed });
       return;
     }
     router.push(next);
@@ -48,7 +50,7 @@ function LoginForm() {
 
   async function sendMagicLink() {
     if (!/^\S+@\S+\.\S+$/.test(form.values.email)) {
-      form.setFieldError('email', 'Enter your email first');
+      form.setFieldError('email', t.auth.enterEmailFirst);
       return;
     }
     const { error } = await authClient.signIn.magicLink({
@@ -57,38 +59,38 @@ function LoginForm() {
     });
     notifications.show(
       error
-        ? { color: 'red', message: error.message ?? 'Could not send link' }
-        : { message: 'Magic link sent. In development it is printed to the server console.' },
+        ? { color: 'red', message: error.message ?? t.auth.couldNotSendLink }
+        : { message: t.auth.magicLinkSent },
     );
   }
 
   return (
     <Paper withBorder p="xl" radius="md">
       <Title order={2} mb="lg">
-        Welcome back
+        {t.auth.welcomeBack}
       </Title>
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack>
           <TextInput
-            label="Email"
-            placeholder="you@example.com"
+            label={t.auth.email}
+            placeholder={t.auth.emailPlaceholder}
             {...form.getInputProps('email')}
           />
-          <PasswordInput label="Password" {...form.getInputProps('password')} />
+          <PasswordInput label={t.auth.password} {...form.getInputProps('password')} />
           <Button type="submit" loading={loading} fullWidth>
-            Sign in
+            {t.auth.signIn}
           </Button>
         </Stack>
       </form>
 
-      <Divider label="or" my="lg" />
+      <Divider label={t.common.or} my="lg" />
       <Button variant="default" fullWidth onClick={sendMagicLink}>
-        Email me a magic link
+        {t.auth.magicLinkButton}
       </Button>
 
       <Text size="sm" mt="lg" ta="center">
-        No account yet?{' '}
-        <Anchor href={`/signup?next=${encodeURIComponent(next)}`}>Create one</Anchor>
+        {t.auth.noAccountYet}{' '}
+        <Anchor href={`/signup?next=${encodeURIComponent(next)}`}>{t.auth.createOne}</Anchor>
       </Text>
     </Paper>
   );

@@ -11,7 +11,3 @@ export function canContribute(role: AccessRole) {
 export function canManage(role: AccessRole) {
   return RANK[role] >= RANK.owner;
 }
-
-export function roleLabel(role: AccessRole) {
-  return role.charAt(0).toUpperCase() + role.slice(1);
-}

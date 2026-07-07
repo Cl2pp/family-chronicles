@@ -5,23 +5,25 @@ import { Button, Group, PasswordInput, Stack, Text } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { authClient } from '@/lib/auth-client';
+import { useI18n } from '@/lib/i18n/client';
 
 export function ChangePasswordForm({ hasPassword }: { hasPassword: boolean }) {
+  const { t } = useI18n();
   const [pending, setPending] = useState(false);
   const form = useForm({
     initialValues: { currentPassword: '', newPassword: '', confirmPassword: '' },
     validate: {
-      currentPassword: (v) => (v ? null : 'Enter your current password'),
-      newPassword: (v) => (v.length >= 8 ? null : 'At least 8 characters'),
+      currentPassword: (v) => (v ? null : t.account.enterCurrentPassword),
+      newPassword: (v) => (v.length >= 8 ? null : t.auth.atLeast8Chars),
       confirmPassword: (v, values) =>
-        v === values.newPassword ? null : 'Passwords do not match',
+        v === values.newPassword ? null : t.account.passwordsDontMatch,
     },
   });
 
   if (!hasPassword) {
     return (
       <Text c="dimmed" size="sm">
-        You signed in with a magic link, so this account has no password yet.
+        {t.account.noPasswordYet}
       </Text>
     );
   }
@@ -35,16 +37,16 @@ export function ChangePasswordForm({ hasPassword }: { hasPassword: boolean }) {
         revokeOtherSessions: true,
       });
       if (!error) {
-        notifications.show({ message: 'Password changed' });
+        notifications.show({ message: t.account.passwordChanged });
         form.reset();
       } else if (error.code === 'INVALID_PASSWORD') {
-        form.setFieldError('currentPassword', 'Current password is incorrect');
+        form.setFieldError('currentPassword', t.account.currentPasswordIncorrect);
       } else if (error.code === 'PASSWORD_TOO_SHORT' || error.code === 'PASSWORD_TOO_LONG') {
-        form.setFieldError('newPassword', error.message ?? 'Invalid new password');
+        form.setFieldError('newPassword', error.message ?? t.account.invalidNewPassword);
       } else {
         notifications.show({
           color: 'red',
-          message: error.message ?? 'Could not change the password',
+          message: error.message ?? t.account.couldNotChangePassword,
         });
       }
     } finally {
@@ -56,23 +58,23 @@ export function ChangePasswordForm({ hasPassword }: { hasPassword: boolean }) {
     <form onSubmit={form.onSubmit(handleSubmit)}>
       <Stack>
         <PasswordInput
-          label="Current password"
+          label={t.account.currentPassword}
           autoComplete="current-password"
           {...form.getInputProps('currentPassword')}
         />
         <PasswordInput
-          label="New password"
+          label={t.account.newPassword}
           autoComplete="new-password"
           {...form.getInputProps('newPassword')}
         />
         <PasswordInput
-          label="Confirm new password"
+          label={t.account.confirmNewPassword}
           autoComplete="new-password"
           {...form.getInputProps('confirmPassword')}
         />
         <Group justify="flex-end">
           <Button type="submit" loading={pending}>
-            Change password
+            {t.account.changePassword}
           </Button>
         </Group>
       </Stack>

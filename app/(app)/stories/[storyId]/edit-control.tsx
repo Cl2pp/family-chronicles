@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { Alert, Button, Card, Group, TextInput, Textarea } from '@mantine/core';
 import { IconPencil } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
+import { useI18n } from '@/lib/i18n/client';
 import { updateStoryDetails } from './actions';
 
 /** Inline edit form for a story's title, summary, retold text and year. */
@@ -15,6 +16,7 @@ export function EditControl({
   initial: { title: string; summary: string; body: string; eventYear: number | null };
 }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState(initial.title);
   const [summary, setSummary] = useState(initial.summary);
@@ -32,7 +34,7 @@ export function EditControl({
           leftSection={<IconPencil size={14} />}
           onClick={() => setOpen(true)}
         >
-          Edit story
+          {t.story.editStory}
         </Button>
       </Group>
     );
@@ -65,20 +67,20 @@ export function EditControl({
         </Alert>
       )}
       <TextInput
-        label="Title"
+        label={t.story.editTitleLabel}
         value={title}
         onChange={(e) => setTitle(e.currentTarget.value)}
         mb="xs"
       />
       <TextInput
-        label="Summary"
+        label={t.story.editSummaryLabel}
         value={summary}
         onChange={(e) => setSummary(e.currentTarget.value)}
         mb="xs"
       />
       <Textarea
-        label="Story"
-        description="Edits change the retold story; the original transcript stays untouched."
+        label={t.story.editStoryLabel}
+        description={t.story.editStoryDescription}
         value={body}
         onChange={(e) => setBody(e.currentTarget.value)}
         autosize
@@ -87,7 +89,7 @@ export function EditControl({
         mb="xs"
       />
       <TextInput
-        label="Year (optional)"
+        label={t.story.editYearLabel}
         value={year}
         onChange={(e) => setYear(e.currentTarget.value.replace(/[^0-9]/g, ''))}
         w={140}
@@ -95,10 +97,10 @@ export function EditControl({
       />
       <Group gap="xs">
         <Button size="xs" onClick={save} loading={pending} disabled={!body.trim() || !title.trim()}>
-          Save changes
+          {t.common.saveChanges}
         </Button>
         <Button size="xs" variant="default" onClick={() => setOpen(false)} disabled={pending}>
-          Cancel
+          {t.common.cancel}
         </Button>
       </Group>
     </Card>

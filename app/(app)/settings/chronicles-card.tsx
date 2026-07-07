@@ -13,7 +13,8 @@ import {
   Text,
 } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
-import { roleLabel, type AccessRole } from '@/lib/permissions';
+import type { AccessRole } from '@/lib/permissions';
+import { useI18n } from '@/lib/i18n/client';
 
 export interface ChronicleRow {
   id: string;
@@ -37,6 +38,7 @@ export function ChroniclesCard({
   activeId: string | null;
 }) {
   const router = useRouter();
+  const { t } = useI18n();
 
   function setActive(id: string) {
     document.cookie = `activeChronicleId=${id}; path=/; max-age=31536000; samesite=lax`;
@@ -47,12 +49,12 @@ export function ChroniclesCard({
     return (
       <Card withBorder radius="md" p="lg">
         <Stack align="flex-start" gap="xs">
-          <Text fw={600}>No chronicles yet</Text>
+          <Text fw={600}>{t.chroniclesCard.noChroniclesYet}</Text>
           <Text size="sm" c="dimmed">
-            Create a chronicle to start collecting stories and building your tree.
+            {t.chroniclesCard.createFirstHint}
           </Text>
           <Button component={Link} href="/chronicle/new" mt="xs">
-            Start your chronicle
+            {t.chroniclesCard.startYourChronicle}
           </Button>
         </Stack>
       </Card>
@@ -68,16 +70,20 @@ export function ChroniclesCard({
               {i > 0 && <Divider my="sm" />}
               <Group justify="space-between" align="flex-start">
                 <Group wrap="nowrap" align="flex-start" gap="sm">
-                  <Radio value={chronicle.id} mt={3} aria-label={`Use ${chronicle.name}`} />
+                  <Radio
+                    value={chronicle.id}
+                    mt={3}
+                    aria-label={t.chroniclesCard.useChronicleAria(chronicle.name)}
+                  />
                   <Stack gap={2}>
                     <Group gap="xs">
                       <Text fw={600}>{chronicle.name}</Text>
                       <Badge size="sm" variant="light" color={ROLE_COLOR[chronicle.role]}>
-                        {roleLabel(chronicle.role)}
+                        {t.roles[chronicle.role]}
                       </Badge>
                       {chronicle.id === activeId && (
                         <Badge size="sm" variant="outline">
-                          Active
+                          {t.chroniclesCard.activeBadge}
                         </Badge>
                       )}
                     </Group>
@@ -87,13 +93,13 @@ export function ChroniclesCard({
                       </Text>
                     )}
                     <Text size="xs" c="dimmed">
-                      Created {chronicle.createdLabel}
+                      {t.chroniclesCard.created(chronicle.createdLabel)}
                     </Text>
                   </Stack>
                 </Group>
                 {chronicle.id === activeId && (
                   <Button component={Link} href="/chronicle" variant="subtle" size="xs">
-                    Open
+                    {t.chroniclesCard.open}
                   </Button>
                 )}
               </Group>
@@ -110,7 +116,7 @@ export function ChroniclesCard({
           size="xs"
           leftSection={<IconPlus size={14} />}
         >
-          New chronicle
+          {t.chroniclesCard.newChronicle}
         </Button>
       </Group>
     </Card>

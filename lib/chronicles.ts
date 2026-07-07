@@ -106,7 +106,12 @@ export async function listMembers(chronicleId: string) {
 
 export async function updateChronicle(
   id: string,
-  patch: { name?: string; description?: string | null; styleGuide?: string | null },
+  patch: {
+    name?: string;
+    description?: string | null;
+    styleGuide?: string | null;
+    storyLanguage?: string | null;
+  },
 ) {
   await db
     .update(chronicles)

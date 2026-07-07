@@ -11,18 +11,20 @@ import {
   Title,
 } from '@mantine/core';
 import { requireUser } from '@/lib/session';
+import { getI18n } from '@/lib/i18n/server';
 import { createChronicleAction } from '../actions';
 
 export default async function NewChroniclePage() {
   await requireUser();
+  const { t } = await getI18n();
 
   return (
     <Box p="lg" maw={1100} mx="auto">
       <Stack gap="lg">
         <div>
-          <Title order={2}>Start a chronicle</Title>
+          <Title order={2}>{t.chronicleNew.title}</Title>
           <Text c="dimmed" mt={4}>
-            A chronicle is your family&apos;s private space for stories and a shared tree. Families themselves appear automatically from last names and marriages.
+            {t.chronicleNew.intro}
           </Text>
         </div>
 
@@ -31,22 +33,22 @@ export default async function NewChroniclePage() {
             <Stack>
               <TextInput
                 name="name"
-                label="Chronicle name"
-                placeholder="e.g. Ortlepp & Hartwick"
+                label={t.settings.chronicleName}
+                placeholder={t.chronicleNew.namePlaceholder}
                 required
               />
               <Textarea
                 name="description"
-                label="Description"
-                placeholder="A short note about this chronicle (optional)"
+                label={t.settings.description}
+                placeholder={t.chronicleNew.descriptionPlaceholder}
                 autosize
                 minRows={2}
               />
               <Group justify="space-between" mt="sm">
                 <Anchor component="a" href="/chronicle" c="dimmed" size="sm">
-                  Cancel
+                  {t.common.cancel}
                 </Anchor>
-                <Button type="submit">Create chronicle</Button>
+                <Button type="submit">{t.chronicleNew.create}</Button>
               </Group>
             </Stack>
           </form>

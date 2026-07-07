@@ -5,8 +5,9 @@ import { Button, Group, Modal, Select, Stack, TextInput } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import type { Gender } from '@/lib/people';
+import { useI18n } from '@/lib/i18n/client';
 import { editPersonAction } from './actions';
-import { GENDER_OPTIONS } from './add-person-modal';
+import { genderOptions } from './add-person-modal';
 import type { PersonRow } from './types';
 
 function yearOf(d: Date | string | null | undefined): string {
@@ -27,6 +28,7 @@ export function EditPersonModal({
   opened: boolean;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const [pending, startTransition] = useTransition();
   const form = useForm({
     initialValues: {
@@ -38,9 +40,9 @@ export function EditPersonModal({
       diedYear: '',
     },
     validate: {
-      displayName: (v) => (v.trim() ? null : 'A name is required'),
-      bornYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : 'Use a 4-digit year'),
-      diedYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : 'Use a 4-digit year'),
+      displayName: (v) => (v.trim() ? null : t.person.nameRequired),
+      bornYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : t.person.use4DigitYear),
+      diedYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : t.person.use4DigitYear),
     },
   });
 
@@ -72,49 +74,57 @@ export function EditPersonModal({
           bornYear: values.bornYear ? Number(values.bornYear) : null,
           diedYear: values.diedYear ? Number(values.diedYear) : null,
         });
-        notifications.show({ message: 'Person updated' });
+        notifications.show({ message: t.person.updated });
         onClose();
       } catch (e) {
         notifications.show({
           color: 'red',
-          message: e instanceof Error ? e.message : 'Could not update person',
+          message: e instanceof Error ? e.message : t.person.couldNotUpdate,
         });
       }
     });
   }
 
   return (
-    <Modal opened={opened} onClose={onClose} title="Edit person" radius="md">
+    <Modal opened={opened} onClose={onClose} title={t.person.editTitle} radius="md">
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack>
-          <TextInput label="Name" required {...form.getInputProps('displayName')} />
+          <TextInput label={t.person.name} required {...form.getInputProps('displayName')} />
           <TextInput
-            label="Family name (surname)"
-            placeholder="Optional"
+            label={t.person.familyName}
+            placeholder={t.common.optional}
             {...form.getInputProps('familyName')}
           />
           <TextInput
-            label="Birth name (surname at birth)"
-            placeholder="Optional — if it changed, e.g. at marriage"
+            label={t.person.birthName}
+            placeholder={t.person.birthNamePlaceholder}
             {...form.getInputProps('birthFamilyName')}
           />
           <Select
-            label="Gender"
-            placeholder="Optional"
-            data={GENDER_OPTIONS}
+            label={t.person.gender}
+            placeholder={t.common.optional}
+            data={genderOptions(t)}
             clearable
             {...form.getInputProps('gender')}
           />
           <Group grow>
-            <TextInput label="Birth year" placeholder="e.g. 1948" {...form.getInputProps('bornYear')} />
-            <TextInput label="Death year" placeholder="e.g. 2019" {...form.getInputProps('diedYear')} />
+            <TextInput
+              label={t.person.birthYear}
+              placeholder={t.person.birthYearPlaceholder}
+              {...form.getInputProps('bornYear')}
+            />
+            <TextInput
+              label={t.person.deathYear}
+              placeholder={t.person.deathYearPlaceholder}
+              {...form.getInputProps('diedYear')}
+            />
           </Group>
           <Group justify="flex-end" mt="sm">
             <Button variant="default" onClick={onClose} disabled={pending}>
-              Cancel
+              {t.common.cancel}
             </Button>
             <Button type="submit" loading={pending}>
-              Save changes
+              {t.common.saveChanges}
             </Button>
           </Group>
         </Stack>

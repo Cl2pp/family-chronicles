@@ -38,6 +38,8 @@ import {
 } from '@tabler/icons-react';
 import type { Gender, PersonRelation, TreeEdge, TreePerson } from '@/lib/people';
 import { birthSurname, personFullName } from '@/lib/person-name';
+import { useI18n } from '@/lib/i18n/client';
+import type { Dictionary } from '@/lib/i18n';
 import { relatePeopleAction, removeRelationshipAction } from './actions';
 import { DeletePersonButton } from './delete-person-button';
 import type { AddTarget } from './types';
@@ -61,18 +63,34 @@ function lifeSpan(person: TreePerson): string {
 }
 
 function GenderIcon({ gender, size = 14 }: { gender: Gender; size?: number }) {
+  const { t } = useI18n();
   return gender === 'male' ? (
-    <IconGenderMale size={size} color="var(--mantine-color-blue-6)" aria-label="Male" />
+    <IconGenderMale size={size} color="var(--mantine-color-blue-6)" aria-label={t.tree.maleAria} />
   ) : (
-    <IconGenderFemale size={size} color="var(--mantine-color-pink-6)" aria-label="Female" />
+    <IconGenderFemale
+      size={size}
+      color="var(--mantine-color-pink-6)"
+      aria-label={t.tree.femaleAria}
+    />
   );
 }
 
-const LINK_RELATIONS: { value: PersonRelation; label: string }[] = [
-  { value: 'parent', label: 'is a parent of' },
-  { value: 'child', label: 'is a child of' },
-  { value: 'partner', label: 'is a partner of' },
+const LINK_RELATIONS: { value: PersonRelation; label: (t: Dictionary) => string }[] = [
+  { value: 'parent', label: (t) => t.tree.isParentOf },
+  { value: 'child', label: (t) => t.tree.isChildOf },
+  { value: 'partner', label: (t) => t.tree.isPartnerOf },
 ];
+
+/** Stable key for a connection from the selected person's point of view. */
+type RelationKey = 'parent' | 'child' | 'partner';
+
+function relationLabel(key: RelationKey, t: Dictionary): string {
+  return key === 'parent'
+    ? t.tree.relationParent
+    : key === 'child'
+      ? t.tree.relationChild
+      : t.tree.relationPartner;
+}
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -119,6 +137,7 @@ export function FamilyTree({
   onAddPerson,
   onEditPerson,
 }: FamilyTreeProps) {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [connectors, setConnectors] = useState<Connectors | null>(null);
@@ -389,30 +408,30 @@ export function FamilyTree({
     [people, selected, activeChronicleId],
   );
 
-  // The selected person's existing edges, labelled from their point of view.
+  // The selected person's existing edges, keyed from their point of view.
   const connections = useMemo(() => {
     if (!selectedId) return [];
-    const rows: { label: string; other: TreePerson; edge: TreeEdge }[] = [];
+    const rows: { key: RelationKey; other: TreePerson; edge: TreeEdge }[] = [];
     for (const e of validEdges) {
-      let label: string | null = null;
+      let key: RelationKey | null = null;
       let otherId: string | null = null;
       if (e.type === 'parent' && e.to === selectedId) {
-        label = 'Parent';
+        key = 'parent';
         otherId = e.from;
       } else if (e.type === 'parent' && e.from === selectedId) {
-        label = 'Child';
+        key = 'child';
         otherId = e.to;
       } else if (e.type === 'spouse' && (e.from === selectedId || e.to === selectedId)) {
-        label = 'Partner';
+        key = 'partner';
         otherId = e.from === selectedId ? e.to : e.from;
       }
       const other = otherId ? peopleById.get(otherId) : undefined;
-      if (label && other) rows.push({ label, other, edge: e });
+      if (key && other) rows.push({ key, other, edge: e });
     }
-    const order: Record<string, number> = { Parent: 0, Partner: 1, Child: 2 };
+    const order: Record<RelationKey, number> = { parent: 0, partner: 1, child: 2 };
     rows.sort(
       (a, b) =>
-        (order[a.label] ?? 9) - (order[b.label] ?? 9) ||
+        (order[a.key] ?? 9) - (order[b.key] ?? 9) ||
         a.other.displayName.localeCompare(b.other.displayName),
     );
     return rows;
@@ -432,11 +451,11 @@ export function FamilyTree({
           personFromId: edge.from,
           personToId: edge.to,
         });
-        notifications.show({ message: 'Connection removed' });
+        notifications.show({ message: t.tree.connectionRemoved });
       } catch (e) {
         notifications.show({
           color: 'red',
-          message: e instanceof Error ? e.message : 'Could not remove the connection',
+          message: e instanceof Error ? e.message : t.tree.couldNotRemoveConnection,
         });
       }
     });
@@ -445,7 +464,7 @@ export function FamilyTree({
   function handleLink() {
     if (!selected || !linkPersonId) return;
     const relative = peopleById.get(linkPersonId);
-    const relativeName = relative ? personFullName(relative) : 'them';
+    const relativeName = relative ? personFullName(relative) : '…';
     startLinking(async () => {
       try {
         await relatePeopleAction({
@@ -454,15 +473,15 @@ export function FamilyTree({
           relativeId: linkPersonId,
           relation: linkRelation,
         });
-        const label = LINK_RELATIONS.find((r) => r.value === linkRelation)?.label;
+        const label = LINK_RELATIONS.find((r) => r.value === linkRelation)?.label(t) ?? '';
         notifications.show({
-          message: `Linked: ${personFullName(selected)} ${label} ${relativeName}.`,
+          message: t.tree.linked(personFullName(selected), label, relativeName),
         });
         setLinkPersonId(null);
       } catch (e) {
         notifications.show({
           color: 'red',
-          message: e instanceof Error ? e.message : 'Could not link those people',
+          message: e instanceof Error ? e.message : t.tree.couldNotLink,
         });
       }
     });
@@ -477,7 +496,7 @@ export function FamilyTree({
             variant="light"
             onClick={() => onAddPerson()}
           >
-            Add person
+            {t.tree.addPerson}
           </Button>
         </Group>
       )}
@@ -485,8 +504,8 @@ export function FamilyTree({
       {people.length === 0 ? (
         <Paper withBorder radius="md" p="xl">
           <Text c="dimmed" ta="center">
-            No people in the tree yet.
-            {canEdit ? ' Add the first person to get started.' : ''}
+            {t.tree.emptyTree}
+            {canEdit ? t.tree.emptyTreeAddFirst : ''}
           </Text>
         </Paper>
       ) : (
@@ -583,7 +602,7 @@ export function FamilyTree({
                         </Text>
                         {birthSurname(person) && (
                           <Text size="xs" c="dimmed" fs="italic" ta="center">
-                            (born {birthSurname(person)})
+                            ({t.tree.bornSurname(birthSurname(person)!)})
                           </Text>
                         )}
                         {lifeSpan(person) && (
@@ -622,7 +641,7 @@ export function FamilyTree({
         opened={!!selected}
         onClose={() => selectPerson(null)}
         position="right"
-        title="Person"
+        title={t.tree.personDrawerTitle}
         padding="lg"
       >
         {selected && (
@@ -643,7 +662,7 @@ export function FamilyTree({
                   </Group>
                   {birthSurname(selected) && (
                     <Text size="sm" c="dimmed" fs="italic">
-                      born {birthSurname(selected)}
+                      {t.tree.bornSurname(birthSurname(selected)!)}
                     </Text>
                   )}
                   {lifeSpan(selected) && (
@@ -665,7 +684,7 @@ export function FamilyTree({
             {selected.familyName && (
               <Text size="sm">
                 <Text span c="dimmed">
-                  Family name:{' '}
+                  {t.tree.familyNameLabel}:{' '}
                 </Text>
                 {selected.familyName}
               </Text>
@@ -673,7 +692,7 @@ export function FamilyTree({
             {birthSurname(selected) && (
               <Text size="sm">
                 <Text span c="dimmed">
-                  Birth name:{' '}
+                  {t.tree.birthNameLabel}:{' '}
                 </Text>
                 {birthSurname(selected)}
               </Text>
@@ -710,7 +729,7 @@ export function FamilyTree({
             )}
             {selected.userId && (
               <Text size="sm" c="brand">
-                Linked to an account
+                {t.tree.linkedToAccount}
               </Text>
             )}
 
@@ -724,24 +743,24 @@ export function FamilyTree({
                   onEditPerson(person);
                 }}
               >
-                Edit details
+                {t.tree.editDetails}
               </Button>
             )}
 
             {connections.length > 0 && (
               <Stack gap="xs" mt="md">
                 <Text size="sm" fw={600}>
-                  Connections
+                  {t.tree.connections}
                 </Text>
-                {connections.map(({ label, other, edge }) => (
+                {connections.map(({ key, other, edge }) => (
                   <Group
-                    key={`${edge.type}-${edge.from}-${edge.to}-${label}`}
+                    key={`${edge.type}-${edge.from}-${edge.to}-${key}`}
                     justify="space-between"
                     wrap="nowrap"
                   >
                     <Text size="sm">
                       <Text span c="dimmed">
-                        {label}:{' '}
+                        {relationLabel(key, t)}:{' '}
                       </Text>
                       {personFullName(other)}
                     </Text>
@@ -749,7 +768,10 @@ export function FamilyTree({
                       <ActionIcon
                         variant="subtle"
                         color="red"
-                        aria-label={`Remove ${label.toLowerCase()} connection to ${personFullName(other)}`}
+                        aria-label={t.tree.removeConnectionAria(
+                          relationLabel(key, t),
+                          personFullName(other),
+                        )}
                         loading={unlinking}
                         onClick={() => handleUnlink(edge)}
                       >
@@ -764,12 +786,12 @@ export function FamilyTree({
             {canEditSelected && (
               <Stack gap="xs" mt="md">
                 <Text size="sm" fw={600}>
-                  Connect a new person
+                  {t.tree.connectNewPerson}
                 </Text>
                 <Button
                   variant="light"
                   leftSection={<IconArrowUp size={16} />}
-                  disabled={connections.filter((c) => c.label === 'Parent').length >= 2}
+                  disabled={connections.filter((c) => c.key === 'parent').length >= 2}
                   onClick={() =>
                     onAddPerson({
                       personId: selected.id,
@@ -778,11 +800,11 @@ export function FamilyTree({
                     })
                   }
                 >
-                  Add parent
+                  {t.tree.addParent}
                 </Button>
-                {connections.filter((c) => c.label === 'Parent').length >= 2 && (
+                {connections.filter((c) => c.key === 'parent').length >= 2 && (
                   <Text size="xs" c="dimmed">
-                    Both parents are set — remove one above to change them.
+                    {t.tree.bothParentsSet}
                   </Text>
                 )}
                 <Button
@@ -796,7 +818,7 @@ export function FamilyTree({
                     })
                   }
                 >
-                  Add child
+                  {t.tree.addChild}
                 </Button>
                 <Button
                   variant="light"
@@ -809,7 +831,7 @@ export function FamilyTree({
                     })
                   }
                 >
-                  Add partner
+                  {t.tree.addPartner}
                 </Button>
               </Stack>
             )}
@@ -817,13 +839,13 @@ export function FamilyTree({
             {canEditSelected && linkCandidates.length > 0 && (
               <Stack gap="xs" mt="md">
                 <Text size="sm" fw={600}>
-                  Link to an existing person
+                  {t.tree.linkToExisting}
                 </Text>
                 <Select
-                  aria-label="Relationship"
+                  aria-label={t.tree.relationshipAria}
                   data={LINK_RELATIONS.map((r) => ({
                     value: r.value,
-                    label: `${personFullName(selected)} ${r.label}…`,
+                    label: `${personFullName(selected)} ${r.label(t)}…`,
                   }))}
                   value={linkRelation}
                   onChange={(v) => v && setLinkRelation(v as PersonRelation)}
@@ -831,8 +853,8 @@ export function FamilyTree({
                   comboboxProps={{ withinPortal: false }}
                 />
                 <Select
-                  aria-label="Person to link"
-                  placeholder="Choose a person"
+                  aria-label={t.tree.personToLinkAria}
+                  placeholder={t.tree.choosePerson}
                   searchable
                   data={linkCandidates}
                   value={linkPersonId}
@@ -845,7 +867,7 @@ export function FamilyTree({
                   loading={linking}
                   onClick={handleLink}
                 >
-                  Link people
+                  {t.tree.linkPeople}
                 </Button>
               </Stack>
             )}

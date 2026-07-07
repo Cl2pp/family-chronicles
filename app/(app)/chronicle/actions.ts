@@ -4,7 +4,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/session';
-import { createChronicle, requireContributor, requireOwner, updateChronicle } from '@/lib/chronicles';
+import { createChronicle, requireContributor, requireOwner } from '@/lib/chronicles';
 import {
   addPersonToChronicle,
   canUserEditPerson,
@@ -230,28 +230,4 @@ export async function invite(input: {
 
   revalidatePath('/chronicle');
   return { token: created.token };
-}
-
-/** Update a chronicle's name, description, and writing-style guide. */
-export async function saveSettings(input: {
-  chronicleId: string;
-  name: string;
-  description: string;
-  styleGuide: string;
-}) {
-  const user = await requireUser();
-  await requireOwner(input.chronicleId, user.id);
-
-  const name = input.name.trim();
-  if (!name) {
-    throw new Error('A chronicle name is required.');
-  }
-
-  await updateChronicle(input.chronicleId, {
-    name,
-    description: input.description.trim() || null,
-    styleGuide: input.styleGuide.trim() || null,
-  });
-
-  revalidatePath('/chronicle');
 }

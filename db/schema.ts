@@ -147,6 +147,8 @@ export const chronicles = pgTable('chronicles', {
   description: text('description'),
   /** Free-text writing-style guide, injected into the styling prompt. */
   styleGuide: text('style_guide'),
+  /** Language stories are retold in ('en' | 'de'); null = keep the submission's language. */
+  storyLanguage: text('story_language'),
   createdBy: text('created_by')
     .notNull()
     .references(() => user.id, { onDelete: 'restrict' }),

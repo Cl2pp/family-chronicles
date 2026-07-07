@@ -1,6 +1,8 @@
 import { Container, Title, Text, Button, Group, Stack, Paper } from '@mantine/core';
+import { getI18n } from '@/lib/i18n/server';
 
-export default function Home() {
+export default async function Home() {
+  const { t } = await getI18n();
   return (
     <Container size="sm" py={120}>
       <Stack gap="xl" align="center" ta="center">
@@ -9,26 +11,22 @@ export default function Home() {
             Family Chronicle
           </Title>
           <Text c="dimmed" fz="lg" maw={520}>
-            A private vault where your family&rsquo;s stories live. Write them down or just
-            speak — and watch them become a shared family book, placed on a timeline,
-            generation after generation.
+            {t.home.tagline}
           </Text>
         </Stack>
 
         <Group>
           <Button component="a" href="/login" size="md">
-            Sign in
+            {t.home.signIn}
           </Button>
           <Button component="a" href="/signup" size="md" variant="default">
-            Create account
+            {t.home.createAccount}
           </Button>
         </Group>
 
         <Paper withBorder p="md" radius="md" maw={520} mt="xl">
           <Text size="sm" c="dimmed">
-            Contribute by writing or by voice message. Stories are transcribed and gently
-            retold in a consistent memoir voice, with photos, dates, and full credit to
-            whoever shared them.
+            {t.home.blurb}
           </Text>
         </Paper>
       </Stack>

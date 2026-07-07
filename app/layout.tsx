@@ -7,6 +7,7 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
 import { ColorSchemeScript, mantineHtmlProps } from '@mantine/core';
+import { getLocale } from '@/lib/i18n/server';
 import { Providers } from './providers';
 
 const inter = Inter({
@@ -37,14 +38,15 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getLocale();
   return (
-    <html lang="en" className={inter.variable} {...mantineHtmlProps}>
+    <html lang={locale} className={inter.variable} {...mantineHtmlProps}>
       <head>
         <ColorSchemeScript defaultColorScheme="light" forceColorScheme="light" />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <Providers locale={locale}>{children}</Providers>
       </body>
     </html>
   );
