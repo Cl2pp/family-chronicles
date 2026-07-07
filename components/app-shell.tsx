@@ -25,14 +25,14 @@ import { authClient } from '@/lib/auth-client';
 const NAV = [
   { href: '/chat', label: 'Chat', icon: IconMessageCircle },
   { href: '/stories', label: 'Stories', icon: IconBook2 },
-  { href: '/chronicle', label: 'Chronicle', icon: IconBinaryTree2 },
+  { href: '/chronicle', label: 'Family Tree', icon: IconBinaryTree2 },
   { href: '/settings', label: 'Settings', icon: IconSettings },
 ] as const;
 
 const MOBILE_NAV = [
   { href: '/chat', label: 'Chat', icon: IconMessageCircle },
   { href: '/stories', label: 'Stories', icon: IconBook2 },
-  { href: '/chronicle', label: 'Chronicle', icon: IconBinaryTree2 },
+  { href: '/chronicle', label: 'Family Tree', icon: IconBinaryTree2 },
   { href: '/account', label: 'Account', icon: IconUserCircle },
 ] as const;
 
