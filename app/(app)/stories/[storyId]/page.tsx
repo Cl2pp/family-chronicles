@@ -3,6 +3,7 @@ import {
   Alert,
   Badge,
   Box,
+  Button,
   Divider,
   Group,
   Image,
@@ -11,7 +12,7 @@ import {
   Text,
   Title,
 } from '@mantine/core';
-import { IconAlertTriangle } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowLeft } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
 import { canUserEditStory, chroniclesForStory, getStoryForUser, listAssets } from '@/lib/stories';
 import { familyTagsByStory } from '@/lib/family-tags';
@@ -24,6 +25,7 @@ import { RetryButton } from './retry-button';
 import { SourceAccordion } from './source-accordion';
 import { ShareControl } from './share-control';
 import { EditControl } from './edit-control';
+import { AddPhotosControl } from './add-photos-control';
 
 function paragraphs(text: string): string[] {
   return text
@@ -80,6 +82,19 @@ export default async function StoryDetailPage({
       <Stack gap="xl">
         {/* Header */}
         <Stack gap="sm">
+          <Group>
+            {/* Plain <a>: an RSC can't pass the Link component into Mantine's polymorphic prop. */}
+            <Button
+              component="a"
+              href="/stories"
+              size="compact-sm"
+              variant="subtle"
+              color="gray"
+              leftSection={<IconArrowLeft size={16} />}
+            >
+              {t.story.backToStories}
+            </Button>
+          </Group>
           <Group justify="space-between" align="flex-start" wrap="nowrap">
             <Title order={1}>{story.title}</Title>
             <Badge variant="light" color={meta.color} size="lg">
@@ -151,21 +166,26 @@ export default async function StoryDetailPage({
         )}
 
         {/* Photos */}
-        {photos.length > 0 && (
+        {(photos.length > 0 || canEdit) && (
           <Stack gap="sm">
-            <Title order={3}>{t.story.photos}</Title>
-            <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
-              {photos.map((p) => (
-                <Image
-                  key={p.id}
-                  src={p.url}
-                  alt={p.caption ?? story.title}
-                  radius="md"
-                  fit="cover"
-                  h={200}
-                />
-              ))}
-            </SimpleGrid>
+            <Group gap="sm" align="center">
+              <Title order={3}>{t.story.photos}</Title>
+              {canEdit && <AddPhotosControl storyId={story.id} />}
+            </Group>
+            {photos.length > 0 && (
+              <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
+                {photos.map((p) => (
+                  <Image
+                    key={p.id}
+                    src={p.url}
+                    alt={p.caption ?? story.title}
+                    radius="md"
+                    fit="cover"
+                    h={200}
+                  />
+                ))}
+              </SimpleGrid>
+            )}
           </Stack>
         )}
 

@@ -27,7 +27,7 @@ export default async function StoriesPage() {
             </Text>
             <Button
               component="a"
-              href="/chat"
+              href="/chat?intent=add-story"
               mt="sm"
               leftSection={<IconMessageCircle2 size={18} />}
             >

@@ -266,6 +266,8 @@ export const de: Dictionary = {
     acceptSave: 'Annehmen & speichern',
     discard: 'Verwerfen',
     couldNotUndo: 'Das konnte nicht rückgängig gemacht werden. Bitte versuch es noch einmal.',
+    addStoryPrompt:
+      'Ich möchte eine neue Geschichte zur Chronik hinzufügen. Bitte frag mich, welche Geschichte ich erzählen möchte.',
   },
   recorder: {
     start: 'Aufnahme starten',
@@ -287,8 +289,10 @@ export const de: Dictionary = {
     undated: 'Ohne Datum',
     storyCount: (n: number) => (n === 1 ? '1 Geschichte' : `${n} Geschichten`),
     by: (name: string) => `Von ${name}`,
+    addStory: 'Geschichte hinzufügen',
   },
   story: {
+    backToStories: 'Zurück zu den Geschichten',
     families: 'Familien',
     sharedWith: 'Geteilt mit',
     failedTitle: 'Beim Nacherzählen dieser Geschichte ist etwas schiefgelaufen',
@@ -309,6 +313,13 @@ export const de: Dictionary = {
       'Änderungen betreffen die nacherzählte Geschichte; das Original-Transkript bleibt unberührt.',
     editYearLabel: 'Jahr (optional)',
     sharePlaceholder: 'In eine andere Chronik teilen…',
+    addPhotos: 'Fotos hinzufügen',
+    photoUploadFailed: 'Hochladen fehlgeschlagen. Bitte versuch es noch einmal.',
+    deleteStory: 'Geschichte löschen',
+    deleteConfirmText:
+      'Diese Geschichte für alle löschen? Das kann nicht rückgängig gemacht werden.',
+    deletePermanently: 'Endgültig löschen',
+    keepStory: 'Geschichte behalten',
   },
   status: {
     processing: 'Wird nacherzählt…',

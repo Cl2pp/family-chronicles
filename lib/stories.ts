@@ -4,6 +4,7 @@ import {
   assets,
   chronicles,
   memberships,
+  messageAttachments,
   stories,
   storyChronicles,
   storyPeople,
@@ -11,6 +12,7 @@ import {
 } from '@/db/schema';
 import { familyTagsByStory } from '@/lib/family-tags';
 import { yearToDate } from '@/lib/dates';
+import { deleteObject } from '@/lib/s3';
 
 export type DatePrecision = 'day' | 'month' | 'year' | 'circa';
 export type InputType = 'text' | 'voice' | 'chat';
@@ -318,6 +320,40 @@ export async function applyStoryEdit(input: {
     set.eventDatePrecision = input.eventYear ? 'year' : null;
   }
   await db.update(stories).set(set).where(eq(stories.id, input.storyId));
+  return { ok: true };
+}
+
+/**
+ * Permanently delete a story (rows cascade: shares, people links, assets).
+ * Stored objects are removed too, except ones still referenced by chat
+ * attachments — those must keep rendering in the conversation history.
+ */
+export async function deleteStoryForUser(
+  storyId: string,
+  userId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!(await canUserEditStory(storyId, userId))) {
+    return { ok: false, error: "Only the story's author or a chronicle owner can delete it." };
+  }
+  const storyAssets = await listAssets(storyId);
+  await db.delete(stories).where(eq(stories.id, storyId));
+
+  const keys = [...new Set(storyAssets.map((a) => a.s3Key))];
+  if (keys.length) {
+    const referenced = await db
+      .select({ s3Key: messageAttachments.s3Key })
+      .from(messageAttachments)
+      .where(inArray(messageAttachments.s3Key, keys));
+    const keep = new Set(referenced.map((r) => r.s3Key));
+    const results = await Promise.allSettled(
+      keys.filter((k) => !keep.has(k)).map((k) => deleteObject(k)),
+    );
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        console.error(`Failed to delete stored object for story ${storyId}:`, r.reason);
+      }
+    }
+  }
   return { ok: true };
 }
 

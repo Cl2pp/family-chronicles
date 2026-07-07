@@ -3,11 +3,18 @@ import { requireUser } from '@/lib/session';
 import { resolveActiveChronicle } from '@/lib/chronicles';
 import { attachmentsByMessage, listMessages, resumableConversation } from '@/lib/conversations';
 import { presignGet } from '@/lib/s3';
+import { getI18n } from '@/lib/i18n/server';
 import type { Receipt } from '@/lib/ai/tools';
 import { ChatView } from './chat-view';
 
-export default async function ChatPage() {
+export default async function ChatPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ intent?: string }>;
+}) {
+  const { intent } = await searchParams;
   const user = await requireUser();
+  const { t } = await getI18n();
   const cookieValue = (await cookies()).get('activeChronicleId')?.value;
   const { active } = await resolveActiveChronicle(user.id, cookieValue);
 
@@ -43,6 +50,7 @@ export default async function ChatPage() {
       conversationId={convo?.id ?? null}
       initialMessages={initialMessages}
       chronicle={active ? { id: active.id, name: active.name } : undefined}
+      autoPrompt={intent === 'add-story' ? t.chat.addStoryPrompt : undefined}
     />
   );
 }
