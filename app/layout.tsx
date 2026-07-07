@@ -6,7 +6,7 @@ import './globals.css';
 
 import type { Metadata, Viewport } from 'next';
 import { Inter } from 'next/font/google';
-import { ColorSchemeScript, mantineHtmlProps } from '@mantine/core';
+import { mantineHtmlProps } from '@mantine/core';
 import { getLocale } from '@/lib/i18n/server';
 import { Providers } from './providers';
 
@@ -42,9 +42,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const locale = await getLocale();
   return (
     <html lang={locale} className={inter.variable} {...mantineHtmlProps}>
-      <head>
-        <ColorSchemeScript defaultColorScheme="light" forceColorScheme="light" />
-      </head>
+      {/* No ColorSchemeScript: the app is forced light and mantineHtmlProps already
+          server-renders data-mantine-color-scheme="light"; the client-rendered inline
+          <script> only re-set that attribute and triggered React's dev script-tag error. */}
       <body>
         <Providers locale={locale}>{children}</Providers>
       </body>
