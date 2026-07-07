@@ -18,7 +18,8 @@ import {
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconCopy, IconMailPlus } from '@tabler/icons-react';
-import { roleLabel, type AccessRole } from '@/lib/permissions';
+import type { AccessRole } from '@/lib/permissions';
+import { useI18n } from '@/lib/i18n/client';
 import { invite } from './actions';
 import type { InviteRow, MemberRow } from './types';
 import { initials } from './utils';
@@ -34,13 +35,14 @@ export function AccessTab({
   invites: InviteRow[];
   canManage: boolean;
 }) {
+  const { t } = useI18n();
   const [opened, setOpened] = useState(false);
   const [pending, startTransition] = useTransition();
   const [link, setLink] = useState<string | null>(null);
   const form = useForm({
     initialValues: { email: '', role: 'contributor' as AccessRole },
     validate: {
-      email: (v) => (/^\S+@\S+\.\S+$/.test(v) ? null : 'Enter a valid email'),
+      email: (v) => (/^\S+@\S+\.\S+$/.test(v) ? null : t.auth.enterValidEmail),
     },
   });
 
@@ -56,11 +58,11 @@ export function AccessTab({
         const { token } = await invite({ chronicleId, email: values.email, role: values.role });
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
         setLink(`${origin}/invite/${token}`);
-        notifications.show({ message: 'Invitation created' });
+        notifications.show({ message: t.access.invitationCreated });
       } catch (e) {
         notifications.show({
           color: 'red',
-          message: e instanceof Error ? e.message : 'Could not create invitation',
+          message: e instanceof Error ? e.message : t.access.couldNotCreateInvitation,
         });
       }
     });
@@ -75,7 +77,7 @@ export function AccessTab({
             variant="light"
             onClick={openInvite}
           >
-            Invite
+            {t.access.invite}
           </Button>
         </Group>
       )}
@@ -102,7 +104,7 @@ export function AccessTab({
                 </Table.Td>
                 <Table.Td style={{ textAlign: 'right' }}>
                   <Badge variant="light" color="slate">
-                    {roleLabel(m.role)}
+                    {t.roles[m.role]}
                   </Badge>
                 </Table.Td>
               </Table.Tr>
@@ -114,7 +116,7 @@ export function AccessTab({
       {invites.length > 0 && (
         <div>
           <Text size="sm" fw={600} mb="xs">
-            Pending invitations
+            {t.access.pendingInvitations}
           </Text>
           <Card withBorder radius="md" p={0}>
             <Table verticalSpacing="sm" horizontalSpacing="md">
@@ -126,7 +128,7 @@ export function AccessTab({
                     </Table.Td>
                     <Table.Td style={{ textAlign: 'right' }}>
                       <Badge variant="outline" color="slate">
-                        {roleLabel(i.role)}
+                        {t.roles[i.role]}
                       </Badge>
                     </Table.Td>
                   </Table.Tr>
@@ -137,10 +139,15 @@ export function AccessTab({
         </div>
       )}
 
-      <Modal opened={opened} onClose={() => setOpened(false)} title="Invite to chronicle" radius="md">
+      <Modal
+        opened={opened}
+        onClose={() => setOpened(false)}
+        title={t.access.inviteModalTitle}
+        radius="md"
+      >
         {link ? (
           <Stack>
-            <Text size="sm">Share this link with the person you invited:</Text>
+            <Text size="sm">{t.access.shareLinkText}</Text>
             <TextInput value={link} readOnly />
             <Group justify="flex-end">
               <CopyButton value={link}>
@@ -150,7 +157,7 @@ export function AccessTab({
                     color={copied ? 'teal' : 'brand'}
                     onClick={copy}
                   >
-                    {copied ? 'Copied' : 'Copy link'}
+                    {copied ? t.access.copied : t.access.copyLink}
                   </Button>
                 )}
               </CopyButton>
@@ -160,27 +167,27 @@ export function AccessTab({
           <form onSubmit={form.onSubmit(handleSubmit)}>
             <Stack>
               <TextInput
-                label="Email"
-                placeholder="person@example.com"
+                label={t.access.email}
+                placeholder={t.access.emailPlaceholder}
                 required
                 {...form.getInputProps('email')}
               />
               <Select
-                label="Role"
+                label={t.access.role}
                 data={[
-                  { value: 'viewer', label: 'Viewer' },
-                  { value: 'contributor', label: 'Contributor' },
-                  { value: 'owner', label: 'Owner' },
+                  { value: 'viewer', label: t.roles.viewer },
+                  { value: 'contributor', label: t.roles.contributor },
+                  { value: 'owner', label: t.roles.owner },
                 ]}
                 allowDeselect={false}
                 {...form.getInputProps('role')}
               />
               <Group justify="flex-end" mt="sm">
                 <Button variant="default" onClick={() => setOpened(false)}>
-                  Cancel
+                  {t.common.cancel}
                 </Button>
                 <Button type="submit" loading={pending}>
-                  Create invitation
+                  {t.access.createInvitation}
                 </Button>
               </Group>
             </Stack>

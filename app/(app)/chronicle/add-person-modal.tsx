@@ -5,18 +5,15 @@ import { Button, Group, Modal, Select, Stack, TextInput } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import type { Gender } from '@/lib/people';
+import { useI18n } from '@/lib/i18n/client';
+import type { Dictionary } from '@/lib/i18n';
 import { addPersonAction } from './actions';
-import type { AddTarget } from './types';
+import { genderOptions, type AddTarget } from './types';
 
-export const GENDER_OPTIONS = [
-  { value: 'male', label: 'Male' },
-  { value: 'female', label: 'Female' },
-];
-
-const RELATION_TITLE: Record<AddTarget['relation'], (name: string) => string> = {
-  parent: (n) => `Add a parent of ${n}`,
-  child: (n) => `Add a child of ${n}`,
-  partner: (n) => `Add a partner of ${n}`,
+const RELATION_TITLE: Record<AddTarget['relation'], (t: Dictionary, name: string) => string> = {
+  parent: (t, n) => t.person.addTitleParent(n),
+  child: (t, n) => t.person.addTitleChild(n),
+  partner: (t, n) => t.person.addTitlePartner(n),
 };
 
 export function AddPersonModal({
@@ -30,6 +27,7 @@ export function AddPersonModal({
   target?: AddTarget;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const [pending, startTransition] = useTransition();
   const form = useForm({
     initialValues: {
@@ -41,9 +39,9 @@ export function AddPersonModal({
       diedYear: '',
     },
     validate: {
-      displayName: (v) => (v.trim() ? null : 'A name is required'),
-      bornYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : 'Use a 4-digit year'),
-      diedYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : 'Use a 4-digit year'),
+      displayName: (v) => (v.trim() ? null : t.person.nameRequired),
+      bornYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : t.person.use4DigitYear),
+      diedYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : t.person.use4DigitYear),
     },
   });
 
@@ -52,7 +50,9 @@ export function AddPersonModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opened]);
 
-  const title = target ? RELATION_TITLE[target.relation](target.personName) : 'Add a person';
+  const title = target
+    ? RELATION_TITLE[target.relation](t, target.personName)
+    : t.person.addTitle;
 
   function handleSubmit(values: typeof form.values) {
     startTransition(async () => {
@@ -69,12 +69,12 @@ export function AddPersonModal({
             ? { personId: target.personId, relation: target.relation }
             : undefined,
         });
-        notifications.show({ message: 'Person added' });
+        notifications.show({ message: t.person.added });
         onClose();
       } catch (e) {
         notifications.show({
           color: 'red',
-          message: e instanceof Error ? e.message : 'Could not add person',
+          message: e instanceof Error ? e.message : t.person.couldNotAdd,
         });
       }
     });
@@ -85,46 +85,46 @@ export function AddPersonModal({
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack>
           <TextInput
-            label="Name"
-            placeholder="Full name"
+            label={t.person.name}
+            placeholder={t.person.fullNamePlaceholder}
             required
             {...form.getInputProps('displayName')}
           />
           <TextInput
-            label="Family name (surname)"
-            placeholder="Optional"
+            label={t.person.familyName}
+            placeholder={t.common.optional}
             {...form.getInputProps('familyName')}
           />
           <TextInput
-            label="Birth name (surname at birth)"
-            placeholder="Optional — if it changed, e.g. at marriage"
+            label={t.person.birthName}
+            placeholder={t.person.birthNamePlaceholder}
             {...form.getInputProps('birthFamilyName')}
           />
           <Select
-            label="Gender"
-            placeholder="Optional"
-            data={GENDER_OPTIONS}
+            label={t.person.gender}
+            placeholder={t.common.optional}
+            data={genderOptions(t)}
             clearable
             {...form.getInputProps('gender')}
           />
           <Group grow>
             <TextInput
-              label="Birth year"
-              placeholder="e.g. 1948"
+              label={t.person.birthYear}
+              placeholder={t.person.birthYearPlaceholder}
               {...form.getInputProps('bornYear')}
             />
             <TextInput
-              label="Death year"
-              placeholder="e.g. 2019"
+              label={t.person.deathYear}
+              placeholder={t.person.deathYearPlaceholder}
               {...form.getInputProps('diedYear')}
             />
           </Group>
           <Group justify="flex-end" mt="sm">
             <Button variant="default" onClick={onClose}>
-              Cancel
+              {t.common.cancel}
             </Button>
             <Button type="submit" loading={pending}>
-              Add person
+              {t.person.add}
             </Button>
           </Group>
         </Stack>

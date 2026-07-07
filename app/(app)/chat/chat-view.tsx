@@ -16,12 +16,10 @@ import {
 } from '@mantine/core';
 import { IconMicrophone, IconPhoto, IconPlus, IconSend, IconX } from '@tabler/icons-react';
 import { AudioRecorder, type RecordedAudio } from '@/components/audio-recorder';
+import { useI18n } from '@/lib/i18n/client';
 import { MessageRow } from './message-row';
 import { presignUpload, sendMessage, sendVoiceMessage } from './actions';
 import type { ChatAttachment, Msg } from './types';
-
-const SETUP_SUGGESTIONS = ['Set up my chronicle', 'Add a relative', 'Record a memory'];
-const FAMILY_SUGGESTIONS = ['A childhood memory', 'About Grandma', 'Add a relative to the tree'];
 
 interface PendingPhoto {
   s3Key: string;
@@ -56,6 +54,7 @@ export function ChatView({
   initialMessages: Msg[];
   chronicle?: { id: string; name: string };
 }) {
+  const { t } = useI18n();
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [messages, setMessages] = useState<Msg[]>(initialMessages);
   const [input, setInput] = useState('');
@@ -73,10 +72,7 @@ export function ChatView({
   }, [messages, busyLabel]);
 
   function pushError() {
-    setMessages((m) => [
-      ...m,
-      { role: 'assistant', content: 'Sorry — something went wrong. Please try again.' },
-    ]);
+    setMessages((m) => [...m, { role: 'assistant', content: t.chat.somethingWentWrong }]);
   }
 
   async function send(text: string) {
@@ -88,11 +84,11 @@ export function ChatView({
     setInput('');
     setPhotos([]);
     setMessages((m) => [...m, { role: 'user', content: trimmed, attachments }]);
-    setBusyLabel('Thinking…');
+    setBusyLabel(t.chat.thinking);
     try {
       const res = await sendMessage({
         conversationId,
-        text: trimmed || 'Here are some photos.',
+        text: trimmed || t.chat.herePhotos,
         attachments: pendingPhotos.map((p) => ({
           kind: 'photo',
           s3Key: p.s3Key,
@@ -136,7 +132,7 @@ export function ChatView({
     const previewUrl = URL.createObjectURL(audio.blob);
     setRecording(false);
     setRecorded(null);
-    setBusyLabel('Transcribing…');
+    setBusyLabel(t.chat.transcribing);
     try {
       const s3Key = await uploadBlob('audio', audio.blob, audio.mimeType, `note.${audio.mimeType.includes('mp4') ? 'mp4' : 'webm'}`);
       const res = await sendVoiceMessage({
@@ -157,7 +153,7 @@ export function ChatView({
         ...m,
         {
           role: 'assistant',
-          content: err instanceof Error ? err.message : 'Sorry — something went wrong.',
+          content: err instanceof Error ? err.message : t.chat.somethingWentWrong,
         },
       ]);
     } finally {
@@ -180,7 +176,7 @@ export function ChatView({
   }
 
   const empty = messages.length === 0;
-  const suggestions = chronicle ? FAMILY_SUGGESTIONS : SETUP_SUGGESTIONS;
+  const suggestions = chronicle ? t.chat.familySuggestions : t.chat.setupSuggestions;
 
   return (
     <Box
@@ -199,7 +195,7 @@ export function ChatView({
             onClick={startNewChat}
             disabled={sending}
           >
-            New chat
+            {t.chat.newChat}
           </Button>
         </Group>
       )}
@@ -208,12 +204,10 @@ export function ChatView({
           <Stack gap="lg" mt="xl">
             <Stack gap={4}>
               <Title order={2}>
-                {chronicle ? 'What would you like to do?' : 'Welcome — let’s begin your chronicle'}
+                {chronicle ? t.chat.welcomeTitle : t.chat.welcomeTitleSetup}
               </Title>
               <Text c="dimmed">
-                {chronicle
-                  ? "Talk or type — I’ll write stories and grow your family tree."
-                  : "Tell me about your family and I’ll set up your chronicle, then we can start collecting memories."}
+                {chronicle ? t.chat.welcomeText : t.chat.welcomeTextSetup}
               </Text>
             </Stack>
             <Group gap="sm">
@@ -253,7 +247,7 @@ export function ChatView({
           <Card withBorder radius="md" p="sm" mb="xs">
             <Group justify="space-between" mb="xs">
               <Text size="sm" fw={600}>
-                Voice message
+                {t.chat.voiceMessage}
               </Text>
               <ActionIcon
                 variant="subtle"
@@ -262,7 +256,7 @@ export function ChatView({
                   setRecording(false);
                   setRecorded(null);
                 }}
-                aria-label="Cancel recording"
+                aria-label={t.chat.cancelRecordingAria}
               >
                 <IconX size={16} />
               </ActionIcon>
@@ -270,7 +264,7 @@ export function ChatView({
             <AudioRecorder onChange={setRecorded} />
             {recorded && (
               <Button size="xs" mt="sm" onClick={sendRecording} loading={sending}>
-                Send voice message
+                {t.chat.sendVoiceMessage}
               </Button>
             )}
           </Card>
@@ -289,7 +283,7 @@ export function ChatView({
                   top={2}
                   right={2}
                   onClick={() => setPhotos((ps) => ps.filter((_, j) => j !== i))}
-                  aria-label="Remove photo"
+                  aria-label={t.chat.removePhotoAria}
                 >
                   <IconX size={12} />
                 </ActionIcon>
@@ -326,7 +320,7 @@ export function ChatView({
             color="gray"
             disabled={sending}
             onClick={() => fileRef.current?.click()}
-            aria-label="Add photos"
+            aria-label={t.chat.addPhotosAria}
           >
             <IconPhoto size={18} />
           </ActionIcon>
@@ -337,7 +331,7 @@ export function ChatView({
             color="gray"
             disabled={sending}
             onClick={() => setRecording((r) => !r)}
-            aria-label="Record voice message"
+            aria-label={t.chat.recordVoiceAria}
           >
             <IconMicrophone size={18} />
           </ActionIcon>
@@ -347,7 +341,7 @@ export function ChatView({
             autosize
             minRows={1}
             maxRows={6}
-            placeholder="Message…"
+            placeholder={t.chat.messagePlaceholder}
             value={input}
             onChange={(e) => setInput(e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -362,7 +356,7 @@ export function ChatView({
             radius="md"
             disabled={(!input.trim() && photos.length === 0) || sending}
             onClick={() => send(input)}
-            aria-label="Send"
+            aria-label={t.chat.sendAria}
           >
             <IconSend size={18} />
           </ActionIcon>

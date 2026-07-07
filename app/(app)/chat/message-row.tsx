@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Group, Paper, Stack, Text } from '@mantine/core';
+import { useI18n } from '@/lib/i18n/client';
 import { ActionReceipts } from './action-receipts';
 import { MessageAttachments } from './message-attachments';
 import { StoryDraftCard } from './story-draft-card';
@@ -16,6 +17,7 @@ export function MessageRow({
   conversationId: string | null;
   onResult: (r: MsgResult) => void;
 }) {
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [discarded, setDiscarded] = useState(false);
 
@@ -54,9 +56,9 @@ export function MessageRow({
             {
               label:
                 msg.result.kind === 'story-update'
-                  ? `Updated "${msg.result.title}"`
-                  : `Saved "${msg.result.title}" to ${msg.result.chronicleName}`,
-              detail: 'View story',
+                  ? t.chat.updatedStory(msg.result.title)
+                  : t.chat.savedStoryTo(msg.result.title, msg.result.chronicleName),
+              detail: t.chat.viewStory,
               href: `/stories/${msg.result.storyId}`,
             },
           ]}

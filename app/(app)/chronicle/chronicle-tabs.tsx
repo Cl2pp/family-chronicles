@@ -3,14 +3,14 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Box, Group, Paper, Select, Stack, Tabs, Text, Title } from '@mantine/core';
-import { IconBinaryTree2, IconSettings, IconUsers } from '@tabler/icons-react';
+import { IconBinaryTree2, IconUsers } from '@tabler/icons-react';
 import type { FamilyTree as MergedTree, TreePerson } from '@/lib/people';
 import { canContribute, canManage, type AccessRole } from '@/lib/permissions';
+import { useI18n } from '@/lib/i18n/client';
 import { FamilyTree } from './family-tree';
 import { AddPersonModal } from './add-person-modal';
 import { EditPersonModal } from './edit-person-modal';
 import { AccessTab } from './access-tab';
-import { SettingsTab } from './settings-tab';
 import type { AddTarget, ChronicleRow, InviteRow, MemberRow, PersonRow } from './types';
 
 const PALETTE = ['brand', 'grape', 'teal', 'orange', 'pink', 'cyan', 'lime', 'violet', 'red'];
@@ -23,7 +23,6 @@ interface ChronicleTabsProps {
   members: MemberRow[];
   invites: InviteRow[];
   currentUserId: string;
-  styleGuide: string;
 }
 
 export function ChronicleTabs({
@@ -34,9 +33,9 @@ export function ChronicleTabs({
   members,
   invites,
   currentUserId,
-  styleGuide,
 }: ChronicleTabsProps) {
   const router = useRouter();
+  const { t } = useI18n();
   const [addState, setAddState] = useState<{ opened: boolean; target?: AddTarget }>({
     opened: false,
   });
@@ -63,8 +62,8 @@ export function ChronicleTabs({
   }, [tree.people]);
 
   const colorByTag: Record<string, string> = {};
-  familyTags.forEach((t, i) => {
-    colorByTag[t.tag] = `var(--mantine-color-${PALETTE[i % PALETTE.length]}-6)`;
+  familyTags.forEach((family, i) => {
+    colorByTag[family.tag] = `var(--mantine-color-${PALETTE[i % PALETTE.length]}-6)`;
   });
 
   const openAdd = (target?: AddTarget) => setAddState({ opened: true, target });
@@ -73,10 +72,10 @@ export function ChronicleTabs({
   return (
     <Stack gap="lg">
       <Group justify="space-between" align="flex-start">
-        <Title order={2}>Family Tree</Title>
+        <Title order={2}>{t.tree.pageTitle}</Title>
         {chronicles.length > 1 && (
           <Select
-            aria-label="Active chronicle"
+            aria-label={t.tree.activeChronicleAria}
             w={200}
             allowDeselect={false}
             value={active.id}
@@ -90,13 +89,10 @@ export function ChronicleTabs({
       <Tabs defaultValue="tree" keepMounted={false}>
         <Tabs.List>
           <Tabs.Tab value="tree" leftSection={<IconBinaryTree2 size={16} />}>
-            Tree
+            {t.tree.tabTree}
           </Tabs.Tab>
           <Tabs.Tab value="access" leftSection={<IconUsers size={16} />}>
-            Access
-          </Tabs.Tab>
-          <Tabs.Tab value="settings" leftSection={<IconSettings size={16} />}>
-            Settings
+            {t.tree.tabAccess}
           </Tabs.Tab>
         </Tabs.List>
 
@@ -107,10 +103,10 @@ export function ChronicleTabs({
               <Paper withBorder radius="md" p="md">
                 <Group justify="space-between" align="baseline" mb="xs">
                   <Text size="sm" fw={600}>
-                    Families
+                    {t.tree.familiesTitle}
                   </Text>
                   <Text size="xs" c="dimmed">
-                    Detected automatically from last names, ancestry, and marriages
+                    {t.tree.familiesHint}
                   </Text>
                 </Group>
                 <Group gap="lg">
@@ -153,17 +149,6 @@ export function ChronicleTabs({
             chronicleId={active.id}
             members={members}
             invites={invites}
-            canManage={canManage(role)}
-          />
-        </Tabs.Panel>
-
-        {/* ── Settings ─────────────────────────────────────────────────── */}
-        <Tabs.Panel value="settings" pt="lg">
-          <SettingsTab
-            chronicleId={active.id}
-            name={active.name}
-            description={active.description ?? ''}
-            styleGuide={styleGuide}
             canManage={canManage(role)}
           />
         </Tabs.Panel>

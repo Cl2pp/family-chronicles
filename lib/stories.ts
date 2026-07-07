@@ -328,14 +328,19 @@ export async function resetStoryForRetry(storyId: string) {
     .where(eq(stories.id, storyId));
 }
 
-/** The styleGuide to use when styling a story: the first chronicle it's shared into. */
-export async function styleGuideForStory(storyId: string): Promise<string | null> {
+/** Styling context (style guide + story language) from the first chronicle a story is shared into. */
+export async function styleContextForStory(
+  storyId: string,
+): Promise<{ styleGuide: string | null; storyLanguage: string | null }> {
   const rows = await db
-    .select({ styleGuide: chronicles.styleGuide })
+    .select({ styleGuide: chronicles.styleGuide, storyLanguage: chronicles.storyLanguage })
     .from(storyChronicles)
     .innerJoin(chronicles, eq(storyChronicles.chronicleId, chronicles.id))
     .where(eq(storyChronicles.storyId, storyId))
     .orderBy(storyChronicles.sharedAt)
     .limit(1);
-  return rows[0]?.styleGuide ?? null;
+  return {
+    styleGuide: rows[0]?.styleGuide ?? null,
+    storyLanguage: rows[0]?.storyLanguage ?? null,
+  };
 }

@@ -4,7 +4,7 @@ import { db } from '@/db';
 import { stories } from '@/db/schema';
 import { getBoss, QUEUES, type StyleJob } from '@/lib/queue';
 import { styleStory } from '@/lib/ai/openrouter';
-import { styleGuideForStory } from '@/lib/stories';
+import { styleContextForStory } from '@/lib/stories';
 
 async function markFailed(storyId: string, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
@@ -23,11 +23,12 @@ async function handleStyle(data: StyleJob) {
     if (!story) throw new Error(`Story ${storyId} not found`);
     if (!story.bodyOriginal?.trim()) throw new Error('No source text to style');
 
-    const styleGuide = await styleGuideForStory(storyId);
+    const { styleGuide, storyLanguage } = await styleContextForStory(storyId);
 
     const styled = await styleStory({
       original: story.bodyOriginal,
       styleGuide,
+      language: storyLanguage,
       title: story.title,
     });
 

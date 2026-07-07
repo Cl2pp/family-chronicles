@@ -15,9 +15,11 @@ import {
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { authClient } from '@/lib/auth-client';
+import { useI18n } from '@/lib/i18n/client';
 
 function SignupForm() {
   const router = useRouter();
+  const { t } = useI18n();
   const params = useSearchParams();
   const next = params.get('next') || '/chat';
   const [loading, setLoading] = useState(false);
@@ -25,9 +27,9 @@ function SignupForm() {
   const form = useForm({
     initialValues: { name: '', email: '', password: '' },
     validate: {
-      name: (v) => (v.trim().length >= 2 ? null : 'Tell us your name'),
-      email: (v) => (/^\S+@\S+\.\S+$/.test(v) ? null : 'Enter a valid email'),
-      password: (v) => (v.length >= 8 ? null : 'At least 8 characters'),
+      name: (v) => (v.trim().length >= 2 ? null : t.auth.tellUsYourName),
+      email: (v) => (/^\S+@\S+\.\S+$/.test(v) ? null : t.auth.enterValidEmail),
+      password: (v) => (v.length >= 8 ? null : t.auth.atLeast8Chars),
     },
   });
 
@@ -40,7 +42,7 @@ function SignupForm() {
     });
     setLoading(false);
     if (error) {
-      notifications.show({ color: 'red', message: error.message ?? 'Sign up failed' });
+      notifications.show({ color: 'red', message: error.message ?? t.auth.signUpFailed });
       return;
     }
     router.push(next);
@@ -50,26 +52,30 @@ function SignupForm() {
   return (
     <Paper withBorder p="xl" radius="md">
       <Title order={2} mb="lg">
-        Create your account
+        {t.auth.createYourAccount}
       </Title>
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack>
-          <TextInput label="Name" placeholder="Maria Schmidt" {...form.getInputProps('name')} />
           <TextInput
-            label="Email"
-            placeholder="you@example.com"
+            label={t.auth.name}
+            placeholder={t.auth.namePlaceholder}
+            {...form.getInputProps('name')}
+          />
+          <TextInput
+            label={t.auth.email}
+            placeholder={t.auth.emailPlaceholder}
             {...form.getInputProps('email')}
           />
-          <PasswordInput label="Password" {...form.getInputProps('password')} />
+          <PasswordInput label={t.auth.password} {...form.getInputProps('password')} />
           <Button type="submit" loading={loading} fullWidth>
-            Create account
+            {t.home.createAccount}
           </Button>
         </Stack>
       </form>
 
       <Text size="sm" mt="lg" ta="center">
-        Already have an account?{' '}
-        <Anchor href={`/login?next=${encodeURIComponent(next)}`}>Sign in</Anchor>
+        {t.auth.alreadyHaveAccount}{' '}
+        <Anchor href={`/login?next=${encodeURIComponent(next)}`}>{t.auth.signIn}</Anchor>
       </Text>
     </Paper>
   );

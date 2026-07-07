@@ -4,11 +4,13 @@ import { db } from '@/db';
 import { account } from '@/db/schema';
 import { requireUser } from '@/lib/session';
 import { presignGet } from '@/lib/s3';
+import { getI18n } from '@/lib/i18n/server';
 import { ProfileCard } from './profile-card';
 import { ChangePasswordForm } from './change-password-form';
 
 export default async function AccountPage() {
   const user = await requireUser();
+  const { t } = await getI18n();
   const avatarUrl = user.image ? await presignGet(user.image) : null;
   const credential = await db.query.account.findFirst({
     where: and(eq(account.userId, user.id), eq(account.providerId, 'credential')),
@@ -18,21 +20,21 @@ export default async function AccountPage() {
   return (
     <Box p="lg" maw={640} mx="auto">
       <Title order={1} mb="lg">
-        Account
+        {t.account.title}
       </Title>
       <ProfileCard name={user.name} email={user.email} avatarUrl={avatarUrl} />
 
       <Card withBorder radius="md" p="lg" mt="lg">
         <Title order={3} mb="md">
-          Change password
+          {t.account.changePassword}
         </Title>
         <ChangePasswordForm hasPassword={!!credential} />
       </Card>
 
       <Text size="sm" c="dimmed" mt="lg">
-        Looking for your chronicles or app info? See{' '}
+        {t.account.settingsHintPrefix}{' '}
         <Anchor component="a" href="/settings" size="sm">
-          App settings
+          {t.account.settingsHintLink}
         </Anchor>
         .
       </Text>

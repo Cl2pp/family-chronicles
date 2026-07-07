@@ -15,6 +15,7 @@ import {
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconCamera } from '@tabler/icons-react';
+import { useI18n } from '@/lib/i18n/client';
 import { presignAvatarUpload, saveAvatar, updateDisplayName } from './actions';
 import { SignOutButton } from './sign-out-button';
 
@@ -40,17 +41,18 @@ export function ProfileCard({
   avatarUrl: string | null;
 }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [uploading, setUploading] = useState(false);
   const [saving, startTransition] = useTransition();
   const form = useForm({
     initialValues: { name },
-    validate: { name: (v) => (v.trim() ? null : 'A name is required') },
+    validate: { name: (v) => (v.trim() ? null : t.account.nameRequired) },
   });
 
   async function handleAvatar(file: File | null) {
     if (!file) return;
     if (file.size > MAX_AVATAR_BYTES) {
-      notifications.show({ color: 'red', message: 'Photos can be at most 5 MB.' });
+      notifications.show({ color: 'red', message: t.account.photoTooLarge });
       return;
     }
     setUploading(true);
@@ -64,14 +66,14 @@ export function ProfileCard({
         headers: { 'Content-Type': file.type },
         body: file,
       });
-      if (!res.ok) throw new Error('Upload failed');
+      if (!res.ok) throw new Error(t.account.uploadFailed);
       await saveAvatar({ s3Key });
-      notifications.show({ message: 'Photo updated' });
+      notifications.show({ message: t.account.photoUpdated });
       router.refresh();
     } catch (e) {
       notifications.show({
         color: 'red',
-        message: e instanceof Error ? e.message : 'Could not update the photo',
+        message: e instanceof Error ? e.message : t.account.couldNotUpdatePhoto,
       });
     } finally {
       setUploading(false);
@@ -82,13 +84,13 @@ export function ProfileCard({
     startTransition(async () => {
       try {
         await updateDisplayName({ name: values.name });
-        notifications.show({ message: 'Name updated' });
+        notifications.show({ message: t.account.nameUpdated });
         form.resetDirty(values);
         router.refresh();
       } catch (e) {
         notifications.show({
           color: 'red',
-          message: e instanceof Error ? e.message : 'Could not update the name',
+          message: e instanceof Error ? e.message : t.account.couldNotUpdateName,
         });
       }
     });
@@ -111,12 +113,12 @@ export function ProfileCard({
                   loading={uploading}
                   leftSection={<IconCamera size={14} />}
                 >
-                  Change photo
+                  {t.account.changePhoto}
                 </Button>
               )}
             </FileButton>
             <Text size="xs" c="dimmed">
-              Also used for you in the family tree.
+              {t.account.avatarHint}
             </Text>
           </Stack>
         </Group>
@@ -125,16 +127,16 @@ export function ProfileCard({
 
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack mt="lg">
-          <TextInput label="Display name" required {...form.getInputProps('name')} />
+          <TextInput label={t.account.displayName} required {...form.getInputProps('name')} />
           <TextInput
-            label="Email"
+            label={t.auth.email}
             value={email}
             disabled
-            description="Email can't be changed"
+            description={t.account.emailCantChange}
           />
           <Group justify="flex-end">
             <Button type="submit" loading={saving} disabled={!form.isDirty()}>
-              Save changes
+              {t.common.saveChanges}
             </Button>
           </Group>
         </Stack>

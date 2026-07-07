@@ -1,22 +1,28 @@
 import { cookies } from 'next/headers';
 import { Anchor, Box, Card, Group, Stack, Text, Title } from '@mantine/core';
 import { requireUser } from '@/lib/session';
-import { resolveActiveChronicle } from '@/lib/chronicles';
-import type { AccessRole } from '@/lib/permissions';
+import { getChronicle, resolveActiveChronicle } from '@/lib/chronicles';
+import { canManage, type AccessRole } from '@/lib/permissions';
+import { getI18n } from '@/lib/i18n/server';
+import { LOCALE_BCP47 } from '@/lib/i18n/config';
 import { ChroniclesCard } from './chronicles-card';
+import { ChronicleSettingsCard } from './chronicle-settings-card';
+import { LanguageCard } from './language-card';
 import pkg from '@/package.json';
 
 export default async function SettingsPage() {
   const user = await requireUser();
+  const { locale, t } = await getI18n();
   const activeCookie = (await cookies()).get('activeChronicleId')?.value;
   const { chronicles, active } = await resolveActiveChronicle(user.id, activeCookie);
+  const fullChronicle = active ? await getChronicle(active.id) : undefined;
 
   const rows = chronicles.map((f) => ({
     id: f.id,
     name: f.name,
     description: f.description,
     role: f.role as AccessRole,
-    createdLabel: f.createdAt.toLocaleDateString('en-GB', {
+    createdLabel: f.createdAt.toLocaleDateString(LOCALE_BCP47[locale], {
       day: 'numeric',
       month: 'long',
       year: 'numeric',
@@ -26,30 +32,53 @@ export default async function SettingsPage() {
   return (
     <Box p="lg" maw={760} mx="auto">
       <Title order={1} mb="lg">
-        Settings
+        {t.settings.title}
       </Title>
 
       <Stack gap="lg">
         <Box>
           <Title order={3} mb="xs">
-            My chronicles
+            {t.settings.languageTitle}
           </Title>
-          <Text size="sm" c="dimmed" mb="md">
-            The selected chronicle is the one Chat, Stories and Tree open with.
-          </Text>
-          <ChroniclesCard chronicles={rows} activeId={active?.id ?? null} />
+          <LanguageCard />
         </Box>
 
         <Box>
           <Title order={3} mb="xs">
-            About
+            {t.settings.myChroniclesTitle}
+          </Title>
+          <Text size="sm" c="dimmed" mb="md">
+            {t.settings.myChroniclesHint}
+          </Text>
+          <ChroniclesCard chronicles={rows} activeId={active?.id ?? null} />
+        </Box>
+
+        {active && fullChronicle && (
+          <Box>
+            <Title order={3} mb="xs">
+              {t.settings.chronicleSettingsTitle}
+            </Title>
+            <ChronicleSettingsCard
+              chronicleId={active.id}
+              name={fullChronicle.name}
+              description={fullChronicle.description ?? ''}
+              styleGuide={fullChronicle.styleGuide ?? ''}
+              storyLanguage={fullChronicle.storyLanguage}
+              canManage={canManage(active.role as AccessRole)}
+            />
+          </Box>
+        )}
+
+        <Box>
+          <Title order={3} mb="xs">
+            {t.settings.aboutTitle}
           </Title>
           <Card withBorder radius="md" p="lg">
             <Group justify="space-between" align="flex-start">
               <Stack gap={2}>
                 <Text fw={600}>Family Chronicle</Text>
                 <Text size="sm" c="dimmed">
-                  A private place for your family&apos;s stories and tree.
+                  {t.settings.aboutDescription}
                 </Text>
               </Stack>
               <Text size="sm" c="dimmed">
@@ -60,9 +89,9 @@ export default async function SettingsPage() {
         </Box>
 
         <Text size="sm" c="dimmed">
-          Profile, password and sign-out live in{' '}
+          {t.settings.accountHintPrefix}{' '}
           <Anchor component="a" href="/account" size="sm">
-            Account
+            {t.settings.accountHintLink}
           </Anchor>
           .
         </Text>

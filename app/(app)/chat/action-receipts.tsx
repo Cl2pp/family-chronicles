@@ -5,11 +5,13 @@ import Link from 'next/link';
 import { Anchor, Button, Stack, Text, ThemeIcon } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { IconArrowBackUp, IconCheck } from '@tabler/icons-react';
+import { useI18n } from '@/lib/i18n/client';
 import type { Receipt } from '@/lib/ai/tools';
 import { undoAction } from './actions';
 
 /** The ✓ "did X" chips shown under an assistant reply for actions applied this turn. */
 export function ActionReceipts({ receipts }: { receipts: Receipt[] }) {
+  const { t } = useI18n();
   const [undone, setUndone] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState<number | null>(null);
 
@@ -24,7 +26,7 @@ export function ActionReceipts({ receipts }: { receipts: Receipt[] }) {
         notifications.show({ color: 'red', message: res.error });
       }
     } catch {
-      notifications.show({ color: 'red', message: 'Could not undo that. Please try again.' });
+      notifications.show({ color: 'red', message: t.chat.couldNotUndo });
     } finally {
       setBusy(null);
     }
@@ -58,7 +60,7 @@ export function ActionReceipts({ receipts }: { receipts: Receipt[] }) {
             {r.undo &&
               (isUndone ? (
                 <Text size="xs" c="dimmed" mt={2}>
-                  Undone
+                  {t.common.undone}
                 </Text>
               ) : (
                 <Button
@@ -69,7 +71,7 @@ export function ActionReceipts({ receipts }: { receipts: Receipt[] }) {
                   loading={busy === i}
                   onClick={() => undo(i, r)}
                 >
-                  Undo
+                  {t.common.undo}
                 </Button>
               ))}
           </div>

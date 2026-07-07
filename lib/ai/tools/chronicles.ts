@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { createChronicle, listChroniclesForUser, updateChronicle } from '@/lib/chronicles';
+import {
+  createChronicle,
+  listChroniclesForUser,
+  normalizeStoryLanguage,
+  updateChronicle,
+} from '@/lib/chronicles';
 import { defineTool } from './types';
 import { ensureOwner } from './util';
 
@@ -43,8 +48,9 @@ export const createChronicleTool = defineTool({
 export const updateChronicleSettingsTool = defineTool({
   name: 'update_chronicle_settings',
   description:
-    "Update the active chronicle's name, description, or style guide. The style guide is free text " +
-    'that shapes how memories are rewritten into memoir prose (e.g. tone, formality). Owner only.',
+    "Update the active chronicle's name, description, style guide, or story language. The style " +
+    'guide is free text that shapes how memories are rewritten into memoir prose (e.g. tone, ' +
+    'formality). Owner only.',
   schema: z.object({
     name: z.string().nullish().describe('New chronicle name.'),
     description: z.string().nullish().describe('New description.'),
@@ -52,12 +58,23 @@ export const updateChronicleSettingsTool = defineTool({
       .string()
       .nullish()
       .describe('Writing-style guidance injected into the story styling prompt.'),
+    storyLanguage: z
+      .enum(['en', 'de', 'auto'])
+      .nullish()
+      .describe(
+        "Language stories are retold in: 'en', 'de', or 'auto' to keep each submission's language.",
+      ),
   }),
   async execute(args, ctx) {
     const gate = await ensureOwner(ctx);
     if ('error' in gate) return { ok: false, error: gate.error };
 
-    const patch: { name?: string; description?: string | null; styleGuide?: string | null } = {};
+    const patch: {
+      name?: string;
+      description?: string | null;
+      styleGuide?: string | null;
+      storyLanguage?: string | null;
+    } = {};
     if (args.name != null) {
       const name = args.name.trim();
       if (!name) return { ok: false, error: 'A chronicle name cannot be empty.' };
@@ -65,8 +82,14 @@ export const updateChronicleSettingsTool = defineTool({
     }
     if (args.description != null) patch.description = args.description.trim() || null;
     if (args.styleGuide != null) patch.styleGuide = args.styleGuide.trim() || null;
+    if (args.storyLanguage != null) {
+      patch.storyLanguage = normalizeStoryLanguage(args.storyLanguage);
+    }
     if (Object.keys(patch).length === 0) {
-      return { ok: false, error: 'Nothing to update — provide name, description, or styleGuide.' };
+      return {
+        ok: false,
+        error: 'Nothing to update — provide name, description, styleGuide, or storyLanguage.',
+      };
     }
 
     await updateChronicle(gate.chronicleId, patch);

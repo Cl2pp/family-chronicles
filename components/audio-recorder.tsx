@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Group, Stack, Text } from '@mantine/core';
 import { IconMicrophone, IconPlayerStopFilled, IconTrash } from '@tabler/icons-react';
+import { useI18n } from '@/lib/i18n/client';
 
 export interface RecordedAudio {
   blob: Blob;
@@ -26,6 +27,7 @@ function formatTime(s: number): string {
 }
 
 export function AudioRecorder({ onChange }: { onChange: (a: RecordedAudio | null) => void }) {
+  const { t } = useI18n();
   const [state, setState] = useState<'idle' | 'recording' | 'recorded'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -78,7 +80,7 @@ export function AudioRecorder({ onChange }: { onChange: (a: RecordedAudio | null
         500,
       );
     } catch {
-      setError('Microphone access was denied or is unavailable.');
+      setError(t.recorder.micDenied);
     }
   }
 
@@ -104,7 +106,7 @@ export function AudioRecorder({ onChange }: { onChange: (a: RecordedAudio | null
           onClick={start}
           w="fit-content"
         >
-          Start recording
+          {t.recorder.start}
         </Button>
       )}
 
@@ -115,7 +117,7 @@ export function AudioRecorder({ onChange }: { onChange: (a: RecordedAudio | null
             leftSection={<IconPlayerStopFilled size={16} />}
             onClick={stop}
           >
-            Stop
+            {t.recorder.stop}
           </Button>
           <Text c="red">● {formatTime(elapsed)}</Text>
         </Group>
@@ -131,7 +133,7 @@ export function AudioRecorder({ onChange }: { onChange: (a: RecordedAudio | null
             onClick={reset}
             w="fit-content"
           >
-            Record again
+            {t.recorder.again}
           </Button>
         </Stack>
       )}

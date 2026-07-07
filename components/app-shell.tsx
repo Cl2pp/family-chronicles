@@ -21,19 +21,21 @@ import {
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { authClient } from '@/lib/auth-client';
+import { useI18n } from '@/lib/i18n/client';
+import type { Dictionary } from '@/lib/i18n';
 
 const NAV = [
-  { href: '/chat', label: 'Chat', icon: IconMessageCircle },
-  { href: '/stories', label: 'Stories', icon: IconBook2 },
-  { href: '/chronicle', label: 'Family Tree', icon: IconBinaryTree2 },
-  { href: '/settings', label: 'Settings', icon: IconSettings },
+  { href: '/chat', label: (t: Dictionary) => t.nav.chat, icon: IconMessageCircle },
+  { href: '/stories', label: (t: Dictionary) => t.nav.stories, icon: IconBook2 },
+  { href: '/chronicle', label: (t: Dictionary) => t.nav.chronicle, icon: IconBinaryTree2 },
+  { href: '/settings', label: (t: Dictionary) => t.nav.settings, icon: IconSettings },
 ] as const;
 
 const MOBILE_NAV = [
-  { href: '/chat', label: 'Chat', icon: IconMessageCircle },
-  { href: '/stories', label: 'Stories', icon: IconBook2 },
-  { href: '/chronicle', label: 'Family Tree', icon: IconBinaryTree2 },
-  { href: '/account', label: 'Account', icon: IconUserCircle },
+  { href: '/chat', label: (t: Dictionary) => t.nav.chat, icon: IconMessageCircle },
+  { href: '/stories', label: (t: Dictionary) => t.nav.stories, icon: IconBook2 },
+  { href: '/chronicle', label: (t: Dictionary) => t.nav.chronicle, icon: IconBinaryTree2 },
+  { href: '/account', label: (t: Dictionary) => t.nav.account, icon: IconUserCircle },
 ] as const;
 
 function initials(name: string) {
@@ -59,6 +61,7 @@ export function AppChrome({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { t } = useI18n();
 
   async function signOut() {
     await authClient.signOut();
@@ -110,7 +113,7 @@ export function AppChrome({
                 <Group gap={10} wrap="nowrap">
                   <Icon size={18} stroke={1.8} />
                   <Text fz={13} fw={activeItem ? 600 : 500}>
-                    {item.label}
+                    {item.label(t)}
                   </Text>
                 </Group>
               </UnstyledButton>
@@ -133,7 +136,7 @@ export function AppChrome({
                       {user.name}
                     </Text>
                     <Text fz={11} c="dimmed">
-                      Account
+                      {t.nav.account}
                     </Text>
                   </Box>
                 </Group>
@@ -146,17 +149,17 @@ export function AppChrome({
                 component={Link}
                 href="/account"
               >
-                Account
+                {t.nav.account}
               </Menu.Item>
               <Menu.Item
                 leftSection={<IconSettings size={16} />}
                 component={Link}
                 href="/settings"
               >
-                Settings
+                {t.nav.settings}
               </Menu.Item>
               <Menu.Item leftSection={<IconLogout size={16} />} onClick={signOut}>
-                Sign out
+                {t.nav.signOut}
               </Menu.Item>
             </Menu.Dropdown>
           </Menu>
@@ -210,7 +213,7 @@ export function AppChrome({
                     fw={activeItem ? 600 : 500}
                     c={activeItem ? 'brand.7' : 'dimmed'}
                   >
-                    {item.label}
+                    {item.label(t)}
                   </Text>
                 </Stack>
               </UnstyledButton>

@@ -2,12 +2,7 @@ import { redirect } from 'next/navigation';
 import { Button, Center, Container, Paper, Stack, Text, Title } from '@mantine/core';
 import { getSession } from '@/lib/session';
 import { acceptInvitation } from '@/lib/invitations';
-
-const MESSAGES: Record<string, string> = {
-  not_found: 'This invitation link is not valid.',
-  expired: 'This invitation has expired. Ask for a new invite.',
-  used: 'This invitation has already been used.',
-};
+import { getI18n } from '@/lib/i18n/server';
 
 export default async function InvitePage({
   params,
@@ -26,15 +21,22 @@ export default async function InvitePage({
     redirect(`/chronicle`);
   }
 
+  const { t } = await getI18n();
+  const messages: Record<string, string> = {
+    not_found: t.invite.notFound,
+    expired: t.invite.expired,
+    used: t.invite.used,
+  };
+
   return (
     <Center mih="100dvh">
       <Container size={420} w="100%" py="xl">
         <Paper withBorder p="xl" radius="md">
           <Stack>
-            <Title order={3}>Invitation</Title>
-            <Text c="dimmed">{MESSAGES[result.reason]}</Text>
+            <Title order={3}>{t.invite.title}</Title>
+            <Text c="dimmed">{messages[result.reason]}</Text>
             <Button component="a" href="/chronicle">
-              Go to your chronicles
+              {t.invite.goToChronicles}
             </Button>
           </Stack>
         </Paper>

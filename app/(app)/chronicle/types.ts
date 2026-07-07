@@ -1,5 +1,14 @@
 import type { AccessRole } from '@/lib/permissions';
 import type { Gender, PersonRelation } from '@/lib/people';
+import type { Dictionary } from '@/lib/i18n';
+
+/** Localized options for the person gender selects. */
+export function genderOptions(t: Dictionary): { value: Gender; label: string }[] {
+  return [
+    { value: 'male', label: t.person.male },
+    { value: 'female', label: t.person.female },
+  ];
+}
 
 export interface AddTarget {
   personId: string;

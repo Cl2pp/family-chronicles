@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Button, Card, Group, Text, TextInput, Textarea } from '@mantine/core';
 import { IconSparkles } from '@tabler/icons-react';
+import { useI18n } from '@/lib/i18n/client';
 import type { StoryDraft } from '@/lib/ai/tools';
 import { acceptStory, applyStoryUpdate, discardStoryDraft } from './actions';
 import type { MsgResult } from './types';
@@ -23,6 +24,7 @@ export function StoryDraftCard({
   onDiscard: () => void;
   onResult: (r: MsgResult) => void;
 }) {
+  const { t } = useI18n();
   const { proposal, chronicleId, chronicleName, updateStoryId } = draft;
   const isUpdate = Boolean(updateStoryId);
   const [title, setTitle] = useState(proposal.title);
@@ -71,11 +73,11 @@ export function StoryDraftCard({
       <Group gap={6} mb="xs">
         <IconSparkles size={15} color="var(--mantine-color-brand-6)" />
         <Text size="xs" fw={600} c="brand.7" tt="uppercase">
-          {isUpdate ? 'Story update' : 'Story draft'} · {chronicleName}
+          {isUpdate ? t.chat.storyUpdate : t.chat.storyDraft} · {chronicleName}
         </Text>
       </Group>
       <TextInput
-        label="Title"
+        label={t.chat.draftTitle}
         value={title}
         onChange={(e) => setTitle(e.currentTarget.value)}
         mb="xs"
@@ -86,7 +88,7 @@ export function StoryDraftCard({
         </Text>
       )}
       <Textarea
-        label="Story"
+        label={t.chat.draftStory}
         value={body}
         onChange={(e) => setBody(e.currentTarget.value)}
         autosize
@@ -95,7 +97,7 @@ export function StoryDraftCard({
         mb="xs"
       />
       <TextInput
-        label="Year (optional)"
+        label={t.chat.draftYear}
         value={year}
         onChange={(e) => setYear(e.currentTarget.value.replace(/[^0-9]/g, ''))}
         w={140}
@@ -103,10 +105,10 @@ export function StoryDraftCard({
       />
       <Group gap="xs">
         <Button size="xs" onClick={accept} loading={busy}>
-          {isUpdate ? 'Save changes' : 'Accept & save'}
+          {isUpdate ? t.common.saveChanges : t.chat.acceptSave}
         </Button>
         <Button size="xs" variant="default" onClick={discard} disabled={busy}>
-          Discard
+          {t.chat.discard}
         </Button>
       </Group>
     </Card>

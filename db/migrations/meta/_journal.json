@@ -36,6 +36,13 @@
       "when": 1783436574127,
       "tag": "0004_add_person_birth_family_name",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783445544258,
+      "tag": "0005_add_chronicle_story_language",
+      "breakpoints": true
     }
   ]
 }

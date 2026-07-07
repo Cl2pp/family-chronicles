@@ -18,6 +18,7 @@ import { familyTagsByStory } from '@/lib/family-tags';
 import { listChroniclesForUser } from '@/lib/chronicles';
 import { formatEventDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
+import { getI18n } from '@/lib/i18n/server';
 import { presignGet } from '@/lib/s3';
 import { RetryButton } from './retry-button';
 import { SourceAccordion } from './source-accordion';
@@ -38,6 +39,7 @@ export default async function StoryDetailPage({
 }) {
   const { storyId } = await params;
   const user = await requireUser();
+  const { locale, t } = await getI18n();
   const story = await getStoryForUser(storyId, user.id);
   if (!story) notFound();
 
@@ -69,8 +71,8 @@ export default async function StoryDetailPage({
     audioAsset ? presignGet(audioAsset.s3Key) : Promise.resolve(null),
   ]);
 
-  const meta = storyStatusMeta(story.status);
-  const date = formatEventDate(story.eventDate, story.eventDatePrecision);
+  const meta = storyStatusMeta(story.status, t);
+  const date = formatEventDate(story.eventDate, story.eventDatePrecision, locale);
   const styledParas = story.bodyStyled ? paragraphs(story.bodyStyled) : [];
 
   return (
@@ -85,13 +87,13 @@ export default async function StoryDetailPage({
             </Badge>
           </Group>
           <Text c="dimmed">
-            By {story.submitterName}
+            {t.stories.by(story.submitterName)}
             {date ? ` · ${date}` : ''}
           </Text>
           {familyTags.length > 0 && (
             <Group gap="xs" align="center">
               <Text size="sm" c="dimmed">
-                Families
+                {t.story.families}
               </Text>
               {familyTags.map((tag) => (
                 <Badge key={tag} variant="light" color="slate" radius="sm">
@@ -103,7 +105,7 @@ export default async function StoryDetailPage({
           {shareChronicles.length > 1 && (
             <Group gap="xs" align="center">
               <Text size="sm" c="dimmed">
-                Shared with
+                {t.story.sharedWith}
               </Text>
               {shareChronicles.map((f) => (
                 <Badge key={f.id} variant="outline" color="slate" radius="sm">
@@ -132,7 +134,7 @@ export default async function StoryDetailPage({
             color="red"
             variant="light"
             icon={<IconAlertTriangle size={18} />}
-            title="Something went wrong retelling this story"
+            title={t.story.failedTitle}
           >
             <Stack gap="sm" align="flex-start">
               {story.errorMessage && <Text size="sm">{story.errorMessage}</Text>}
@@ -151,7 +153,7 @@ export default async function StoryDetailPage({
         {/* Photos */}
         {photos.length > 0 && (
           <Stack gap="sm">
-            <Title order={3}>Photos</Title>
+            <Title order={3}>{t.story.photos}</Title>
             <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
               {photos.map((p) => (
                 <Image
@@ -169,7 +171,7 @@ export default async function StoryDetailPage({
 
         {/* The story */}
         <Stack gap="sm">
-          <Title order={3}>The story</Title>
+          <Title order={3}>{t.story.theStory}</Title>
           {styledParas.length > 0 ? (
             <Box maw="68ch">
               <Stack gap="md">
@@ -182,7 +184,7 @@ export default async function StoryDetailPage({
             </Box>
           ) : story.status === 'processing' ? (
             <Text c="dimmed" fs="italic">
-              This story is being retold… check back in a moment.
+              {t.story.beingRetold}
             </Text>
           ) : story.bodyOriginal ? (
             <Box maw="68ch">
@@ -196,7 +198,7 @@ export default async function StoryDetailPage({
             </Box>
           ) : (
             <Text c="dimmed" fs="italic">
-              No retold text yet.
+              {t.story.noRetoldText}
             </Text>
           )}
         </Stack>
@@ -204,7 +206,7 @@ export default async function StoryDetailPage({
         {/* Dive deeper */}
         {(story.bodyOriginal || audioUrl || story.conversationId) && (
           <>
-            <Divider label="Dive deeper" labelPosition="center" />
+            <Divider label={t.story.diveDeeper} labelPosition="center" />
             <SourceAccordion
               audioUrl={audioUrl}
               originalParas={story.bodyOriginal ? paragraphs(story.bodyOriginal) : []}

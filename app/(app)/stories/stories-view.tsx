@@ -17,11 +17,10 @@ import {
 import { IconMicrophone, IconPhoto, IconUsers } from '@tabler/icons-react';
 import { formatEventDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
+import { useI18n } from '@/lib/i18n/client';
 import type { StoryListItem } from '@/lib/stories';
 
 type ViewMode = 'timeline' | 'bubbles';
-
-const UNDATED = 'Undated';
 
 function yearKey(story: StoryListItem): number | null {
   if (!story.eventDate) return null;
@@ -37,7 +36,7 @@ interface YearGroup {
 }
 
 /** Group stories by event-year, ascending, with Undated last. */
-function groupByYear(stories: StoryListItem[]): YearGroup[] {
+function groupByYear(stories: StoryListItem[], undatedLabel: string): YearGroup[] {
   const buckets = new Map<number | null, StoryListItem[]>();
   for (const s of stories) {
     const y = yearKey(s);
@@ -51,13 +50,14 @@ function groupByYear(stories: StoryListItem[]): YearGroup[] {
     .map(([year, group]) => ({ year, label: String(year), stories: group }));
 
   const undated = buckets.get(null);
-  if (undated) dated.push({ year: null, label: UNDATED, stories: undated });
+  if (undated) dated.push({ year: null, label: undatedLabel, stories: undated });
   return dated;
 }
 
 function StoryCard({ story }: { story: StoryListItem }) {
-  const meta = storyStatusMeta(story.status);
-  const date = formatEventDate(story.eventDate, story.eventDatePrecision);
+  const { locale, t } = useI18n();
+  const meta = storyStatusMeta(story.status, t);
+  const date = formatEventDate(story.eventDate, story.eventDatePrecision, locale);
   const excerpt = (story.summary ?? story.bodyStyled ?? story.bodyOriginal ?? '').slice(0, 160);
   const shared = story.chronicleIds.length > 1;
 
@@ -82,7 +82,7 @@ function StoryCard({ story }: { story: StoryListItem }) {
 
         <Group gap="xs" c="dimmed">
           <Text size="sm" c="dimmed">
-            By {story.submitterName}
+            {t.stories.by(story.submitterName)}
             {date ? ` · ${date}` : ''}
           </Text>
           {story.inputType === 'voice' && <IconMicrophone size={15} />}
@@ -125,6 +125,7 @@ function StoryCard({ story }: { story: StoryListItem }) {
 }
 
 function Timeline({ groups }: { groups: YearGroup[] }) {
+  const { t } = useI18n();
   return (
     <Stack gap="xl">
       {groups.map((group) => (
@@ -134,7 +135,7 @@ function Timeline({ groups }: { groups: YearGroup[] }) {
               {group.label}
             </Title>
             <Text size="sm" c="dimmed">
-              {group.stories.length} {group.stories.length === 1 ? 'story' : 'stories'}
+              {t.stories.storyCount(group.stories.length)}
             </Text>
           </Group>
           <Box
@@ -235,6 +236,7 @@ function Bubbles({ groups }: { groups: YearGroup[] }) {
 }
 
 export function StoriesView({ stories }: { stories: StoryListItem[] }) {
+  const { t } = useI18n();
   const [view, setView] = useState<ViewMode>('timeline');
   const [tags, setTags] = useState<string[]>([]);
 
@@ -255,18 +257,21 @@ export function StoriesView({ stories }: { stories: StoryListItem[] }) {
     [stories, tags],
   );
 
-  const groups = useMemo(() => groupByYear(visible), [visible]);
+  const groups = useMemo(
+    () => groupByYear(visible, t.stories.undated),
+    [visible, t.stories.undated],
+  );
 
   return (
     <Stack gap="lg">
       <Group justify="space-between" align="center">
-        <Title order={1}>Stories</Title>
+        <Title order={1}>{t.stories.title}</Title>
         <SegmentedControl
           value={view}
           onChange={(v) => setView(v as ViewMode)}
           data={[
-            { label: 'Timeline', value: 'timeline' },
-            { label: 'Bubbles', value: 'bubbles' },
+            { label: t.stories.viewTimeline, value: 'timeline' },
+            { label: t.stories.viewBubbles, value: 'bubbles' },
           ]}
         />
       </Group>
@@ -274,10 +279,10 @@ export function StoriesView({ stories }: { stories: StoryListItem[] }) {
       {tagOptions.length > 1 && (
         <Group gap="xs" align="center">
           <Text size="sm" c="dimmed">
-            Show:
+            {t.stories.show}
           </Text>
           <Chip size="sm" variant="light" checked={tags.length === 0} onClick={() => setTags([])}>
-            All families
+            {t.stories.allFamilies}
           </Chip>
           <Chip.Group multiple value={tags} onChange={setTags}>
             <Group gap="xs">
@@ -294,7 +299,7 @@ export function StoriesView({ stories }: { stories: StoryListItem[] }) {
       {visible.length === 0 ? (
         <Card withBorder radius="md" p="xl">
           <Text c="dimmed" ta="center">
-            No stories in the selected families.
+            {t.stories.noneInFamilies}
           </Text>
         </Card>
       ) : view === 'timeline' ? (
