@@ -162,7 +162,8 @@ export async function sendVoiceMessage(input: {
     const buffer = await getObjectBuffer(input.s3Key);
     const filename = input.s3Key.split('/').pop() ?? 'audio';
     transcript = await transcribeAudio(buffer, filename, input.mimeType);
-  } catch {
+  } catch (err) {
+    console.error(`Voice transcription failed for ${input.s3Key}:`, err);
     throw new Error("Sorry — I couldn't transcribe that recording. Please try again.");
   }
 
