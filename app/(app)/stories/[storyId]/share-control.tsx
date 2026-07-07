@@ -6,7 +6,7 @@ import { IconShare } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { shareStory } from './actions';
 
-/** Lets a contributor share this story into another of their families. */
+/** Lets a contributor share this story into another of their chronicles. */
 export function ShareControl({
   storyId,
   candidates,
@@ -33,7 +33,7 @@ export function ShareControl({
     <Group gap="xs" align="flex-end">
       <Select
         size="xs"
-        placeholder="Share to another family…"
+        placeholder="Share to another chronicle…"
         data={candidates.map((c) => ({ value: c.id, label: c.name }))}
         value={value}
         onChange={setValue}

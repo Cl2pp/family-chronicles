@@ -8,7 +8,7 @@ export const PROMPT_VERSION = 'memoir-v1';
 export interface StylingInput {
   /** The raw text or verbatim transcript to rewrite. */
   original: string;
-  /** The family's free-text style guide (may be empty). */
+  /** The chronicle's free-text style guide (may be empty). */
   styleGuide?: string | null;
   /** Optional title for context. */
   title?: string | null;
@@ -32,8 +32,8 @@ export function buildStylingMessages(input: StylingInput): {
 }[] {
   const styleGuide = input.styleGuide?.trim();
   const styleSection = styleGuide
-    ? `\n\nThis family has its own style guide. Follow it for tone, voice, and formatting:\n"""\n${styleGuide}\n"""`
-    : '\n\nNo family style guide was provided. Use a warm, clear, timeless memoir tone.';
+    ? `\n\nThis chronicle has its own style guide. Follow it for tone, voice, and formatting:\n"""\n${styleGuide}\n"""`
+    : '\n\nNo style guide was provided. Use a warm, clear, timeless memoir tone.';
 
   const titleSection = input.title?.trim() ? `Working title: ${input.title.trim()}\n\n` : '';
 

@@ -4,16 +4,16 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/session';
-import { createFamily, requireContributor, requireOwner, updateFamily } from '@/lib/families';
+import { createChronicle, requireContributor, requireOwner, updateChronicle } from '@/lib/chronicles';
 import {
-  addPersonToFamily,
+  addPersonToChronicle,
   canUserEditPerson,
   connectPeople,
   createPerson,
   deletePerson,
   edgeForRelation,
   getPerson,
-  isPersonInFamily,
+  isPersonInChronicle,
   removeRelationship,
   updatePerson,
   type Gender,
@@ -23,16 +23,16 @@ import { createInvitation } from '@/lib/invitations';
 import type { AccessRole } from '@/lib/permissions';
 import { parseYear, yearToDate } from '@/lib/dates';
 
-/** Create a family, make it active, and go to the family screen. */
-export async function createFamilyAction(formData: FormData) {
+/** Create a chronicle, make it active, and go to the chronicle screen. */
+export async function createChronicleAction(formData: FormData) {
   const user = await requireUser();
   const name = String(formData.get('name') ?? '').trim();
   const description = String(formData.get('description') ?? '').trim();
   if (!name) {
-    throw new Error('A family name is required.');
+    throw new Error('A chronicle name is required.');
   }
 
-  const family = await createFamily({
+  const chronicle = await createChronicle({
     name,
     description: description || null,
     userId: user.id,
@@ -40,14 +40,14 @@ export async function createFamilyAction(formData: FormData) {
   });
 
   const cookieStore = await cookies();
-  cookieStore.set('activeFamilyId', family.id, { path: '/' });
+  cookieStore.set('activeChronicleId', chronicle.id, { path: '/' });
 
-  revalidatePath('/family');
-  redirect('/family');
+  revalidatePath('/chronicle');
+  redirect('/chronicle');
 }
 
 export interface AddPersonInput {
-  familyId: string;
+  chronicleId: string;
   displayName: string;
   familyName?: string;
   gender?: Gender | null;
@@ -56,10 +56,10 @@ export interface AddPersonInput {
   connectTo?: { personId: string; relation: PersonRelation };
 }
 
-/** Add a person to a family's tree, optionally wiring a kinship edge. */
+/** Add a person to a chronicle's tree, optionally wiring a kinship edge. */
 export async function addPersonAction(input: AddPersonInput) {
   const user = await requireUser();
-  await requireContributor(input.familyId, user.id);
+  await requireContributor(input.chronicleId, user.id);
 
   const displayName = input.displayName.trim();
   if (!displayName) {
@@ -78,12 +78,12 @@ export async function addPersonAction(input: AddPersonInput) {
     diedOn: diedYear !== undefined ? yearToDate(diedYear) : null,
     diedPrecision: diedYear !== undefined ? 'year' : null,
     createdBy: user.id,
-    familyId: input.familyId,
+    chronicleId: input.chronicleId,
   });
 
   // Make sure the person is in the family tree (createPerson already does this,
-  // but stay defensive in case familyId handling changes).
-  await addPersonToFamily(input.familyId, person.id);
+  // but stay defensive in case chronicleId handling changes).
+  await addPersonToChronicle(input.chronicleId, person.id);
 
   if (input.connectTo) {
     const { personId: target, relation } = input.connectTo;
@@ -93,13 +93,13 @@ export async function addPersonAction(input: AddPersonInput) {
     });
   }
 
-  revalidatePath('/family');
+  revalidatePath('/chronicle');
   return { id: person.id };
 }
 
-/** Edit a person's details in this family's tree. Contributor+. */
+/** Edit a person's details in this chronicle's tree. Contributor+. */
 export async function editPersonAction(input: {
-  familyId: string;
+  chronicleId: string;
   personId: string;
   displayName: string;
   familyName?: string | null;
@@ -108,12 +108,12 @@ export async function editPersonAction(input: {
   diedYear?: number | null;
 }) {
   const user = await requireUser();
-  await requireContributor(input.familyId, user.id);
+  await requireContributor(input.chronicleId, user.id);
 
   const displayName = input.displayName.trim();
   if (!displayName) throw new Error('A name is required.');
-  if (!(await isPersonInFamily(input.familyId, input.personId))) {
-    throw new Error('That person is not in this family.');
+  if (!(await isPersonInChronicle(input.chronicleId, input.personId))) {
+    throw new Error('That person is not in this chronicle.');
   }
 
   const bornYear = parseYear(input.bornYear ?? undefined);
@@ -129,7 +129,7 @@ export async function editPersonAction(input: {
     diedPrecision: diedYear !== undefined ? 'year' : null,
   });
 
-  revalidatePath('/family');
+  revalidatePath('/chronicle');
 }
 
 /** Remove a single kinship edge between two people the user may edit. Contributor+. */
@@ -140,8 +140,8 @@ export async function removeRelationshipAction(input: {
 }) {
   const user = await requireUser();
 
-  // The tree is merged across families, so authorize per person: the user must be
-  // able to contribute to a family containing each endpoint.
+  // The tree is merged across chronicles, so authorize per person: the user must be
+  // able to contribute to a chronicle containing each endpoint.
   const [canFrom, canTo] = await Promise.all([
     canUserEditPerson(user.id, input.personFromId),
     canUserEditPerson(user.id, input.personToId),
@@ -151,66 +151,66 @@ export async function removeRelationshipAction(input: {
   }
 
   await removeRelationship(input);
-  revalidatePath('/family');
+  revalidatePath('/chronicle');
 }
 
-/** Connect two people who are already in this family's tree. Contributor+. */
+/** Connect two people who are already in this chronicle's tree. Contributor+. */
 export async function relatePeopleAction(input: {
-  familyId: string;
+  chronicleId: string;
   personId: string;
   relativeId: string;
   relation: PersonRelation;
 }) {
   const user = await requireUser();
-  await requireContributor(input.familyId, user.id);
+  await requireContributor(input.chronicleId, user.id);
 
   if (input.personId === input.relativeId) {
     throw new Error('A person cannot be related to themselves.');
   }
   const [personIn, relativeIn] = await Promise.all([
-    isPersonInFamily(input.familyId, input.personId),
-    isPersonInFamily(input.familyId, input.relativeId),
+    isPersonInChronicle(input.chronicleId, input.personId),
+    isPersonInChronicle(input.chronicleId, input.relativeId),
   ]);
   if (!personIn || !relativeIn) {
-    throw new Error('Both people must be in this family.');
+    throw new Error('Both people must be in this chronicle.');
   }
 
   await connectPeople({
     ...edgeForRelation(input.relation, input.personId, input.relativeId),
     createdBy: user.id,
   });
-  revalidatePath('/family');
+  revalidatePath('/chronicle');
 }
 
-/** Delete a person from this family's tree (and their relationships). Contributor+. */
-export async function deletePersonAction(input: { familyId: string; personId: string }) {
+/** Delete a person from this chronicle's tree (and their relationships). Contributor+. */
+export async function deletePersonAction(input: { chronicleId: string; personId: string }) {
   const user = await requireUser();
-  await requireContributor(input.familyId, user.id);
+  await requireContributor(input.chronicleId, user.id);
 
   const person = await getPerson(input.personId);
   if (!person) {
-    revalidatePath('/family');
+    revalidatePath('/chronicle');
     return;
   }
   if (person.userId) {
     throw new Error('This person is linked to an account and cannot be deleted here.');
   }
-  if (!(await isPersonInFamily(input.familyId, input.personId))) {
-    throw new Error('That person is not in this family.');
+  if (!(await isPersonInChronicle(input.chronicleId, input.personId))) {
+    throw new Error('That person is not in this chronicle.');
   }
 
   await deletePerson(input.personId);
-  revalidatePath('/family');
+  revalidatePath('/chronicle');
 }
 
 /** Create an invitation and return its shareable token. */
 export async function invite(input: {
-  familyId: string;
+  chronicleId: string;
   email: string;
   role: AccessRole;
 }) {
   const user = await requireUser();
-  await requireOwner(input.familyId, user.id);
+  await requireOwner(input.chronicleId, user.id);
 
   const email = input.email.trim().toLowerCase();
   if (!/^\S+@\S+\.\S+$/.test(email)) {
@@ -218,36 +218,36 @@ export async function invite(input: {
   }
 
   const created = await createInvitation({
-    familyId: input.familyId,
+    chronicleId: input.chronicleId,
     email,
     role: input.role,
     invitedBy: user.id,
   });
 
-  revalidatePath('/family');
+  revalidatePath('/chronicle');
   return { token: created.token };
 }
 
-/** Update a family's name, description, and writing-style guide. */
+/** Update a chronicle's name, description, and writing-style guide. */
 export async function saveSettings(input: {
-  familyId: string;
+  chronicleId: string;
   name: string;
   description: string;
   styleGuide: string;
 }) {
   const user = await requireUser();
-  await requireOwner(input.familyId, user.id);
+  await requireOwner(input.chronicleId, user.id);
 
   const name = input.name.trim();
   if (!name) {
-    throw new Error('A family name is required.');
+    throw new Error('A chronicle name is required.');
   }
 
-  await updateFamily(input.familyId, {
+  await updateChronicle(input.chronicleId, {
     name,
     description: input.description.trim() || null,
     styleGuide: input.styleGuide.trim() || null,
   });
 
-  revalidatePath('/family');
+  revalidatePath('/chronicle');
 }

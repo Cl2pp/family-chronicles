@@ -3,7 +3,7 @@
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/session';
-import { resolveActiveFamily, getMembership } from '@/lib/families';
+import { resolveActiveChronicle, getMembership } from '@/lib/chronicles';
 import {
   addAttachments,
   addMessage,
@@ -20,7 +20,7 @@ import {
   canUserEditPerson,
   deletePerson,
   getPerson,
-  listFamilyPeople,
+  listChroniclePeople,
   removeRelationship,
 } from '@/lib/people';
 import { canContribute, type AccessRole } from '@/lib/permissions';
@@ -28,12 +28,12 @@ import { yearToDate } from '@/lib/dates';
 import { buildKey, getObjectBuffer, presignPut } from '@/lib/s3';
 import { transcribeAudio } from '@/lib/ai/groq';
 
-/** Throw unless the user can contribute to the family (create stories / tree). */
-async function assertContributor(familyId: string, userId: string) {
-  const membership = await getMembership(familyId, userId);
-  if (!membership) throw new Error('You do not have access to this family.');
+/** Throw unless the user can contribute to the chronicle (create stories / tree). */
+async function assertContributor(chronicleId: string, userId: string) {
+  const membership = await getMembership(chronicleId, userId);
+  if (!membership) throw new Error('You do not have access to this chronicle.');
   if (!canContribute(membership.accessRole as AccessRole)) {
-    throw new Error('You do not have permission to add to this family.');
+    throw new Error('You do not have permission to add to this chronicle.');
   }
   return membership;
 }
@@ -58,7 +58,7 @@ export interface SendResult {
   storyDraft: StoryDraft | null;
 }
 
-/** Build the mutable per-turn tool context from the resolved active family. */
+/** Build the mutable per-turn tool context from the resolved active chronicle. */
 function makeContext(
   userId: string,
   userName: string,
@@ -67,11 +67,11 @@ function makeContext(
   const ctx: ToolContext = {
     userId,
     userName,
-    activeFamilyId: active?.id ?? null,
-    activeFamilyName: active?.name ?? null,
-    setActiveFamily(id, name) {
-      ctx.activeFamilyId = id;
-      ctx.activeFamilyName = name;
+    activeChronicleId: active?.id ?? null,
+    activeChronicleName: active?.name ?? null,
+    setActiveChronicle(id, name) {
+      ctx.activeChronicleId = id;
+      ctx.activeChronicleName = name;
     },
   };
   return ctx;
@@ -80,11 +80,11 @@ function makeContext(
 /** Resolve the conversation to use (existing, owned) or create a new one. */
 async function resolveConversation(
   conversationId: string | null,
-  familyId: string | null,
+  chronicleId: string | null,
   userId: string,
 ): Promise<string> {
   if (!conversationId) {
-    const convo = await createConversation(userId, familyId);
+    const convo = await createConversation(userId, chronicleId);
     return convo.id;
   }
   const convo = await getConversation(conversationId);
@@ -96,7 +96,7 @@ async function resolveConversation(
 async function respondAndStore(
   conversationId: string,
   ctx: ToolContext,
-  previousFamilyId: string | undefined,
+  previousChronicleId: string | undefined,
 ): Promise<SendResult> {
   const stored = await listMessages(conversationId);
   const history: ChatTurn[] = stored
@@ -108,13 +108,13 @@ async function respondAndStore(
   const metadata = result.receipts.length ? { receipts: result.receipts } : undefined;
   await addMessage(conversationId, 'assistant', result.reply, metadata);
 
-  // A tool may have created/switched the active family — persist it to the cookie.
-  if (ctx.activeFamilyId && ctx.activeFamilyId !== previousFamilyId) {
-    (await cookies()).set('activeFamilyId', ctx.activeFamilyId, { path: '/' });
+  // A tool may have created/switched the active chronicle — persist it to the cookie.
+  if (ctx.activeChronicleId && ctx.activeChronicleId !== previousChronicleId) {
+    (await cookies()).set('activeChronicleId', ctx.activeChronicleId, { path: '/' });
   }
   // Any applied action may have changed the family tree or stories pages.
   if (result.receipts.length) {
-    revalidatePath('/family');
+    revalidatePath('/chronicle');
     revalidatePath('/stories');
   }
 
@@ -136,15 +136,15 @@ export async function sendMessage(input: {
   const text = input.text.trim();
   if (!text) throw new Error('Empty message');
 
-  const previousFamilyId = (await cookies()).get('activeFamilyId')?.value;
-  const { active } = await resolveActiveFamily(user.id, previousFamilyId);
+  const previousChronicleId = (await cookies()).get('activeChronicleId')?.value;
+  const { active } = await resolveActiveChronicle(user.id, previousChronicleId);
   const ctx = makeContext(user.id, user.name, active);
 
-  const conversationId = await resolveConversation(input.conversationId, ctx.activeFamilyId, user.id);
+  const conversationId = await resolveConversation(input.conversationId, ctx.activeChronicleId, user.id);
   const message = await addMessage(conversationId, 'user', text);
   if (input.attachments?.length) await addAttachments(message.id, input.attachments);
 
-  return respondAndStore(conversationId, ctx, previousFamilyId);
+  return respondAndStore(conversationId, ctx, previousChronicleId);
 }
 
 /** Transcribe an uploaded voice note, store it as the user's message, then run the agent. */
@@ -166,11 +166,11 @@ export async function sendVoiceMessage(input: {
     throw new Error("Sorry — I couldn't transcribe that recording. Please try again.");
   }
 
-  const previousFamilyId = (await cookies()).get('activeFamilyId')?.value;
-  const { active } = await resolveActiveFamily(user.id, previousFamilyId);
+  const previousChronicleId = (await cookies()).get('activeChronicleId')?.value;
+  const { active } = await resolveActiveChronicle(user.id, previousChronicleId);
   const ctx = makeContext(user.id, user.name, active);
 
-  const conversationId = await resolveConversation(input.conversationId, ctx.activeFamilyId, user.id);
+  const conversationId = await resolveConversation(input.conversationId, ctx.activeChronicleId, user.id);
   const message = await addMessage(conversationId, 'user', transcript);
   await addAttachments(message.id, [
     {
@@ -182,7 +182,7 @@ export async function sendVoiceMessage(input: {
     },
   ]);
 
-  const result = await respondAndStore(conversationId, ctx, previousFamilyId);
+  const result = await respondAndStore(conversationId, ctx, previousChronicleId);
   return { ...result, transcript };
 }
 
@@ -209,25 +209,25 @@ export async function undoAction(
     await removeRelationship({ type: undo.relType, personFromId: undo.from, personToId: undo.to });
   }
 
-  revalidatePath('/family');
+  revalidatePath('/chronicle');
   return { ok: true };
 }
 
-/** Accept a story draft → create a ready story shared into the given family. */
+/** Accept a story draft → create a ready story shared into the given chronicle. */
 export async function acceptStory(input: {
   conversationId: string;
-  familyId: string;
+  chronicleId: string;
   proposal: StoryProposal;
 }): Promise<{ storyId: string }> {
   const user = await requireUser();
-  await assertContributor(input.familyId, user.id);
+  await assertContributor(input.chronicleId, user.id);
   const p = input.proposal;
 
-  // Resolve any named people to existing tree members in this family (best-effort).
+  // Resolve any named people to existing tree members in this chronicle (best-effort).
   let personIds: string[] = [];
   if (p.people?.length) {
-    const familyPeople = await listFamilyPeople(input.familyId);
-    const byName = new Map(familyPeople.map((fp) => [fp.displayName.toLowerCase(), fp.id]));
+    const chroniclePeople = await listChroniclePeople(input.chronicleId);
+    const byName = new Map(chroniclePeople.map((fp) => [fp.displayName.toLowerCase(), fp.id]));
     personIds = p.people
       .map((name) => byName.get(name.trim().toLowerCase()))
       .filter((id): id is string => Boolean(id));
@@ -244,7 +244,7 @@ export async function acceptStory(input: {
     eventDate: yearToDate(p.eventYear),
     eventDatePrecision: p.eventYear ? 'year' : null,
     conversationId: input.conversationId,
-    familyIds: [input.familyId],
+    chronicleIds: [input.chronicleId],
     personIds,
   });
 

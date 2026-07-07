@@ -20,6 +20,10 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
   route transcription through it.
 
 ## Key conventions
+- The top-level space is a **chronicle** (`chronicles` table; user access via `memberships`,
+  tree membership via `chronicle_members`). **Families are never stored or set up** — they are
+  tags derived on the fly from `people.family_name` + kinship edges (own surname, all ancestor
+  surnames, spouse surnames); see `lib/family-tags.ts`. A story's tags = union over its people.
 - All env vars are validated in `lib/env.ts` (zod). Import `{ env }` from there, not
   `process.env`. Use `SKIP_ENV_VALIDATION=1` only for `next build`.
 - Two runtime processes from one repo: `web` (`npm start`) and `worker` (`npm run worker`).

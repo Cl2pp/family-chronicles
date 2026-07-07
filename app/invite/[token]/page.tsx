@@ -5,7 +5,7 @@ import { acceptInvitation } from '@/lib/invitations';
 
 const MESSAGES: Record<string, string> = {
   not_found: 'This invitation link is not valid.',
-  expired: 'This invitation has expired. Ask the family to send a new one.',
+  expired: 'This invitation has expired. Ask for a new invite.',
   used: 'This invitation has already been used.',
 };
 
@@ -23,7 +23,7 @@ export default async function InvitePage({
 
   const result = await acceptInvitation(token, session.user.id);
   if (result.ok) {
-    redirect(`/family?family=${result.familyId}`);
+    redirect(`/chronicle`);
   }
 
   return (
@@ -33,8 +33,8 @@ export default async function InvitePage({
           <Stack>
             <Title order={3}>Invitation</Title>
             <Text c="dimmed">{MESSAGES[result.reason]}</Text>
-            <Button component="a" href="/family">
-              Go to your families
+            <Button component="a" href="/chronicle">
+              Go to your chronicles
             </Button>
           </Stack>
         </Paper>

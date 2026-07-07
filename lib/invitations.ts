@@ -2,14 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import { invitations, memberships } from '@/db/schema';
-import { getMembership } from '@/lib/families';
+import { getMembership } from '@/lib/chronicles';
 import type { AccessRole } from '@/lib/permissions';
 
 const INVITE_TTL_DAYS = 14;
 
 /** Create an invitation and return it (token is shareable). */
 export async function createInvitation(input: {
-  familyId: string;
+  chronicleId: string;
   email: string;
   role: AccessRole;
   invitedBy: string;
@@ -20,7 +20,7 @@ export async function createInvitation(input: {
   const [created] = await db
     .insert(invitations)
     .values({
-      familyId: input.familyId,
+      chronicleId: input.chronicleId,
       email: input.email.trim().toLowerCase(),
       accessRole: input.role,
       token,
@@ -32,15 +32,15 @@ export async function createInvitation(input: {
   return created;
 }
 
-export async function listPendingInvitations(familyId: string) {
+export async function listPendingInvitations(chronicleId: string) {
   return db
     .select()
     .from(invitations)
-    .where(and(eq(invitations.familyId, familyId), isNull(invitations.acceptedAt)));
+    .where(and(eq(invitations.chronicleId, chronicleId), isNull(invitations.acceptedAt)));
 }
 
 export type AcceptResult =
-  | { ok: true; familyId: string }
+  | { ok: true; chronicleId: string }
   | { ok: false; reason: 'not_found' | 'expired' | 'used' };
 
 /** Accept an invitation for the given user, creating their membership. */
@@ -53,10 +53,10 @@ export async function acceptInvitation(token: string, userId: string): Promise<A
   if (invite.acceptedAt) return { ok: false, reason: 'used' };
   if (invite.expiresAt.getTime() < Date.now()) return { ok: false, reason: 'expired' };
 
-  const existing = await getMembership(invite.familyId, userId);
+  const existing = await getMembership(invite.chronicleId, userId);
   if (!existing) {
     await db.insert(memberships).values({
-      familyId: invite.familyId,
+      chronicleId: invite.chronicleId,
       userId,
       accessRole: invite.accessRole,
     });
@@ -67,5 +67,5 @@ export async function acceptInvitation(token: string, userId: string): Promise<A
     .set({ acceptedAt: new Date() })
     .where(eq(invitations.id, invite.id));
 
-  return { ok: true, familyId: invite.familyId };
+  return { ok: true, chronicleId: invite.chronicleId };
 }

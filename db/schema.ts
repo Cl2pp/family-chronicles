@@ -70,7 +70,7 @@ export const verification = pgTable('verification', {
  * Domain enums
  * ────────────────────────────────────────────────────────────────────────── */
 
-/** Per-family access level (authz). */
+/** Per-chronicle access level (authz). */
 export const accessRole = pgEnum('access_role', ['owner', 'contributor', 'viewer']);
 /** Global kinship edge types between people. */
 export const relationshipType = pgEnum('relationship_type', ['parent', 'spouse']);
@@ -82,17 +82,17 @@ export const assetKind = pgEnum('asset_kind', ['audio', 'photo']);
 export const messageRole = pgEnum('message_role', ['user', 'assistant', 'system', 'tool']);
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Genealogy layer (global, family-agnostic): people + kinship edges
+ * Genealogy layer (global, chronicle-agnostic): people + kinship edges
  * ────────────────────────────────────────────────────────────────────────── */
 
-/** A person — a node in the family graph. May or may not have an app account. */
+/** A person — a node in the kinship graph. May or may not have an app account. */
 export const people = pgTable(
   'people',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     displayName: text('display_name').notNull(),
     givenName: text('given_name'),
-    /** Surname lives on the person, independent of any family. */
+    /** Surname — the source of derived family tags (see lib/family-tags.ts). */
     familyName: text('family_name'),
     /** Optional link to an app account (most people never log in). */
     userId: text('user_id').references(() => user.id, { onDelete: 'set null' }),
@@ -135,11 +135,11 @@ export const relationships = pgTable(
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Family layer: a named sharing circle + its tree membership
+ * Chronicle layer: the private space a group of relatives shares
  * ────────────────────────────────────────────────────────────────────────── */
 
-/** A family = a named sharing circle (name is a label, NOT unique). */
-export const families = pgTable('families', {
+/** A chronicle = a private story space (name is a label, NOT unique). */
+export const chronicles = pgTable('chronicles', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   description: text('description'),
@@ -152,31 +152,31 @@ export const families = pgTable('families', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
-/** USER access to a family (authz) — separate from being a tree node. */
+/** USER access to a chronicle (authz) — separate from being a tree node. */
 export const memberships = pgTable(
   'memberships',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    familyId: uuid('family_id')
+    chronicleId: uuid('chronicle_id')
       .notNull()
-      .references(() => families.id, { onDelete: 'cascade' }),
+      .references(() => chronicles.id, { onDelete: 'cascade' }),
     userId: text('user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     accessRole: accessRole('access_role').notNull().default('contributor'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('memberships_family_user_uq').on(t.familyId, t.userId)],
+  (t) => [uniqueIndex('memberships_chronicle_user_uq').on(t.chronicleId, t.userId)],
 );
 
-/** Which PEOPLE are nodes in a family's tree (person↔family, many-to-many). */
-export const familyMembers = pgTable(
-  'family_members',
+/** Which PEOPLE are nodes in a chronicle's tree (person↔chronicle, many-to-many). */
+export const chronicleMembers = pgTable(
+  'chronicle_members',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    familyId: uuid('family_id')
+    chronicleId: uuid('chronicle_id')
       .notNull()
-      .references(() => families.id, { onDelete: 'cascade' }),
+      .references(() => chronicles.id, { onDelete: 'cascade' }),
     personId: uuid('person_id')
       .notNull()
       .references(() => people.id, { onDelete: 'cascade' }),
@@ -185,19 +185,19 @@ export const familyMembers = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('family_members_uq').on(t.familyId, t.personId),
-    index('family_members_family_idx').on(t.familyId),
+    uniqueIndex('chronicle_members_uq').on(t.chronicleId, t.personId),
+    index('chronicle_members_chronicle_idx').on(t.chronicleId),
   ],
 );
 
-/** Pending email invitations to join a family (grants a membership). */
+/** Pending email invitations to join a chronicle (grants a membership). */
 export const invitations = pgTable(
   'invitations',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    familyId: uuid('family_id')
+    chronicleId: uuid('chronicle_id')
       .notNull()
-      .references(() => families.id, { onDelete: 'cascade' }),
+      .references(() => chronicles.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
     accessRole: accessRole('access_role').notNull().default('contributor'),
     token: text('token').notNull().unique(),
@@ -208,17 +208,17 @@ export const invitations = pgTable(
     acceptedAt: timestamp('accepted_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (t) => [index('invitations_family_idx').on(t.familyId)],
+  (t) => [index('invitations_chronicle_idx').on(t.chronicleId)],
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Stories — standalone, shareable across many families
+ * Stories — standalone, shareable across many chronicles
  * ────────────────────────────────────────────────────────────────────────── */
 
 export const conversations = pgTable('conversations', {
   id: uuid('id').defaultRandom().primaryKey(),
-  /** Family context the chat was started in (nullable = "all"). */
-  familyId: uuid('family_id').references(() => families.id, { onDelete: 'set null' }),
+  /** Chronicle context the chat was started in (nullable = "all"). */
+  chronicleId: uuid('chronicle_id').references(() => chronicles.id, { onDelete: 'set null' }),
   userId: text('user_id')
     .notNull()
     .references(() => user.id, { onDelete: 'cascade' }),
@@ -243,7 +243,7 @@ export const messages = pgTable(
   (t) => [index('messages_conversation_idx').on(t.conversationId)],
 );
 
-/** A single story. No longer bound to one family — see story_families. */
+/** A single story. No longer bound to one chronicle — see story_chronicles. */
 export const stories = pgTable(
   'stories',
   {
@@ -273,23 +273,23 @@ export const stories = pgTable(
   (t) => [index('stories_event_date_idx').on(t.eventDate)],
 );
 
-/** A story is shared into every family linked here (≥1). */
-export const storyFamilies = pgTable(
-  'story_families',
+/** A story is shared into every chronicle linked here (≥1). */
+export const storyChronicles = pgTable(
+  'story_chronicles',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     storyId: uuid('story_id')
       .notNull()
       .references(() => stories.id, { onDelete: 'cascade' }),
-    familyId: uuid('family_id')
+    chronicleId: uuid('chronicle_id')
       .notNull()
-      .references(() => families.id, { onDelete: 'cascade' }),
+      .references(() => chronicles.id, { onDelete: 'cascade' }),
     sharedBy: text('shared_by').references(() => user.id, { onDelete: 'set null' }),
     sharedAt: timestamp('shared_at').notNull().defaultNow(),
   },
   (t) => [
-    uniqueIndex('story_families_uq').on(t.storyId, t.familyId),
-    index('story_families_family_idx').on(t.familyId),
+    uniqueIndex('story_chronicles_uq').on(t.storyId, t.chronicleId),
+    index('story_chronicles_chronicle_idx').on(t.chronicleId),
   ],
 );
 

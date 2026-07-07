@@ -30,7 +30,7 @@ export default async function AccountPage() {
       </Card>
 
       <Text size="sm" c="dimmed" mt="lg">
-        Looking for your families or app info? See{' '}
+        Looking for your chronicles or app info? See{' '}
         <Anchor component="a" href="/settings" size="sm">
           App settings
         </Anchor>

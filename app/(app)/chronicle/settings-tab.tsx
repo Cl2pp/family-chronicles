@@ -7,13 +7,13 @@ import { notifications } from '@mantine/notifications';
 import { saveSettings } from './actions';
 
 export function SettingsTab({
-  familyId,
+  chronicleId,
   name,
   description,
   styleGuide,
   canManage: manage,
 }: {
-  familyId: string;
+  chronicleId: string;
   name: string;
   description: string;
   styleGuide: string;
@@ -22,13 +22,13 @@ export function SettingsTab({
   const [pending, startTransition] = useTransition();
   const form = useForm({
     initialValues: { name, description, styleGuide },
-    validate: { name: (v) => (v.trim() ? null : 'A family name is required') },
+    validate: { name: (v) => (v.trim() ? null : 'A chronicle name is required') },
   });
 
   function handleSubmit(values: typeof form.values) {
     startTransition(async () => {
       try {
-        await saveSettings({ familyId, ...values });
+        await saveSettings({ chronicleId, ...values });
         notifications.show({ message: 'Settings saved' });
         form.resetDirty(values);
       } catch (e) {
@@ -50,7 +50,7 @@ export function SettingsTab({
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack>
           <TextInput
-            label="Family name"
+            label="Chronicle name"
             required
             disabled={!manage}
             {...form.getInputProps('name')}

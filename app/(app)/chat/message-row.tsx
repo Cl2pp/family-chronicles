@@ -61,7 +61,7 @@ export function MessageRow({
         >
           {msg.result.kind === 'story-update'
             ? 'Story updated — View story'
-            : `Saved to ${msg.result.familyName} — View story`}
+            : `Saved to ${msg.result.chronicleName} — View story`}
         </Badge>
       )}
 

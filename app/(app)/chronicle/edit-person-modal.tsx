@@ -5,29 +5,26 @@ import { Button, Group, Modal, Select, Stack, TextInput } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import type { Gender } from '@/lib/people';
-import { addPersonAction } from './actions';
-import type { AddTarget } from './types';
+import { editPersonAction } from './actions';
+import { GENDER_OPTIONS } from './add-person-modal';
+import type { PersonRow } from './types';
 
-export const GENDER_OPTIONS = [
-  { value: 'male', label: 'Male' },
-  { value: 'female', label: 'Female' },
-];
+function yearOf(d: Date | string | null | undefined): string {
+  if (!d) return '';
+  const date = typeof d === 'string' ? new Date(d) : d;
+  return Number.isNaN(date.getTime()) ? '' : String(date.getUTCFullYear());
+}
 
-const RELATION_TITLE: Record<AddTarget['relation'], (name: string) => string> = {
-  parent: (n) => `Add a parent of ${n}`,
-  child: (n) => `Add a child of ${n}`,
-  partner: (n) => `Add a partner of ${n}`,
-};
-
-export function AddPersonModal({
-  familyId,
+/** Edit an existing person's name, surname, and birth/death years. */
+export function EditPersonModal({
+  chronicleId,
+  person,
   opened,
-  target,
   onClose,
 }: {
-  familyId: string;
+  chronicleId: string;
+  person: PersonRow | null;
   opened: boolean;
-  target?: AddTarget;
   onClose: () => void;
 }) {
   const [pending, startTransition] = useTransition();
@@ -47,47 +44,47 @@ export function AddPersonModal({
   });
 
   useEffect(() => {
-    if (opened) form.reset();
+    if (opened && person) {
+      form.setValues({
+        displayName: person.displayName,
+        familyName: person.familyName ?? '',
+        gender: person.gender,
+        bornYear: yearOf(person.bornOn),
+        diedYear: yearOf(person.diedOn),
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opened]);
-
-  const title = target ? RELATION_TITLE[target.relation](target.personName) : 'Add a person';
+  }, [opened, person]);
 
   function handleSubmit(values: typeof form.values) {
+    if (!person) return;
     startTransition(async () => {
       try {
-        await addPersonAction({
-          familyId,
+        await editPersonAction({
+          chronicleId,
+          personId: person.id,
           displayName: values.displayName,
-          familyName: values.familyName || undefined,
+          familyName: values.familyName.trim() || null,
           gender: values.gender,
-          bornYear: values.bornYear ? Number(values.bornYear) : undefined,
-          diedYear: values.diedYear ? Number(values.diedYear) : undefined,
-          connectTo: target
-            ? { personId: target.personId, relation: target.relation }
-            : undefined,
+          bornYear: values.bornYear ? Number(values.bornYear) : null,
+          diedYear: values.diedYear ? Number(values.diedYear) : null,
         });
-        notifications.show({ message: 'Person added' });
+        notifications.show({ message: 'Person updated' });
         onClose();
       } catch (e) {
         notifications.show({
           color: 'red',
-          message: e instanceof Error ? e.message : 'Could not add person',
+          message: e instanceof Error ? e.message : 'Could not update person',
         });
       }
     });
   }
 
   return (
-    <Modal opened={opened} onClose={onClose} title={title} radius="md">
+    <Modal opened={opened} onClose={onClose} title="Edit person" radius="md">
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack>
-          <TextInput
-            label="Name"
-            placeholder="Full name"
-            required
-            {...form.getInputProps('displayName')}
-          />
+          <TextInput label="Name" required {...form.getInputProps('displayName')} />
           <TextInput
             label="Family name (surname)"
             placeholder="Optional"
@@ -101,23 +98,15 @@ export function AddPersonModal({
             {...form.getInputProps('gender')}
           />
           <Group grow>
-            <TextInput
-              label="Birth year"
-              placeholder="e.g. 1948"
-              {...form.getInputProps('bornYear')}
-            />
-            <TextInput
-              label="Death year"
-              placeholder="e.g. 2019"
-              {...form.getInputProps('diedYear')}
-            />
+            <TextInput label="Birth year" placeholder="e.g. 1948" {...form.getInputProps('bornYear')} />
+            <TextInput label="Death year" placeholder="e.g. 2019" {...form.getInputProps('diedYear')} />
           </Group>
           <Group justify="flex-end" mt="sm">
-            <Button variant="default" onClick={onClose}>
+            <Button variant="default" onClick={onClose} disabled={pending}>
               Cancel
             </Button>
             <Button type="submit" loading={pending}>
-              Add person
+              Save changes
             </Button>
           </Group>
         </Stack>

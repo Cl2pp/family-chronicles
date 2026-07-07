@@ -51,7 +51,7 @@ export async function saveAvatar(input: { s3Key: string }): Promise<void> {
   revalidatePath('/', 'layout');
 }
 
-/** Rename the account. Tree names are edited separately on the Family tab. */
+/** Rename the account. Tree names are edited separately on the Chronicle tab. */
 export async function updateDisplayName(input: { name: string }): Promise<void> {
   await requireUser();
   const name = input.name.trim();

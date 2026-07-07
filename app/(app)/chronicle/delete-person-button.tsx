@@ -6,13 +6,13 @@ import { notifications } from '@mantine/notifications';
 import { IconTrash } from '@tabler/icons-react';
 import { deletePersonAction } from './actions';
 
-/** Trash button + confirm dialog that removes a person from the active family's tree. */
+/** Trash button + confirm dialog that removes a person from the active chronicle's tree. */
 export function DeletePersonButton({
-  familyId,
+  chronicleId,
   personId,
   name,
 }: {
-  familyId: string;
+  chronicleId: string;
   personId: string;
   name: string;
 }) {
@@ -22,7 +22,7 @@ export function DeletePersonButton({
   async function confirm() {
     setBusy(true);
     try {
-      await deletePersonAction({ familyId, personId });
+      await deletePersonAction({ chronicleId, personId });
       notifications.show({ message: `Removed ${name} from the tree.` });
       setOpened(false);
     } catch (err) {

@@ -12,6 +12,7 @@ import {
 import {
   ActionIcon,
   Avatar,
+  Badge,
   Box,
   Button,
   Card,
@@ -98,9 +99,10 @@ interface Connectors {
 export interface FamilyTreeProps {
   people: TreePerson[];
   edges: TreeEdge[];
-  colorByFamily: Record<string, string>;
+  /** Color per derived family tag (surname) — drives the dots under each card. */
+  colorByTag: Record<string, string>;
   currentUserId: string;
-  activeFamilyId: string;
+  activeChronicleId: string;
   canEdit: boolean;
   onAddPerson: (target?: AddTarget) => void;
   onEditPerson: (person: TreePerson) => void;
@@ -109,9 +111,9 @@ export interface FamilyTreeProps {
 export function FamilyTree({
   people,
   edges,
-  colorByFamily,
+  colorByTag,
   currentUserId,
-  activeFamilyId,
+  activeChronicleId,
   canEdit,
   onAddPerson,
   onEditPerson,
@@ -222,7 +224,7 @@ export function FamilyTree({
         comps.push(comp);
       }
       // Order groups by the barycenter (average) of their members' parent positions.
-      // Using the minimum instead would let a couple that straddles two families
+      // Using the minimum instead would let a couple that straddles two chronicles
       // claim the leftmost slot and push a sibling in between another family's
       // children, making the connector lines cross.
       const compKey = (comp: string[]) => {
@@ -375,15 +377,15 @@ export function FamilyTree({
   const [unlinking, startUnlink] = useTransition();
   // Edits/links act on the active family, so the person must be one of its members.
   const canEditSelected =
-    canEdit && !!selected && selected.familyIds.includes(activeFamilyId);
+    canEdit && !!selected && selected.chronicleIds.includes(activeChronicleId);
   const linkCandidates = useMemo(
     () =>
       selected
         ? people
-            .filter((p) => p.id !== selected.id && p.familyIds.includes(activeFamilyId))
+            .filter((p) => p.id !== selected.id && p.chronicleIds.includes(activeChronicleId))
             .map((p) => ({ value: p.id, label: p.displayName }))
         : [],
-    [people, selected, activeFamilyId],
+    [people, selected, activeChronicleId],
   );
 
   // The selected person's existing edges, labelled from their point of view.
@@ -445,7 +447,7 @@ export function FamilyTree({
     startLinking(async () => {
       try {
         await relatePeopleAction({
-          familyId: activeFamilyId,
+          chronicleId: activeChronicleId,
           personId: selected.id,
           relativeId: linkPersonId,
           relation: linkRelation,
@@ -582,17 +584,18 @@ export function FamilyTree({
                             {lifeSpan(person)}
                           </Text>
                         )}
-                        {person.familyIds.length > 0 && (
+                        {person.familyTags.length > 0 && (
                           <Group gap={4} justify="center">
-                            {person.familyIds.map((fid) => (
+                            {person.familyTags.map((tag) => (
                               <Box
-                                key={fid}
+                                key={tag}
+                                title={tag}
                                 w={8}
                                 h={8}
                                 style={{
                                   borderRadius: '50%',
                                   background:
-                                    colorByFamily[fid] ?? 'var(--mantine-color-slate-4)',
+                                    colorByTag[tag] ?? 'var(--mantine-color-slate-4)',
                                 }}
                               />
                             ))}
@@ -640,7 +643,7 @@ export function FamilyTree({
               </Group>
               {canEditSelected && !selected.userId && (
                 <DeletePersonButton
-                  familyId={activeFamilyId}
+                  chronicleId={activeChronicleId}
                   personId={selected.id}
                   name={selected.displayName}
                 />
@@ -654,6 +657,36 @@ export function FamilyTree({
                 </Text>
                 {selected.familyName}
               </Text>
+            )}
+            {selected.familyTags.length > 0 && (
+              <Group gap={6}>
+                {selected.familyTags.map((tag) => (
+                  <Badge
+                    key={tag}
+                    size="sm"
+                    variant="light"
+                    radius="sm"
+                    styles={{
+                      root: {
+                        background: 'var(--mantine-color-slate-1)',
+                        color: 'var(--mantine-color-slate-7)',
+                      },
+                    }}
+                    leftSection={
+                      <Box
+                        w={8}
+                        h={8}
+                        style={{
+                          borderRadius: '50%',
+                          background: colorByTag[tag] ?? 'var(--mantine-color-slate-4)',
+                        }}
+                      />
+                    }
+                  >
+                    {tag}
+                  </Badge>
+                ))}
+              </Group>
             )}
             {selected.userId && (
               <Text size="sm" c="brand">

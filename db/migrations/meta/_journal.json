@@ -22,6 +22,13 @@
       "when": 1783369068066,
       "tag": "0002_add_person_gender",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783424849773,
+      "tag": "0003_rename_families_to_chronicles",
+      "breakpoints": true
     }
   ]
 }

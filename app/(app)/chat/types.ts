@@ -14,7 +14,7 @@ export interface Msg {
   /** A story draft awaiting the user's review + save. */
   storyDraft?: StoryDraft | null;
   /** Set once a draft on this message has been saved (created or updated). */
-  result?: { kind: 'story' | 'story-update'; storyId: string; familyName: string };
+  result?: { kind: 'story' | 'story-update'; storyId: string; chronicleName: string };
 }
 
 export type MsgResult = Msg['result'];

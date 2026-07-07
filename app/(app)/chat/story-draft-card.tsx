@@ -23,7 +23,7 @@ export function StoryDraftCard({
   onDiscard: () => void;
   onResult: (r: MsgResult) => void;
 }) {
-  const { proposal, familyId, familyName, updateStoryId } = draft;
+  const { proposal, chronicleId, chronicleName, updateStoryId } = draft;
   const isUpdate = Boolean(updateStoryId);
   const [title, setTitle] = useState(proposal.title);
   const [body, setBody] = useState(proposal.body);
@@ -35,14 +35,14 @@ export function StoryDraftCard({
       const edited = { ...proposal, title, body, eventYear: year ? Number(year) : null };
       if (updateStoryId) {
         const res = await applyStoryUpdate({ storyId: updateStoryId, proposal: edited });
-        onResult({ kind: 'story-update', storyId: res.storyId, familyName });
+        onResult({ kind: 'story-update', storyId: res.storyId, chronicleName });
       } else {
         const res = await acceptStory({
           conversationId: conversationId ?? '',
-          familyId,
+          chronicleId,
           proposal: edited,
         });
-        onResult({ kind: 'story', storyId: res.storyId, familyName });
+        onResult({ kind: 'story', storyId: res.storyId, chronicleName });
       }
     } finally {
       setBusy(false);
@@ -54,7 +54,7 @@ export function StoryDraftCard({
       <Group gap={6} mb="xs">
         <IconSparkles size={15} color="var(--mantine-color-brand-6)" />
         <Text size="xs" fw={600} c="brand.7" tt="uppercase">
-          {isUpdate ? 'Story update' : 'Story draft'} · {familyName}
+          {isUpdate ? 'Story update' : 'Story draft'} · {chronicleName}
         </Text>
       </Group>
       <TextInput

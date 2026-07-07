@@ -20,7 +20,7 @@ import { MessageRow } from './message-row';
 import { presignUpload, sendMessage, sendVoiceMessage } from './actions';
 import type { ChatAttachment, Msg } from './types';
 
-const SETUP_SUGGESTIONS = ['Set up my family', 'Add a relative', 'Record a memory'];
+const SETUP_SUGGESTIONS = ['Set up my chronicle', 'Add a relative', 'Record a memory'];
 const FAMILY_SUGGESTIONS = ['A childhood memory', 'About Grandma', 'Add a relative to the tree'];
 
 interface PendingPhoto {
@@ -50,11 +50,11 @@ async function uploadBlob(
 export function ChatView({
   conversationId: initialConversationId,
   initialMessages,
-  family,
+  chronicle,
 }: {
   conversationId: string | null;
   initialMessages: Msg[];
-  family?: { id: string; name: string };
+  chronicle?: { id: string; name: string };
 }) {
   const [conversationId, setConversationId] = useState(initialConversationId);
   const [messages, setMessages] = useState<Msg[]>(initialMessages);
@@ -180,7 +180,7 @@ export function ChatView({
   }
 
   const empty = messages.length === 0;
-  const suggestions = family ? FAMILY_SUGGESTIONS : SETUP_SUGGESTIONS;
+  const suggestions = chronicle ? FAMILY_SUGGESTIONS : SETUP_SUGGESTIONS;
 
   return (
     <Box
@@ -208,12 +208,12 @@ export function ChatView({
           <Stack gap="lg" mt="xl">
             <Stack gap={4}>
               <Title order={2}>
-                {family ? 'What would you like to do?' : 'Welcome — let’s begin your chronicle'}
+                {chronicle ? 'What would you like to do?' : 'Welcome — let’s begin your chronicle'}
               </Title>
               <Text c="dimmed">
-                {family
+                {chronicle
                   ? "Talk or type — I’ll write stories and grow your family tree."
-                  : "Tell me about your family and I’ll set it up, then we can start collecting memories."}
+                  : "Tell me about your family and I’ll set up your chronicle, then we can start collecting memories."}
               </Text>
             </Stack>
             <Group gap="sm">
