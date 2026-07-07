@@ -1,6 +1,5 @@
 import { notFound } from 'next/navigation';
 import {
-  Accordion,
   Alert,
   Badge,
   Box,
@@ -12,7 +11,7 @@ import {
   Text,
   Title,
 } from '@mantine/core';
-import { IconAlertTriangle, IconMessageCircle2 } from '@tabler/icons-react';
+import { IconAlertTriangle } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
 import { canUserEditStory, chroniclesForStory, getStoryForUser, listAssets } from '@/lib/stories';
 import { familyTagsByStory } from '@/lib/family-tags';
@@ -21,6 +20,7 @@ import { formatEventDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
 import { presignGet } from '@/lib/s3';
 import { RetryButton } from './retry-button';
+import { SourceAccordion } from './source-accordion';
 import { ShareControl } from './share-control';
 import { EditControl } from './edit-control';
 
@@ -205,42 +205,12 @@ export default async function StoryDetailPage({
         {(story.bodyOriginal || audioUrl || story.conversationId) && (
           <>
             <Divider label="Dive deeper" labelPosition="center" />
-            <Accordion variant="separated" radius="md">
-              <Accordion.Item value="source">
-                <Accordion.Control>Source material</Accordion.Control>
-                <Accordion.Panel>
-                  <Stack gap="md">
-                    {audioUrl && <audio controls src={audioUrl} style={{ width: '100%' }} />}
-                    {story.bodyOriginal && (
-                      <Box
-                        p="md"
-                        bg="slate.0"
-                        style={{ borderRadius: 'var(--mantine-radius-md)' }}
-                      >
-                        <Text size="xs" c="dimmed" mb={6} tt="uppercase" fw={600}>
-                          Original {story.inputType === 'voice' ? 'transcript' : 'text'}
-                        </Text>
-                        <Stack gap="sm">
-                          {paragraphs(story.bodyOriginal).map((para, i) => (
-                            <Text key={i} size="sm" c="slate.7">
-                              {para}
-                            </Text>
-                          ))}
-                        </Stack>
-                      </Box>
-                    )}
-                    {story.conversationId && (
-                      <Group gap="xs" c="dimmed">
-                        <IconMessageCircle2 size={16} />
-                        <Text size="sm" c="dimmed">
-                          From a chat conversation
-                        </Text>
-                      </Group>
-                    )}
-                  </Stack>
-                </Accordion.Panel>
-              </Accordion.Item>
-            </Accordion>
+            <SourceAccordion
+              audioUrl={audioUrl}
+              originalParas={story.bodyOriginal ? paragraphs(story.bodyOriginal) : []}
+              inputType={story.inputType}
+              fromConversation={Boolean(story.conversationId)}
+            />
           </>
         )}
       </Stack>
