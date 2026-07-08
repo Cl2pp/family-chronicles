@@ -21,7 +21,8 @@ export const metadata: Metadata = {
   title: 'Family Chronicle',
   description: 'A private vault where your family stories live.',
   manifest: '/manifest.webmanifest',
-  appleWebApp: { capable: true, title: 'Family Chronicle', statusBarStyle: 'default' },
+  // `title` is the iOS home-screen label when the PWA is added via Safari.
+  appleWebApp: { capable: true, title: 'Chronicles', statusBarStyle: 'default' },
   icons: {
     icon: [
       { url: '/icon.svg', type: 'image/svg+xml' },

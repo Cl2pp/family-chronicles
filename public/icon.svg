@@ -1,10 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Family Chronicle">
-  <rect width="512" height="512" rx="96" fill="#c97c4e"/>
-  <g fill="#fbf7f2">
-    <path d="M150 120h150c28 0 50 22 50 50v222c0-18-14-32-32-32H150z" opacity="0.95"/>
-    <path d="M362 120h0c28 0 50 22 50 50v240c0-18-14-32-32-32h-18z" opacity="0.55"/>
-    <rect x="182" y="176" width="120" height="20" rx="10"/>
-    <rect x="182" y="224" width="120" height="20" rx="10"/>
-    <rect x="182" y="272" width="84" height="20" rx="10"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="Open Chronicle icon, blue tile">
+  <rect x="0" y="0" width="96" height="96" rx="21.6" ry="21.6" fill="#2F6DB0"/>
+  <g transform="translate(20.16,20.16) scale(0.58)">
+    <g fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M48 30 L18 24 L18 70 L48 76 Z" fill="#FFFFFF" fill-opacity="0.22" stroke="none"/>
+      <path d="M48 30 L78 24 L78 70 L48 76 Z" fill="#FFFFFF" fill-opacity="0.22" stroke="none"/>
+      <path d="M48 30 L48 76"/>
+      <g stroke-width="3.4" opacity="0.6">
+        <path d="M26 41 L40 43.5 M26 51 L40 53.5 M26 61 L40 63.5"/>
+        <path d="M70 41 L56 43.5 M70 51 L56 53.5 M70 61 L56 63.5"/>
+      </g>
+    </g>
   </g>
 </svg>
