@@ -15,7 +15,18 @@ import {
   Textarea,
   Title,
 } from '@mantine/core';
-import { IconMicrophone, IconPhoto, IconPlus, IconSend, IconX } from '@tabler/icons-react';
+import {
+  IconBook2,
+  IconHeart,
+  IconMicrophone,
+  IconMoodKid,
+  IconPhoto,
+  IconPlus,
+  IconSend,
+  IconUserPlus,
+  IconUsersPlus,
+  IconX,
+} from '@tabler/icons-react';
 import { AudioRecorder, type RecordedAudio } from '@/components/audio-recorder';
 import { MOBILE_TABBAR_OFFSET } from '@/components/app-shell';
 import { CONVERSATION_IDLE_MS } from '@/lib/chat-idle';
@@ -23,6 +34,10 @@ import { useI18n } from '@/lib/i18n/client';
 import { MessageRow } from './message-row';
 import { endConversation, presignUpload, sendMessage, sendVoiceMessage } from './actions';
 import type { ChatAttachment, Msg } from './types';
+
+// Icons paired by index with t.chat.setupSuggestions / t.chat.familySuggestions.
+const setupSuggestionIcons = [IconBook2, IconUserPlus, IconMicrophone];
+const familySuggestionIcons = [IconMoodKid, IconHeart, IconUsersPlus];
 
 interface PendingPhoto {
   s3Key: string;
@@ -227,6 +242,7 @@ export function ChatView({
 
   const empty = messages.length === 0;
   const suggestions = chronicle ? t.chat.familySuggestions : t.chat.setupSuggestions;
+  const suggestionIcons = chronicle ? familySuggestionIcons : setupSuggestionIcons;
 
   return (
     <Box
@@ -275,11 +291,21 @@ export function ChatView({
               </Text>
             </Stack>
             <Group gap="sm">
-              {suggestions.map((s) => (
-                <Button key={s} variant="light" size="xs" radius="xl" onClick={() => send(s)}>
-                  {s}
-                </Button>
-              ))}
+              {suggestions.map((s, i) => {
+                const Icon = suggestionIcons[i];
+                return (
+                  <Button
+                    key={s}
+                    variant="light"
+                    size="xs"
+                    radius="xl"
+                    leftSection={Icon ? <Icon size={14} /> : undefined}
+                    onClick={() => send(s)}
+                  >
+                    {s}
+                  </Button>
+                );
+              })}
             </Group>
           </Stack>
         ) : (
