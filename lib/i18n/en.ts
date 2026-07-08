@@ -77,8 +77,6 @@ export const en = {
     invalidNewPassword: 'Invalid new password',
     couldNotChangePassword: 'Could not change the password',
     noPasswordYet: 'You signed in with a magic link, so this account has no password yet.',
-    settingsHintPrefix: 'Looking for your chronicles or app info? See',
-    settingsHintLink: 'App settings',
   },
   settings: {
     title: 'Settings',
@@ -103,8 +101,7 @@ export const en = {
     couldNotSaveSettings: 'Could not save settings',
     aboutTitle: 'About',
     aboutDescription: "A private place for your family's stories and tree.",
-    accountHintPrefix: 'Profile, password and sign-out live in',
-    accountHintLink: 'Account',
+    appTitle: 'App',
   },
   chroniclesCard: {
     noChroniclesYet: 'No chronicles yet',

@@ -77,8 +77,6 @@ export const de: Dictionary = {
     couldNotChangePassword: 'Passwort konnte nicht geändert werden',
     noPasswordYet:
       'Du hast dich mit einem Magic-Link angemeldet, daher hat dieses Konto noch kein Passwort.',
-    settingsHintPrefix: 'Suchst du deine Chroniken oder App-Infos? Siehe',
-    settingsHintLink: 'App-Einstellungen',
   },
   settings: {
     title: 'Einstellungen',
@@ -103,8 +101,7 @@ export const de: Dictionary = {
     couldNotSaveSettings: 'Einstellungen konnten nicht gespeichert werden',
     aboutTitle: 'Über',
     aboutDescription: 'Ein privater Ort für die Geschichten und den Stammbaum deiner Familie.',
-    accountHintPrefix: 'Profil, Passwort und Abmelden findest du unter',
-    accountHintLink: 'Konto',
+    appTitle: 'App',
   },
   chroniclesCard: {
     noChroniclesYet: 'Noch keine Chroniken',
