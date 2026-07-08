@@ -101,6 +101,7 @@ export const de: Dictionary = {
     couldNotSaveSettings: 'Einstellungen konnten nicht gespeichert werden',
     aboutTitle: 'Über',
     aboutDescription: 'Ein privater Ort für die Geschichten und den Stammbaum deiner Familie.',
+    installTitle: 'Zum Home-Bildschirm hinzufügen',
     appTitle: 'App',
   },
   chroniclesCard: {
@@ -353,6 +354,14 @@ export const de: Dictionary = {
       'Tippe auf „Hinzufügen“ — Family Chronicle liegt jetzt wie eine App auf deinem Home-Bildschirm.',
     iosSafariHint:
       'Du siehst „Zum Home-Bildschirm“ nicht? Öffne family.clepp.de in Safari und versuch es dort.',
+    androidStep1: 'Tippe auf das ⋮-Menü in der Browserleiste.',
+    androidStep2: 'Tippe auf „App installieren“ oder „Zum Startbildschirm zufügen“.',
+    androidStep3:
+      'Bestätige — Family Chronicle liegt jetzt wie eine App auf deinem Home-Bildschirm.',
+    androidHint:
+      'Du siehst die Option nicht? Öffne family.clepp.de in Chrome und versuch es dort.',
+    alreadyInstalled:
+      'Du nutzt Family Chronicle als App — sie liegt schon auf deinem Home-Bildschirm.',
     done: 'Alles klar',
   },
   dates: {

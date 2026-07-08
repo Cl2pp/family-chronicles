@@ -1,18 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  Button,
-  CloseButton,
-  Group,
-  Paper,
-  Stack,
-  Text,
-  ThemeIcon,
-} from '@mantine/core';
+import { Button, CloseButton, Group, Paper, Stack, Text, ThemeIcon } from '@mantine/core';
 import { usePathname } from 'next/navigation';
-import { IconDeviceMobilePlus, IconShare2, IconSquareRoundedPlus } from '@tabler/icons-react';
+import { IconDeviceMobilePlus } from '@tabler/icons-react';
 import { MOBILE_TABBAR_OFFSET } from '@/components/app-shell';
+import { InstallGuideSteps, isIos, isStandalone } from '@/components/install-guide';
 import { useI18n } from '@/lib/i18n/client';
 
 /** Chromium fires this before showing its own install UI; not in the TS DOM lib yet. */
@@ -23,43 +16,21 @@ interface BeforeInstallPromptEvent extends Event {
 
 /** localStorage key holding the epoch-ms timestamp of the last dismissal. */
 const DISMISSED_KEY = 'fc-install-prompt-dismissed-at';
-const SNOOZE_DAYS = 30;
+/** localStorage key set once the user tells us they're done — never nudge again. */
+const SETTLED_KEY = 'fc-install-prompt-settled';
+/** Short on purpose: brushing the card away shouldn't bury it for a month. */
+const SNOOZE_HOURS = 1;
 
 /** Routes that show the mobile bottom tab bar; the card floats above it there. */
 const TAB_BAR_ROUTES = ['/chat', '/stories', '/chronicle', '/settings', '/account'];
 
 function isSnoozed() {
   const at = Number(localStorage.getItem(DISMISSED_KEY));
-  return at > 0 && Date.now() - at < SNOOZE_DAYS * 24 * 60 * 60 * 1000;
+  return at > 0 && Date.now() - at < SNOOZE_HOURS * 60 * 60 * 1000;
 }
 
-function isStandalone() {
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    // iOS Safari's non-standard flag, set when launched from the Home Screen.
-    ('standalone' in navigator && (navigator as { standalone?: boolean }).standalone === true)
-  );
-}
-
-function isIos() {
-  // iPadOS 13+ masquerades as macOS but is the only "Mac" with a touch screen.
-  return (
-    /iphone|ipad|ipod/i.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  );
-}
-
-function GuideStep({ icon: Icon, text }: { icon: typeof IconShare2; text: string }) {
-  return (
-    <Group gap="sm" wrap="nowrap">
-      <ThemeIcon size={30} radius="md" variant="light" color="brand" style={{ flexShrink: 0 }}>
-        <Icon size={18} stroke={1.8} />
-      </ThemeIcon>
-      <Text fz={13} lh={1.35}>
-        {text}
-      </Text>
-    </Group>
-  );
+function isSettled() {
+  return localStorage.getItem(SETTLED_KEY) === '1';
 }
 
 /**
@@ -67,7 +38,12 @@ function GuideStep({ icon: Icon, text }: { icon: typeof IconShare2; text: string
  * iOS has no install API, so "Show me how" swaps the card content for
  * illustrated share-menu steps in place; on Android/Chromium we hold on
  * to `beforeinstallprompt` and trigger the native install dialog.
- * Dismissing snoozes the card for 30 days.
+ *
+ * Brushing the card away only snoozes it for an hour, so it comes back on the
+ * next visit. Installing, or reaching the end of the iOS guide, settles it for
+ * good — iOS fires no `appinstalled` event, so that button is the only signal
+ * we get from an iPhone. Either way the steps stay available under
+ * Settings → App (see `settings/install-card.tsx`).
  */
 export function InstallPrompt() {
   const { t } = useI18n();
@@ -77,7 +53,7 @@ export function InstallPrompt() {
   const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
-    if (isStandalone() || isSnoozed()) return;
+    if (isStandalone() || isSettled() || isSnoozed()) return;
 
     // Let the page settle before nudging; the check runs at fire time.
     const timer = setTimeout(() => {
@@ -89,7 +65,7 @@ export function InstallPrompt() {
       setInstallEvent(e as BeforeInstallPromptEvent);
       setPlatform('android');
     };
-    const onInstalled = () => setPlatform(null);
+    const onInstalled = () => settle();
     window.addEventListener('beforeinstallprompt', onPrompt);
     window.addEventListener('appinstalled', onInstalled);
     return () => {
@@ -99,8 +75,15 @@ export function InstallPrompt() {
     };
   }, []);
 
+  /** "Not now" / the X — back in an hour. */
   function dismiss() {
     localStorage.setItem(DISMISSED_KEY, String(Date.now()));
+    setPlatform(null);
+  }
+
+  /** Installed, or finished reading the guide — don't ask again. */
+  function settle() {
+    localStorage.setItem(SETTLED_KEY, '1');
     setPlatform(null);
   }
 
@@ -108,7 +91,7 @@ export function InstallPrompt() {
     if (!installEvent) return;
     await installEvent.prompt();
     const { outcome } = await installEvent.userChoice;
-    if (outcome === 'accepted') setPlatform(null);
+    if (outcome === 'accepted') settle();
     else dismiss();
   }
 
@@ -140,13 +123,8 @@ export function InstallPrompt() {
             </Text>
             <CloseButton size="sm" onClick={dismiss} aria-label={t.pwa.notNow} />
           </Group>
-          <GuideStep icon={IconShare2} text={t.pwa.iosStep1} />
-          <GuideStep icon={IconSquareRoundedPlus} text={t.pwa.iosStep2} />
-          <GuideStep icon={IconDeviceMobilePlus} text={t.pwa.iosStep3} />
-          <Text fz={12} c="dimmed" lh={1.35}>
-            {t.pwa.iosSafariHint}
-          </Text>
-          <Button fullWidth size="compact-md" onClick={dismiss}>
+          <InstallGuideSteps platform="ios" />
+          <Button fullWidth size="compact-md" onClick={settle}>
             {t.pwa.done}
           </Button>
         </Stack>

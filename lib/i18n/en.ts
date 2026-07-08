@@ -101,6 +101,7 @@ export const en = {
     couldNotSaveSettings: 'Could not save settings',
     aboutTitle: 'About',
     aboutDescription: "A private place for your family's stories and tree.",
+    installTitle: 'Add to home screen',
     appTitle: 'App',
   },
   chroniclesCard: {
@@ -338,6 +339,11 @@ export const en = {
     iosStep2: 'Scroll down and tap “Add to Home Screen”.',
     iosStep3: 'Tap “Add” — Family Chronicle now lives on your Home Screen like an app.',
     iosSafariHint: 'Don’t see “Add to Home Screen”? Open family.clepp.de in Safari and try again.',
+    androidStep1: 'Tap the ⋮ menu in the browser toolbar.',
+    androidStep2: 'Tap “Install app” or “Add to Home screen”.',
+    androidStep3: 'Confirm — Family Chronicle now lives on your home screen like an app.',
+    androidHint: 'Don’t see the option? Open family.clepp.de in Chrome and try again.',
+    alreadyInstalled: 'You’re using Family Chronicle as an app — it’s already on your home screen.',
     done: 'Got it',
   },
   dates: {

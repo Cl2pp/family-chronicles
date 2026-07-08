@@ -11,6 +11,7 @@ import { getI18n } from '@/lib/i18n/server';
 import { LOCALE_BCP47 } from '@/lib/i18n/config';
 import { ChangePasswordForm } from './change-password-form';
 import { ChroniclesCard } from './chronicles-card';
+import { InstallCard } from './install-card';
 import { LanguageCard } from './language-card';
 import { ProfileCard } from './profile-card';
 import { SettingsTabs } from './settings-tabs';
@@ -98,6 +99,8 @@ export default async function SettingsPage() {
                 </Group>
               </Card>
             </Box>
+
+            <InstallCard />
           </Stack>
         }
       />
