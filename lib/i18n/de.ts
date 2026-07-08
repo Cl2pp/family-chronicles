@@ -85,9 +85,9 @@ export const de: Dictionary = {
     languageTitle: 'Sprache',
     uiLanguageLabel: 'App-Sprache',
     uiLanguageDescription: 'Die Sprache von Menüs, Buttons und Seiten auf diesem Gerät.',
-    myChroniclesTitle: 'Meine Chroniken',
-    myChroniclesHint: 'Die ausgewählte Chronik ist die, mit der Chat, Geschichten und Stammbaum öffnen.',
-    chronicleSettingsTitle: 'Chronik-Einstellungen',
+    chroniclesTitle: 'Chroniken',
+    chroniclesHint:
+      'Die ausgewählte Chronik ist die, mit der Chat, Geschichten und Stammbaum öffnen. Klappe eine Chronik auf, um ihre Einstellungen zu bearbeiten.',
     onlyOwners: 'Nur Eigentümer können diese Einstellungen ändern.',
     chronicleName: 'Name der Chronik',
     chronicleNameRequired: 'Ein Name für die Chronik ist erforderlich',
@@ -115,6 +115,7 @@ export const de: Dictionary = {
     activeBadge: 'Aktiv',
     open: 'Öffnen',
     created: (date: string) => `Erstellt am ${date}`,
+    toggleSettingsAria: (name: string) => `Einstellungen für ${name}`,
     newChronicle: 'Neue Chronik',
   },
   chronicleNew: {

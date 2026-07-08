@@ -1,12 +1,11 @@
 import { cookies } from 'next/headers';
 import { Anchor, Box, Card, Group, Stack, Text, Title } from '@mantine/core';
 import { requireUser } from '@/lib/session';
-import { getChronicle, resolveActiveChronicle } from '@/lib/chronicles';
-import { canManage, type AccessRole } from '@/lib/permissions';
+import { resolveActiveChronicle } from '@/lib/chronicles';
+import { type AccessRole } from '@/lib/permissions';
 import { getI18n } from '@/lib/i18n/server';
 import { LOCALE_BCP47 } from '@/lib/i18n/config';
 import { ChroniclesCard } from './chronicles-card';
-import { ChronicleSettingsCard } from './chronicle-settings-card';
 import { LanguageCard } from './language-card';
 import pkg from '@/package.json';
 
@@ -15,12 +14,13 @@ export default async function SettingsPage() {
   const { locale, t } = await getI18n();
   const activeCookie = (await cookies()).get('activeChronicleId')?.value;
   const { chronicles, active } = await resolveActiveChronicle(user.id, activeCookie);
-  const fullChronicle = active ? await getChronicle(active.id) : undefined;
 
   const rows = chronicles.map((f) => ({
     id: f.id,
     name: f.name,
     description: f.description,
+    styleGuide: f.styleGuide,
+    storyLanguage: f.storyLanguage,
     role: f.role as AccessRole,
     createdLabel: f.createdAt.toLocaleDateString(LOCALE_BCP47[locale], {
       day: 'numeric',
@@ -45,29 +45,13 @@ export default async function SettingsPage() {
 
         <Box>
           <Title order={3} mb="xs">
-            {t.settings.myChroniclesTitle}
+            {t.settings.chroniclesTitle}
           </Title>
           <Text size="sm" c="dimmed" mb="md">
-            {t.settings.myChroniclesHint}
+            {t.settings.chroniclesHint}
           </Text>
           <ChroniclesCard chronicles={rows} activeId={active?.id ?? null} />
         </Box>
-
-        {active && fullChronicle && (
-          <Box>
-            <Title order={3} mb="xs">
-              {t.settings.chronicleSettingsTitle}
-            </Title>
-            <ChronicleSettingsCard
-              chronicleId={active.id}
-              name={fullChronicle.name}
-              description={fullChronicle.description ?? ''}
-              styleGuide={fullChronicle.styleGuide ?? ''}
-              storyLanguage={fullChronicle.storyLanguage}
-              canManage={canManage(active.role as AccessRole)}
-            />
-          </Box>
-        )}
 
         <Box>
           <Title order={3} mb="xs">

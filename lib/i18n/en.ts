@@ -85,9 +85,9 @@ export const en = {
     languageTitle: 'Language',
     uiLanguageLabel: 'App language',
     uiLanguageDescription: 'The language of menus, buttons, and pages on this device.',
-    myChroniclesTitle: 'My chronicles',
-    myChroniclesHint: 'The selected chronicle is the one Chat, Stories and Tree open with.',
-    chronicleSettingsTitle: 'Chronicle settings',
+    chroniclesTitle: 'Chronicles',
+    chroniclesHint:
+      'The selected chronicle is the one Chat, Stories and Tree open with. Expand a chronicle to edit its settings.',
     onlyOwners: 'Only owners can change these settings.',
     chronicleName: 'Chronicle name',
     chronicleNameRequired: 'A chronicle name is required',
@@ -114,6 +114,7 @@ export const en = {
     activeBadge: 'Active',
     open: 'Open',
     created: (date: string) => `Created ${date}`,
+    toggleSettingsAria: (name: string) => `Settings for ${name}`,
     newChronicle: 'New chronicle',
   },
   chronicleNew: {
