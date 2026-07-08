@@ -1,18 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  Button,
-  CloseButton,
-  Group,
-  Paper,
-  Stack,
-  Text,
-  ThemeIcon,
-} from '@mantine/core';
+import { Button, CloseButton, Group, Paper, Stack, Text, ThemeIcon } from '@mantine/core';
 import { usePathname } from 'next/navigation';
-import { IconDeviceMobilePlus, IconShare2, IconSquareRoundedPlus } from '@tabler/icons-react';
+import { IconDeviceMobilePlus } from '@tabler/icons-react';
 import { MOBILE_TABBAR_OFFSET } from '@/components/app-shell';
+import { InstallGuideSteps, isIos, isStandalone } from '@/components/install-guide';
 import { useI18n } from '@/lib/i18n/client';
 
 /** Chromium fires this before showing its own install UI; not in the TS DOM lib yet. */
@@ -33,41 +26,13 @@ function isSnoozed() {
   return at > 0 && Date.now() - at < SNOOZE_DAYS * 24 * 60 * 60 * 1000;
 }
 
-function isStandalone() {
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    // iOS Safari's non-standard flag, set when launched from the Home Screen.
-    ('standalone' in navigator && (navigator as { standalone?: boolean }).standalone === true)
-  );
-}
-
-function isIos() {
-  // iPadOS 13+ masquerades as macOS but is the only "Mac" with a touch screen.
-  return (
-    /iphone|ipad|ipod/i.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  );
-}
-
-function GuideStep({ icon: Icon, text }: { icon: typeof IconShare2; text: string }) {
-  return (
-    <Group gap="sm" wrap="nowrap">
-      <ThemeIcon size={30} radius="md" variant="light" color="brand" style={{ flexShrink: 0 }}>
-        <Icon size={18} stroke={1.8} />
-      </ThemeIcon>
-      <Text fz={13} lh={1.35}>
-        {text}
-      </Text>
-    </Group>
-  );
-}
-
 /**
  * Mobile-only card nudging users to add the app to their home screen.
  * iOS has no install API, so "Show me how" swaps the card content for
  * illustrated share-menu steps in place; on Android/Chromium we hold on
  * to `beforeinstallprompt` and trigger the native install dialog.
- * Dismissing snoozes the card for 30 days.
+ * Dismissing snoozes the card for 30 days; the same steps stay available
+ * for good under Settings → App (see `settings/install-card.tsx`).
  */
 export function InstallPrompt() {
   const { t } = useI18n();
@@ -140,12 +105,7 @@ export function InstallPrompt() {
             </Text>
             <CloseButton size="sm" onClick={dismiss} aria-label={t.pwa.notNow} />
           </Group>
-          <GuideStep icon={IconShare2} text={t.pwa.iosStep1} />
-          <GuideStep icon={IconSquareRoundedPlus} text={t.pwa.iosStep2} />
-          <GuideStep icon={IconDeviceMobilePlus} text={t.pwa.iosStep3} />
-          <Text fz={12} c="dimmed" lh={1.35}>
-            {t.pwa.iosSafariHint}
-          </Text>
+          <InstallGuideSteps platform="ios" />
           <Button fullWidth size="compact-md" onClick={dismiss}>
             {t.pwa.done}
           </Button>
