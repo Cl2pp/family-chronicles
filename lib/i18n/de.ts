@@ -340,9 +340,9 @@ export const de: Dictionary = {
     text: 'Family Chronicle braucht für diese Seite eine Verbindung. Prüfe dein Netzwerk und versuch es noch einmal — deine Geschichten sind sicher und warten auf dich.',
   },
   pwa: {
-    bannerTitle: 'Family Chronicle auf deinen Home-Bildschirm',
+    bannerTitle: 'Füg das hier als App zu deinem Home-Bildschirm hinzu',
     bannerBody:
-      'Öffnet sich im Vollbild wie eine App — ein Tipp und du bist bei deinen Geschichten.',
+      'Family Chronicle liegt dann wie eine normale App auf deinem Home-Bildschirm — ein Tipp und du bist bei deinen Geschichten.',
     showMeHow: 'So geht’s',
     install: 'Installieren',
     notNow: 'Später',

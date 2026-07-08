@@ -5,13 +5,14 @@ import {
   Button,
   CloseButton,
   Group,
-  Modal,
   Paper,
   Stack,
   Text,
   ThemeIcon,
 } from '@mantine/core';
+import { usePathname } from 'next/navigation';
 import { IconDeviceMobilePlus, IconShare2, IconSquareRoundedPlus } from '@tabler/icons-react';
+import { MOBILE_TABBAR_OFFSET } from '@/components/app-shell';
 import { useI18n } from '@/lib/i18n/client';
 
 /** Chromium fires this before showing its own install UI; not in the TS DOM lib yet. */
@@ -20,8 +21,12 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
+/** localStorage key holding the epoch-ms timestamp of the last dismissal. */
 const DISMISSED_KEY = 'fc-install-prompt-dismissed-at';
 const SNOOZE_DAYS = 30;
+
+/** Routes that show the mobile bottom tab bar; the card floats above it there. */
+const TAB_BAR_ROUTES = ['/chat', '/stories', '/chronicle', '/settings', '/account'];
 
 function isSnoozed() {
   const at = Number(localStorage.getItem(DISMISSED_KEY));
@@ -44,26 +49,40 @@ function isIos() {
   );
 }
 
+function GuideStep({ icon: Icon, text }: { icon: typeof IconShare2; text: string }) {
+  return (
+    <Group gap="sm" wrap="nowrap">
+      <ThemeIcon size={30} radius="md" variant="light" color="brand" style={{ flexShrink: 0 }}>
+        <Icon size={18} stroke={1.8} />
+      </ThemeIcon>
+      <Text fz={13} lh={1.35}>
+        {text}
+      </Text>
+    </Group>
+  );
+}
+
 /**
- * Mobile-only banner nudging users to put the app on their home screen.
- * iOS has no install API, so the banner opens illustrated share-menu steps;
- * on Android/Chromium we hold on to `beforeinstallprompt` and trigger the
- * native install dialog. Dismissing snoozes the banner for 30 days.
+ * Mobile-only card nudging users to add the app to their home screen.
+ * iOS has no install API, so "Show me how" swaps the card content for
+ * illustrated share-menu steps in place; on Android/Chromium we hold on
+ * to `beforeinstallprompt` and trigger the native install dialog.
+ * Dismissing snoozes the card for 30 days.
  */
 export function InstallPrompt() {
   const { t } = useI18n();
+  const pathname = usePathname();
   const [platform, setPlatform] = useState<'ios' | 'android' | null>(null);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
-  const [guideOpen, setGuideOpen] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
     if (isStandalone() || isSnoozed()) return;
 
-    if (isIos()) {
-      // Let the page settle before nudging.
-      const timer = setTimeout(() => setPlatform('ios'), 1500);
-      return () => clearTimeout(timer);
-    }
+    // Let the page settle before nudging; the check runs at fire time.
+    const timer = setTimeout(() => {
+      if (isIos()) setPlatform('ios');
+    }, 1500);
 
     const onPrompt = (e: Event) => {
       e.preventDefault();
@@ -74,6 +93,7 @@ export function InstallPrompt() {
     window.addEventListener('beforeinstallprompt', onPrompt);
     window.addEventListener('appinstalled', onInstalled);
     return () => {
+      clearTimeout(timer);
       window.removeEventListener('beforeinstallprompt', onPrompt);
       window.removeEventListener('appinstalled', onInstalled);
     };
@@ -94,22 +114,43 @@ export function InstallPrompt() {
 
   if (!platform) return null;
 
+  const aboveTabBar = TAB_BAR_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
+
   return (
-    <>
-      <Paper
-        hiddenFrom="sm"
-        shadow="md"
-        radius="lg"
-        p="sm"
-        withBorder
-        style={{
-          position: 'fixed',
-          bottom: 72,
-          left: 12,
-          right: 12,
-          zIndex: 300,
-        }}
-      >
+    <Paper
+      hiddenFrom="sm"
+      shadow="md"
+      radius="lg"
+      p="sm"
+      withBorder
+      style={{
+        position: 'fixed',
+        bottom: aboveTabBar ? MOBILE_TABBAR_OFFSET : 16,
+        left: 12,
+        right: 12,
+        zIndex: 300,
+      }}
+    >
+      {showGuide ? (
+        /* iOS guide — replaces the nudge in place */
+        <Stack gap="sm">
+          <Group justify="space-between" wrap="nowrap" align="flex-start">
+            <Text fz={13} fw={600} lh={1.3}>
+              {t.pwa.guideTitle}
+            </Text>
+            <CloseButton size="sm" onClick={dismiss} aria-label={t.pwa.notNow} />
+          </Group>
+          <GuideStep icon={IconShare2} text={t.pwa.iosStep1} />
+          <GuideStep icon={IconSquareRoundedPlus} text={t.pwa.iosStep2} />
+          <GuideStep icon={IconDeviceMobilePlus} text={t.pwa.iosStep3} />
+          <Text fz={12} c="dimmed" lh={1.35}>
+            {t.pwa.iosSafariHint}
+          </Text>
+          <Button fullWidth size="compact-md" onClick={dismiss}>
+            {t.pwa.done}
+          </Button>
+        </Stack>
+      ) : (
         <Group gap="sm" wrap="nowrap" align="flex-start">
           <ThemeIcon size={38} radius="md" variant="light" color="brand">
             <IconDeviceMobilePlus size={22} stroke={1.8} />
@@ -123,7 +164,7 @@ export function InstallPrompt() {
             </Text>
             <Group gap="xs" mt={2}>
               {platform === 'ios' ? (
-                <Button size="compact-sm" onClick={() => setGuideOpen(true)}>
+                <Button size="compact-sm" onClick={() => setShowGuide(true)}>
                   {t.pwa.showMeHow}
                 </Button>
               ) : (
@@ -138,49 +179,7 @@ export function InstallPrompt() {
           </Stack>
           <CloseButton size="sm" onClick={dismiss} aria-label={t.pwa.notNow} />
         </Group>
-      </Paper>
-
-      {/* iOS step-by-step guide */}
-      <Modal
-        opened={guideOpen}
-        onClose={() => setGuideOpen(false)}
-        title={t.pwa.guideTitle}
-        centered
-        radius="lg"
-      >
-        <Stack gap="md">
-          <Group gap="sm" wrap="nowrap">
-            <ThemeIcon size={34} radius="md" variant="light" color="brand">
-              <IconShare2 size={20} stroke={1.8} />
-            </ThemeIcon>
-            <Text fz={14}>{t.pwa.iosStep1}</Text>
-          </Group>
-          <Group gap="sm" wrap="nowrap">
-            <ThemeIcon size={34} radius="md" variant="light" color="brand">
-              <IconSquareRoundedPlus size={20} stroke={1.8} />
-            </ThemeIcon>
-            <Text fz={14}>{t.pwa.iosStep2}</Text>
-          </Group>
-          <Group gap="sm" wrap="nowrap">
-            <ThemeIcon size={34} radius="md" variant="light" color="brand">
-              <IconDeviceMobilePlus size={20} stroke={1.8} />
-            </ThemeIcon>
-            <Text fz={14}>{t.pwa.iosStep3}</Text>
-          </Group>
-          <Text fz={12} c="dimmed">
-            {t.pwa.iosSafariHint}
-          </Text>
-          <Button
-            fullWidth
-            onClick={() => {
-              setGuideOpen(false);
-              dismiss();
-            }}
-          >
-            {t.pwa.done}
-          </Button>
-        </Stack>
-      </Modal>
-    </>
+      )}
+    </Paper>
   );
 }

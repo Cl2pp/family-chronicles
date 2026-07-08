@@ -21,7 +21,6 @@ import {
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { authClient } from '@/lib/auth-client';
-import { InstallPrompt } from '@/components/install-prompt';
 import { useI18n } from '@/lib/i18n/client';
 import type { Dictionary } from '@/lib/i18n';
 
@@ -225,8 +224,6 @@ export function AppChrome({
           })}
         </Group>
       </Box>
-
-      <InstallPrompt />
     </AppShell>
   );
 }
