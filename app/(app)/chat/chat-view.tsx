@@ -188,6 +188,11 @@ export function ChatView({
     setRecording(false);
     setRecorded(null);
     setBusyLabel(t.chat.transcribing);
+    // Show the voice note straight away — uploading + transcribing takes seconds, and
+    // without a bubble a fresh chat would sit on its empty state as if nothing was sent.
+    // The transcript fills this same bubble in once the server returns it.
+    const pending: Msg = { role: 'user', content: '', attachments: [{ kind: 'audio', url: previewUrl }] };
+    setMessages((m) => [...m, pending]);
     try {
       const s3Key = await uploadBlob('audio', audio.blob, audio.mimeType, `note.${audio.mimeType.includes('mp4') ? 'mp4' : 'webm'}`);
       const res = await sendVoiceMessage({
@@ -198,11 +203,15 @@ export function ChatView({
         durationSec: audio.durationSec,
       });
       setConversationId(res.conversationId);
-      setMessages((m) => [
-        ...m,
-        { role: 'user', content: res.transcript, attachments: [{ kind: 'audio', url: previewUrl }] },
-        { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
-      ]);
+      setMessages((m) => {
+        const next = [...m];
+        const i = next.lastIndexOf(pending);
+        if (i !== -1) next[i] = { ...pending, content: res.transcript };
+        return [
+          ...next,
+          { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
+        ];
+      });
     } catch (err) {
       setMessages((m) => [
         ...m,
@@ -318,16 +327,18 @@ export function ChatView({
                 onResult={(r) => setResult(i, r)}
               />
             ))}
-            {busyLabel && (
-              <Group justify="flex-start">
-                <Paper bg="slate.1" p="sm" radius="md">
-                  <Text size="sm" c="dimmed">
-                    {busyLabel}
-                  </Text>
-                </Paper>
-              </Group>
-            )}
           </Stack>
+        )}
+        {/* Outside the empty/non-empty branch: a send that hasn't produced a bubble yet
+            must still show progress rather than leave the welcome screen looking idle. */}
+        {busyLabel && (
+          <Group justify="flex-start" mt="md">
+            <Paper bg="slate.1" p="sm" radius="md">
+              <Text size="sm" c="dimmed">
+                {busyLabel}
+              </Text>
+            </Paper>
+          </Group>
         )}
         <div ref={endRef} />
       </Box>

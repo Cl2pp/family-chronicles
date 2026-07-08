@@ -33,7 +33,7 @@ How to work:
 - Prefer acting over asking. Once you have enough to act, call the tool(s) and then briefly say what you did. You may call several tools in one turn (e.g. create_chronicle, then add_person for each relative) — the app applies each immediately.
 - If the user is brand-new with no chronicle, offer to create one, then add the people they mention and connect them.
 - For a STORY: only call draft_story once you have enough detail (who was there, roughly when, where). Otherwise ask ONE short, friendly follow-up instead. The story body must be third-person memoir prose ("Maria remembered…"), preserve every fact (names, places, dates), invent NOTHING, and keep the family's original language. draft_story shows the user an editable card to review and save — after calling it, keep your reply short (e.g. "Here's a draft — take a look.").
-- The draft card is the ONLY way a story gets saved. You cannot save it and must NEVER ask "should I save it?" — the user saves or discards it on the card. Bracketed [system] notes in the conversation tell you when a card was saved or discarded; trust them. Never call draft_story again for the same story unless the user asks for changes before saving (and if they do, note in your reply that the previous card should be discarded) — or unless no saved/discarded note ever appeared and the user asks about the story again (the card was lost, e.g. to a page reload; draft it afresh).
+- The draft card is the ONLY way a story gets saved. You cannot save it and must NEVER ask "should I save it?" — the user saves or discards it on the card. Bracketed [system] notes in the conversation tell you when a card was saved or discarded; trust them. A card stays on screen across reloads until the user acts on it, so never call draft_story again for the same story unless the user asks for changes before saving (and if they do, note in your reply that the previous card should be discarded).
 - Never record the same event twice. If a memory sounds like one that may already be recorded, check list_stories first: when a matching story exists, offer to update it (get_story → update_story) instead of drafting a duplicate.
 - To CHANGE an existing story (rewrite it, fix a fact, weave in new details the user just told you): call get_story to read the current text, then update_story with the COMPLETE revised story — same memoir rules, and never drop facts that are still true. It shows a review card too; keep your reply short.
 - Read tools (list_chronicles, get_family_tree, list_stories, get_story) are free — use them to check current state before acting or to answer questions.
@@ -41,6 +41,33 @@ How to work:
 - Confirm first only when something is ambiguous or hard to undo. Adding people/relationships is fine to do directly.
 - If a tool returns an error, explain it plainly and suggest the fix; never pretend an action succeeded.
 - Keep replies concise and friendly. Never output raw JSON or tool names to the user.`;
+
+/**
+ * Flatten the stored conversation into turns the model will accept.
+ *
+ * Stored `system` turns are app events (a draft card appeared / was saved / was
+ * discarded). They must NOT go over the wire as `role: 'system'`: providers hoist the
+ * leading system prompt out of the array, and Anthropic then rejects any remaining
+ * `system` message that follows a plain assistant turn ("messages.2: role 'system' must
+ * follow a 'user' message…") — which permanently wedges the conversation, since history
+ * is replayed from storage on every turn. They ride along as the bracketed user notes the
+ * system prompt already tells the model to trust. Consecutive user turns are merged so
+ * the array stays strictly alternating.
+ */
+function toModelTurns(history: ChatTurn[]): Array<{ role: 'user' | 'assistant'; content: string }> {
+  const turns: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  for (const turn of history) {
+    if (!turn.content.trim()) continue;
+    const role = turn.role === 'assistant' ? 'assistant' : 'user';
+    const prev = turns[turns.length - 1];
+    if (role === 'user' && prev?.role === 'user') {
+      prev.content = `${prev.content}\n\n${turn.content}`;
+      continue;
+    }
+    turns.push({ role, content: turn.content });
+  }
+  return turns;
+}
 
 /** A short note describing the current chronicle context for the system prompt. */
 function contextNote(ctx: ToolContext): string {
@@ -58,7 +85,7 @@ function contextNote(ctx: ToolContext): string {
 export async function runAgent(history: ChatTurn[], ctx: ToolContext): Promise<AgentResult> {
   const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: BASE_SYSTEM + contextNote(ctx) },
-    ...history,
+    ...toModelTurns(history),
   ];
   const schemas = toOpenAISchemas();
   const receipts: Receipt[] = [];
