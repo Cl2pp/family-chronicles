@@ -18,6 +18,7 @@ import {
   IconSettings,
   IconUserCircle,
 } from '@tabler/icons-react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { authClient } from '@/lib/auth-client';
@@ -84,11 +85,7 @@ export function AppChrome({
         withBorder
       >
         <Group gap={8} mb="md" px={6}>
-          <Box
-            w={22}
-            h={22}
-            style={{ borderRadius: 6, background: 'var(--mantine-color-brand-6)' }}
-          />
+          <Image src="/icon.svg" alt="" width={22} height={22} priority />
           <Text fw={700} fz={14}>
             Family Chronicle
           </Text>
