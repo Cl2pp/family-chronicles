@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "web",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "BETTER_AUTH_URL=\"http://localhost:$PORT\" npm run dev"],
       "port": 3000,
       "autoPort": true
     },

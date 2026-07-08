@@ -21,6 +21,8 @@ export async function listChroniclesForUser(userId: string) {
       id: chronicles.id,
       name: chronicles.name,
       description: chronicles.description,
+      styleGuide: chronicles.styleGuide,
+      storyLanguage: chronicles.storyLanguage,
       role: memberships.accessRole,
       createdAt: chronicles.createdAt,
     })
