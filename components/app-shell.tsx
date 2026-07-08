@@ -38,7 +38,7 @@ const MOBILE_NAV = [
   { href: '/chat', label: (t: Dictionary) => t.nav.chat, icon: IconMessageCircle },
   { href: '/stories', label: (t: Dictionary) => t.nav.stories, icon: IconBook2 },
   { href: '/chronicle', label: (t: Dictionary) => t.nav.chronicle, icon: IconBinaryTree2 },
-  { href: '/account', label: (t: Dictionary) => t.nav.account, icon: IconUserCircle },
+  { href: '/settings', label: (t: Dictionary) => t.nav.settings, icon: IconSettings },
 ] as const;
 
 function initials(name: string) {
@@ -150,16 +150,9 @@ export function AppChrome({
               <Menu.Item
                 leftSection={<IconUserCircle size={16} />}
                 component={Link}
-                href="/account"
+                href="/settings?tab=account"
               >
                 {t.nav.account}
-              </Menu.Item>
-              <Menu.Item
-                leftSection={<IconSettings size={16} />}
-                component={Link}
-                href="/settings"
-              >
-                {t.nav.settings}
               </Menu.Item>
               <Menu.Item leftSection={<IconLogout size={16} />} onClick={signOut}>
                 {t.nav.signOut}

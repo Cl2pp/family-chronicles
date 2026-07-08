@@ -16,7 +16,7 @@ import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconCamera } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
-import { presignAvatarUpload, saveAvatar, updateDisplayName } from './actions';
+import { presignAvatarUpload, saveAvatar, updateDisplayName } from './account-actions';
 import { SignOutButton } from './sign-out-button';
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
