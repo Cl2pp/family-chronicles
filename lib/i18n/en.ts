@@ -169,6 +169,9 @@ export const en = {
     couldNotLink: 'Could not link those people',
     maleAria: 'Male',
     femaleAria: 'Female',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    resetView: 'Fit tree to view',
   },
   person: {
     addTitleParent: (name: string) => `Add a parent of ${name}`,

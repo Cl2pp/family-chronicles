@@ -171,6 +171,9 @@ export const de: Dictionary = {
     couldNotLink: 'Diese Personen konnten nicht verknüpft werden',
     maleAria: 'Männlich',
     femaleAria: 'Weiblich',
+    zoomIn: 'Vergrößern',
+    zoomOut: 'Verkleinern',
+    resetView: 'Stammbaum einpassen',
   },
   person: {
     addTitleParent: (name: string) => `Elternteil von ${name} hinzufügen`,

@@ -32,6 +32,8 @@ import {
   IconGenderMale,
   IconHeart,
   IconLink,
+  IconMaximize,
+  IconMinus,
   IconPencil,
   IconPlus,
   IconUnlink,
@@ -45,6 +47,10 @@ import { DeletePersonButton } from './delete-person-button';
 import type { AddTarget } from './types';
 
 const CARD_WIDTH = 150;
+
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 2.5;
+const clampZoom = (s: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, s));
 
 function yearOf(d: Date | string | null | undefined): number | null {
   if (!d) return null;
@@ -139,7 +145,14 @@ export function FamilyTree({
 }: FamilyTreeProps) {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
+  const worldRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  // Current pan/zoom, applied imperatively to `worldRef` so gestures never
+  // trigger a React re-render. `didFit` guards the one-time initial fit;
+  // `moved` suppresses the card-select click at the end of a drag/pinch.
+  const view = useRef({ scale: 1, x: 0, y: 0 });
+  const didFitRef = useRef(false);
+  const movedRef = useRef(false);
   const [connectors, setConnectors] = useState<Connectors | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [linkRelation, setLinkRelation] = useState<PersonRelation>('parent');
@@ -304,23 +317,27 @@ export function FamilyTree({
   }, [people, edges, peopleById]);
 
   const measure = useCallback(() => {
-    const container = containerRef.current;
-    if (!container || cardRefs.current.size === 0) return;
-    const crect = container.getBoundingClientRect();
-    const scrollLeft = container.scrollLeft;
-    const scrollTop = container.scrollTop;
+    const world = worldRef.current;
+    if (!world || cardRefs.current.size === 0) return;
+    // Measure in the world's own (unscaled) coordinate space: the world may be
+    // zoomed via a CSS transform, so divide screen rects by the current scale
+    // to recover natural coordinates the SVG (a child of the world) draws in.
+    const wrect = world.getBoundingClientRect();
+    const s = view.current.scale || 1;
     const pos = new Map<string, Pos>();
     for (const [id, el] of cardRefs.current) {
       const r = el.getBoundingClientRect();
-      const left = r.left - crect.left + scrollLeft;
-      const top = r.top - crect.top + scrollTop;
+      const left = (r.left - wrect.left) / s;
+      const top = (r.top - wrect.top) / s;
+      const width = r.width / s;
+      const height = r.height / s;
       pos.set(id, {
         left,
-        right: left + r.width,
-        cx: left + r.width / 2,
+        right: left + width,
+        cx: left + width / 2,
         top,
-        bottom: top + r.height,
-        midY: top + r.height / 2,
+        bottom: top + height,
+        midY: top + height / 2,
       });
     }
 
@@ -366,18 +383,80 @@ export function FamilyTree({
     }
 
     setConnectors({
-      width: container.scrollWidth,
-      height: container.scrollHeight,
+      width: world.offsetWidth,
+      height: world.offsetHeight,
       parents,
       spouses,
     });
   }, [validEdges]);
 
+  // Push the current pan/zoom onto the world element. Called imperatively from
+  // gesture handlers (no state update) and re-asserted after every React commit
+  // via the deps-less layout effect below, so unrelated re-renders (selecting a
+  // person, new connectors) don't wipe out the viewport.
+  const applyTransform = useCallback(() => {
+    const w = worldRef.current;
+    if (!w) return;
+    const { x, y, scale } = view.current;
+    w.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+  }, []);
+
+  useLayoutEffect(() => {
+    applyTransform();
+  });
+
+  // Zoom by `factor` while keeping the point (px, py) — in viewport pixels —
+  // pinned under the cursor / pinch midpoint.
+  const zoomAt = useCallback(
+    (px: number, py: number, factor: number) => {
+      const t = view.current;
+      const next = clampZoom(t.scale * factor);
+      const k = next / t.scale;
+      t.x = px - (px - t.x) * k;
+      t.y = py - (py - t.y) * k;
+      t.scale = next;
+      applyTransform();
+    },
+    [applyTransform],
+  );
+
+  // Scale the whole tree to fit the viewport and center it.
+  const fitView = useCallback(() => {
+    const vp = containerRef.current;
+    const w = worldRef.current;
+    if (!vp || !w) return;
+    const cw = vp.clientWidth;
+    const ch = vp.clientHeight;
+    const ww = w.offsetWidth;
+    const wh = w.offsetHeight;
+    if (!ww || !wh) return;
+    const scale = clampZoom(Math.min(cw / ww, ch / wh, 1));
+    view.current = {
+      scale,
+      x: (cw - ww * scale) / 2,
+      y: (ch - wh * scale) / 2,
+    };
+    applyTransform();
+  }, [applyTransform]);
+
+  const zoomFromButton = useCallback(
+    (factor: number) => {
+      const vp = containerRef.current;
+      if (!vp) return;
+      zoomAt(vp.clientWidth / 2, vp.clientHeight / 2, factor);
+    },
+    [zoomAt],
+  );
+
   useLayoutEffect(() => {
     measure();
+    if (!didFitRef.current && worldRef.current?.offsetWidth) {
+      fitView();
+      didFitRef.current = true;
+    }
     const raf = requestAnimationFrame(measure);
     return () => cancelAnimationFrame(raf);
-  }, [measure, rows]);
+  }, [measure, rows, fitView]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -392,6 +471,84 @@ export function FamilyTree({
       ro?.disconnect();
     };
   }, [measure]);
+
+  // Google-Maps-style navigation: drag to pan, wheel/pinch to zoom. Handlers are
+  // native (not React props) so the wheel listener can be non-passive and call
+  // preventDefault, and so pointer tracking survives the cursor leaving a card.
+  useEffect(() => {
+    const vp = containerRef.current;
+    if (!vp || people.length === 0) return;
+
+    const pointers = new Map<number, { x: number; y: number }>();
+    let startX = 0;
+    let startY = 0;
+    let pinchDist = 0;
+
+    const twoPointerSpread = () => {
+      const [a, b] = [...pointers.values()];
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    };
+    const twoPointerMid = () => {
+      const [a, b] = [...pointers.values()];
+      return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 1) {
+        startX = e.clientX;
+        startY = e.clientY;
+        movedRef.current = false;
+        vp.style.cursor = 'grabbing';
+      } else if (pointers.size === 2) {
+        pinchDist = twoPointerSpread();
+      }
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      const prev = pointers.get(e.pointerId);
+      if (!prev) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const rect = vp.getBoundingClientRect();
+      if (pointers.size >= 2) {
+        const dist = twoPointerSpread();
+        const mid = twoPointerMid();
+        if (pinchDist > 0) zoomAt(mid.x - rect.left, mid.y - rect.top, dist / pinchDist);
+        pinchDist = dist;
+        movedRef.current = true;
+      } else {
+        view.current.x += e.clientX - prev.x;
+        view.current.y += e.clientY - prev.y;
+        applyTransform();
+        if (Math.hypot(e.clientX - startX, e.clientY - startY) > 4) movedRef.current = true;
+      }
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinchDist = 0;
+      if (pointers.size === 0) vp.style.cursor = 'grab';
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = vp.getBoundingClientRect();
+      zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.0015));
+    };
+
+    vp.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    vp.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      vp.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+      vp.removeEventListener('wheel', onWheel);
+    };
+  }, [applyTransform, zoomAt, people.length]);
 
   const selected = selectedId ? peopleById.get(selectedId) : undefined;
   const [unlinking, startUnlink] = useTransition();
@@ -511,129 +668,185 @@ export function FamilyTree({
       ) : (
         <Box
           ref={containerRef}
-          style={{ position: 'relative', overflowX: 'auto', paddingBottom: 8 }}
+          style={{
+            position: 'relative',
+            overflow: 'hidden',
+            height: 'clamp(360px, 70vh, 760px)',
+            touchAction: 'none',
+            cursor: 'grab',
+            userSelect: 'none',
+            borderRadius: 'var(--mantine-radius-md)',
+            border: '1px solid var(--mantine-color-slate-2)',
+            background: 'var(--mantine-color-slate-0)',
+          }}
         >
-          {connectors && (
-            <svg
-              width={connectors.width}
-              height={connectors.height}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                pointerEvents: 'none',
-                zIndex: 0,
-              }}
-            >
-              {connectors.parents.map((d, i) => (
-                <path
-                  key={`p-${i}`}
-                  d={d}
-                  fill="none"
-                  stroke="var(--mantine-color-slate-3)"
-                  strokeWidth={1.5}
-                />
-              ))}
-              {connectors.spouses.map((s, i) => (
-                <g key={`s-${i}`} stroke="var(--mantine-color-slate-4)" strokeWidth={1.5}>
-                  <line x1={s.x1} y1={s.y - 2} x2={s.x2} y2={s.y - 2} />
-                  <line x1={s.x1} y1={s.y + 2} x2={s.x2} y2={s.y + 2} />
-                </g>
-              ))}
-            </svg>
-          )}
-
-          <Stack
-            gap={56}
+          <div
+            ref={worldRef}
             style={{
-              position: 'relative',
-              zIndex: 1,
-              minWidth: 'fit-content',
+              position: 'absolute',
+              top: 0,
+              left: 0,
               width: 'fit-content',
-              margin: '0 auto',
+              transformOrigin: '0 0',
+              willChange: 'transform',
             }}
           >
-            {rows.map((row) => (
-              <Group key={row.gen} gap={0} wrap="nowrap" align="flex-start">
-                {row.ids.map((id) => {
-                  const person = peopleById.get(id);
-                  if (!person) return null;
-                  const isMe = person.userId === currentUserId;
-                  return (
-                    <Card
-                      key={id}
-                      ref={(el: HTMLDivElement | null) => {
-                        if (el) cardRefs.current.set(id, el);
-                        else cardRefs.current.delete(id);
-                      }}
-                      withBorder
-                      radius="md"
-                      padding="sm"
-                      onClick={() => selectPerson(id)}
-                      style={{
-                        position: 'relative',
-                        width: CARD_WIDTH,
-                        flex: '0 0 auto',
-                        marginLeft: margins.get(id) ?? 0,
-                        cursor: 'pointer',
-                        borderColor: isMe ? 'var(--mantine-color-brand-6)' : undefined,
-                        borderWidth: isMe ? 2 : undefined,
-                        boxShadow: isMe ? '0 0 0 2px var(--mantine-color-brand-1)' : undefined,
-                      }}
-                    >
-                      {person.gender && (
-                        <Box
+            {connectors && (
+              <svg
+                width={connectors.width}
+                height={connectors.height}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  pointerEvents: 'none',
+                  zIndex: 0,
+                }}
+              >
+                {connectors.parents.map((d, i) => (
+                  <path
+                    key={`p-${i}`}
+                    d={d}
+                    fill="none"
+                    stroke="var(--mantine-color-slate-3)"
+                    strokeWidth={1.5}
+                  />
+                ))}
+                {connectors.spouses.map((s, i) => (
+                  <g key={`s-${i}`} stroke="var(--mantine-color-slate-4)" strokeWidth={1.5}>
+                    <line x1={s.x1} y1={s.y - 2} x2={s.x2} y2={s.y - 2} />
+                    <line x1={s.x1} y1={s.y + 2} x2={s.x2} y2={s.y + 2} />
+                  </g>
+                ))}
+              </svg>
+            )}
+
+            <Stack
+              gap={56}
+              style={{
+                position: 'relative',
+                zIndex: 1,
+                minWidth: 'fit-content',
+                width: 'fit-content',
+              }}
+            >
+              {rows.map((row) => (
+                <Group key={row.gen} gap={0} wrap="nowrap" align="flex-start">
+                  {row.ids.map((id) => {
+                    const person = peopleById.get(id);
+                    if (!person) return null;
+                    const isMe = person.userId === currentUserId;
+                    return (
+                      <Card
+                        key={id}
+                        ref={(el: HTMLDivElement | null) => {
+                          if (el) cardRefs.current.set(id, el);
+                          else cardRefs.current.delete(id);
+                        }}
+                        withBorder
+                        radius="md"
+                        padding="sm"
+                        onClick={() => {
+                          // A drag/pinch ends in a click on the card under the
+                          // pointer — don't treat that as a selection.
+                          if (movedRef.current) return;
+                          selectPerson(id);
+                        }}
                           style={{
-                            position: 'absolute',
-                            top: 6,
-                            right: 6,
-                            display: 'flex',
-                          }}
-                        >
-                          <GenderIcon gender={person.gender} />
-                        </Box>
-                      )}
-                      <Stack align="center" gap={6}>
-                        <Avatar radius="xl" size={48} color={isMe ? 'brand' : 'slate'}>
-                          {initials(personFullName(person))}
-                        </Avatar>
-                        <Text fw={600} size="sm" ta="center" lineClamp={2}>
-                          {personFullName(person)}
-                        </Text>
-                        {birthSurname(person) && (
-                          <Text size="xs" c="dimmed" fs="italic" ta="center">
-                            ({t.tree.bornSurname(birthSurname(person)!)})
+                          position: 'relative',
+                          width: CARD_WIDTH,
+                          flex: '0 0 auto',
+                          marginLeft: margins.get(id) ?? 0,
+                          cursor: 'pointer',
+                          borderColor: isMe ? 'var(--mantine-color-brand-6)' : undefined,
+                          borderWidth: isMe ? 2 : undefined,
+                          boxShadow: isMe ? '0 0 0 2px var(--mantine-color-brand-1)' : undefined,
+                        }}
+                      >
+                        {person.gender && (
+                          <Box
+                            style={{
+                              position: 'absolute',
+                              top: 6,
+                              right: 6,
+                              display: 'flex',
+                            }}
+                          >
+                            <GenderIcon gender={person.gender} />
+                          </Box>
+                        )}
+                        <Stack align="center" gap={6}>
+                          <Avatar radius="xl" size={48} color={isMe ? 'brand' : 'slate'}>
+                            {initials(personFullName(person))}
+                          </Avatar>
+                          <Text fw={600} size="sm" ta="center" lineClamp={2}>
+                            {personFullName(person)}
                           </Text>
-                        )}
-                        {lifeSpan(person) && (
-                          <Text size="xs" c="dimmed">
-                            {lifeSpan(person)}
-                          </Text>
-                        )}
-                        {person.familyTags.length > 0 && (
-                          <Group gap={4} justify="center">
-                            {person.familyTags.map((tag) => (
-                              <Box
-                                key={tag}
-                                title={tag}
-                                w={8}
-                                h={8}
-                                style={{
-                                  borderRadius: '50%',
-                                  background:
-                                    colorByTag[tag] ?? 'var(--mantine-color-slate-4)',
-                                }}
-                              />
-                            ))}
-                          </Group>
-                        )}
-                      </Stack>
-                    </Card>
+                          {birthSurname(person) && (
+                            <Text size="xs" c="dimmed" fs="italic" ta="center">
+                              ({t.tree.bornSurname(birthSurname(person)!)})
+                            </Text>
+                          )}
+                          {lifeSpan(person) && (
+                            <Text size="xs" c="dimmed">
+                              {lifeSpan(person)}
+                            </Text>
+                          )}
+                          {person.familyTags.length > 0 && (
+                            <Group gap={4} justify="center">
+                              {person.familyTags.map((tag) => (
+                                <Box
+                                  key={tag}
+                                  title={tag}
+                                  w={8}
+                                  h={8}
+                                  style={{
+                                    borderRadius: '50%',
+                                    background:
+                                      colorByTag[tag] ?? 'var(--mantine-color-slate-4)',
+                                  }}
+                                />
+                              ))}
+                            </Group>
+                          )}
+                        </Stack>
+                      </Card>
                   );
                 })}
-              </Group>
-            ))}
-          </Stack>
+                </Group>
+              ))}
+            </Stack>
+          </div>
+
+          <Group gap={6} style={{ position: 'absolute', right: 12, bottom: 12, zIndex: 2 }}>
+            <ActionIcon
+              variant="default"
+              size="lg"
+              radius="md"
+              aria-label={t.tree.zoomOut}
+              onClick={() => zoomFromButton(1 / 1.3)}
+            >
+              <IconMinus size={18} />
+            </ActionIcon>
+            <ActionIcon
+              variant="default"
+              size="lg"
+              radius="md"
+              aria-label={t.tree.resetView}
+              onClick={fitView}
+            >
+              <IconMaximize size={18} />
+            </ActionIcon>
+            <ActionIcon
+              variant="default"
+              size="lg"
+              radius="md"
+              aria-label={t.tree.zoomIn}
+              onClick={() => zoomFromButton(1.3)}
+            >
+              <IconPlus size={18} />
+            </ActionIcon>
+          </Group>
         </Box>
       )}
 
