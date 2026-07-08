@@ -327,8 +327,9 @@ export const en = {
     text: 'Family Chronicle needs a connection for this page. Check your network and try again — your stories are safe and will be here when you’re back.',
   },
   pwa: {
-    bannerTitle: 'Add Family Chronicle to your Home Screen',
-    bannerBody: 'It opens full-screen like an app — one tap and you’re with your stories.',
+    bannerTitle: 'Add this as an app to your home screen',
+    bannerBody:
+      'Family Chronicle will sit on your home screen like a normal app — one tap and you’re with your stories.',
     showMeHow: 'Show me how',
     install: 'Install',
     notNow: 'Not now',

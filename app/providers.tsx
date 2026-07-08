@@ -2,6 +2,7 @@
 
 import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
+import { InstallPrompt } from '@/components/install-prompt';
 import { ServiceWorkerRegister } from '@/components/sw-register';
 import { I18nProvider } from '@/lib/i18n/client';
 import type { Locale } from '@/lib/i18n/config';
@@ -17,6 +18,8 @@ export function Providers({ locale, children }: { locale: Locale; children: Reac
       <MantineProvider theme={theme} forceColorScheme="light">
         <Notifications />
         <ServiceWorkerRegister />
+        {/* Global so the nudge also shows on login/signup, before users are inside the app. */}
+        <InstallPrompt />
         {children}
       </MantineProvider>
     </I18nProvider>
