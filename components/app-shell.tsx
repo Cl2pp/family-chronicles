@@ -24,6 +24,9 @@ import { authClient } from '@/lib/auth-client';
 import { useI18n } from '@/lib/i18n/client';
 import type { Dictionary } from '@/lib/i18n';
 
+/** Space reserved under content for the fixed mobile tab bar (60px bar + breathing room). */
+export const MOBILE_TABBAR_OFFSET = 72;
+
 const NAV = [
   { href: '/chat', label: (t: Dictionary) => t.nav.chat, icon: IconMessageCircle },
   { href: '/stories', label: (t: Dictionary) => t.nav.stories, icon: IconBook2 },
@@ -170,7 +173,7 @@ export function AppChrome({
       <AppShell.Main
         style={{ background: 'var(--mantine-color-slate-0)', minHeight: '100dvh' }}
       >
-        <Box pb={{ base: 72, sm: 0 }}>{children}</Box>
+        <Box pb={{ base: MOBILE_TABBAR_OFFSET, sm: 0 }}>{children}</Box>
       </AppShell.Main>
 
       {/* ── Mobile bottom tab bar ───────────────────────────── */}

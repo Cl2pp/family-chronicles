@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, gt, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import { conversations, messageAttachments, messages } from '@/db/schema';
+import { CONVERSATION_IDLE_MS } from '@/lib/chat-idle';
 
 export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';
 export type AttachmentKind = 'audio' | 'photo';
@@ -27,23 +28,35 @@ export async function getConversation(id: string) {
   return db.query.conversations.findFirst({ where: eq(conversations.id, id) });
 }
 
-/** Hours of chat inactivity after which the app starts a fresh conversation. */
-export const CONVERSATION_IDLE_HOURS = 24;
-
 /**
  * The conversation the chat page should resume: the user's most recent one, but only
- * if it saw activity within the idle window. Older conversations stay in the DB as
- * history (stories link back via `stories.conversationId`) — they're just not resumed.
+ * if it saw activity within the idle window and wasn't explicitly closed via "New
+ * chat". Older/closed conversations stay in the DB as history (stories link back via
+ * `stories.conversationId`) — they're just not resumed.
  */
 export async function resumableConversation(userId: string) {
-  const cutoff = new Date(Date.now() - CONVERSATION_IDLE_HOURS * 60 * 60 * 1000);
+  const cutoff = new Date(Date.now() - CONVERSATION_IDLE_MS);
   const rows = await db
     .select()
     .from(conversations)
-    .where(and(eq(conversations.userId, userId), gt(conversations.updatedAt, cutoff)))
+    .where(
+      and(
+        eq(conversations.userId, userId),
+        isNull(conversations.closedAt),
+        gt(conversations.updatedAt, cutoff),
+      ),
+    )
     .orderBy(desc(conversations.updatedAt))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/** Mark a conversation closed — it stays stored as history but is never resumed. */
+export async function closeConversation(id: string) {
+  await db
+    .update(conversations)
+    .set({ closedAt: new Date() })
+    .where(eq(conversations.id, id));
 }
 
 export async function listMessages(conversationId: string) {

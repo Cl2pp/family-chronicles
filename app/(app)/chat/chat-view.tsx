@@ -17,9 +17,11 @@ import {
 } from '@mantine/core';
 import { IconMicrophone, IconPhoto, IconPlus, IconSend, IconX } from '@tabler/icons-react';
 import { AudioRecorder, type RecordedAudio } from '@/components/audio-recorder';
+import { MOBILE_TABBAR_OFFSET } from '@/components/app-shell';
+import { CONVERSATION_IDLE_MS } from '@/lib/chat-idle';
 import { useI18n } from '@/lib/i18n/client';
 import { MessageRow } from './message-row';
-import { presignUpload, sendMessage, sendVoiceMessage } from './actions';
+import { endConversation, presignUpload, sendMessage, sendVoiceMessage } from './actions';
 import type { ChatAttachment, Msg } from './types';
 
 interface PendingPhoto {
@@ -49,11 +51,14 @@ async function uploadBlob(
 export function ChatView({
   conversationId: initialConversationId,
   initialMessages,
+  lastActivityAt,
   chronicle,
   autoPrompt,
 }: {
   conversationId: string | null;
   initialMessages: Msg[];
+  /** When the resumed conversation last saw a message (ms epoch), if any. */
+  lastActivityAt?: number | null;
   chronicle?: { id: string; name: string };
   /** Message sent on the user's behalf right after mount (e.g. "Add story" entry point). */
   autoPrompt?: string;
@@ -69,6 +74,7 @@ export function ChatView({
   const fileRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const autoPromptSent = useRef(false);
+  const lastActivityRef = useRef(lastActivityAt ?? Date.now());
   const router = useRouter();
 
   const sending = busyLabel !== null;
@@ -76,6 +82,22 @@ export function ChatView({
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busyLabel]);
+
+  // A resumed PWA can sit on a days-old render without ever hitting the server.
+  // When the app returns to the foreground past the idle window, drop the stale
+  // thread client-side — mirroring what `resumableConversation` does on a reload.
+  useEffect(() => {
+    function dropIfStale() {
+      if (document.visibilityState === 'hidden') return;
+      if (Date.now() - lastActivityRef.current > CONVERSATION_IDLE_MS) resetChat();
+    }
+    document.addEventListener('visibilitychange', dropIfStale);
+    window.addEventListener('focus', dropIfStale);
+    return () => {
+      document.removeEventListener('visibilitychange', dropIfStale);
+      window.removeEventListener('focus', dropIfStale);
+    };
+  }, []);
 
   // Entry points like the "Add story" button open the chat with a ready-made
   // opener; send it once, then drop the query param so a reload won't repeat it.
@@ -97,6 +119,7 @@ export function ChatView({
 
     const attachments: ChatAttachment[] = photos.map((p) => ({ kind: 'photo', url: p.previewUrl }));
     const pendingPhotos = photos;
+    lastActivityRef.current = Date.now();
     setInput('');
     setPhotos([]);
     setMessages((m) => [...m, { role: 'user', content: trimmed, attachments }]);
@@ -146,6 +169,7 @@ export function ChatView({
     if (!recorded || sending) return;
     const audio = recorded;
     const previewUrl = URL.createObjectURL(audio.blob);
+    lastActivityRef.current = Date.now();
     setRecording(false);
     setRecorded(null);
     setBusyLabel(t.chat.transcribing);
@@ -181,14 +205,24 @@ export function ChatView({
     setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, result } : msg)));
   }
 
-  /** Start a fresh conversation; the old one stays stored and linked to its stories. */
-  function startNewChat() {
+  /** Clear the view back to a fresh, empty chat. */
+  function resetChat() {
     setConversationId(null);
     setMessages([]);
     setInput('');
     setPhotos([]);
     setRecording(false);
     setRecorded(null);
+    lastActivityRef.current = Date.now();
+  }
+
+  /**
+   * Start a fresh conversation. The old one is closed server-side so a reload or
+   * PWA reopen won't resume it; it stays stored and linked to its stories.
+   */
+  function startNewChat() {
+    if (conversationId) void endConversation(conversationId).catch(() => {});
+    resetChat();
   }
 
   const empty = messages.length === 0;
@@ -199,14 +233,28 @@ export function ChatView({
       maw={820}
       mx="auto"
       px="md"
-      style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}
+      // On mobile the fixed bottom tab bar eats into the viewport; size the chat
+      // column to what's actually visible so the header and composer never scroll away.
+      h={{ base: `calc(100dvh - ${MOBILE_TABBAR_OFFSET}px)`, sm: '100dvh' }}
+      style={{ display: 'flex', flexDirection: 'column' }}
     >
       {!empty && (
-        <Group justify="flex-end" pt="xs">
+        <Group
+          justify="space-between"
+          align="center"
+          py={6}
+          style={{
+            // Keeps the header clear of the status bar in the installed PWA.
+            paddingTop: 'max(env(safe-area-inset-top), 6px)',
+            borderBottom: '1px solid var(--mantine-color-slate-2)',
+          }}
+        >
+          <Text size="sm" fw={600} c="dimmed" truncate>
+            {chronicle?.name ?? t.nav.chat}
+          </Text>
           <Button
             size="xs"
-            variant="subtle"
-            color="gray"
+            variant="light"
             leftSection={<IconPlus size={14} />}
             onClick={startNewChat}
             disabled={sending}
