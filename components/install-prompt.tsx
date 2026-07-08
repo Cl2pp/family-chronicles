@@ -16,14 +16,21 @@ interface BeforeInstallPromptEvent extends Event {
 
 /** localStorage key holding the epoch-ms timestamp of the last dismissal. */
 const DISMISSED_KEY = 'fc-install-prompt-dismissed-at';
-const SNOOZE_DAYS = 30;
+/** localStorage key set once the user tells us they're done — never nudge again. */
+const SETTLED_KEY = 'fc-install-prompt-settled';
+/** Short on purpose: brushing the card away shouldn't bury it for a month. */
+const SNOOZE_HOURS = 1;
 
 /** Routes that show the mobile bottom tab bar; the card floats above it there. */
 const TAB_BAR_ROUTES = ['/chat', '/stories', '/chronicle', '/settings', '/account'];
 
 function isSnoozed() {
   const at = Number(localStorage.getItem(DISMISSED_KEY));
-  return at > 0 && Date.now() - at < SNOOZE_DAYS * 24 * 60 * 60 * 1000;
+  return at > 0 && Date.now() - at < SNOOZE_HOURS * 60 * 60 * 1000;
+}
+
+function isSettled() {
+  return localStorage.getItem(SETTLED_KEY) === '1';
 }
 
 /**
@@ -31,8 +38,12 @@ function isSnoozed() {
  * iOS has no install API, so "Show me how" swaps the card content for
  * illustrated share-menu steps in place; on Android/Chromium we hold on
  * to `beforeinstallprompt` and trigger the native install dialog.
- * Dismissing snoozes the card for 30 days; the same steps stay available
- * for good under Settings → App (see `settings/install-card.tsx`).
+ *
+ * Brushing the card away only snoozes it for an hour, so it comes back on the
+ * next visit. Installing, or reaching the end of the iOS guide, settles it for
+ * good — iOS fires no `appinstalled` event, so that button is the only signal
+ * we get from an iPhone. Either way the steps stay available under
+ * Settings → App (see `settings/install-card.tsx`).
  */
 export function InstallPrompt() {
   const { t } = useI18n();
@@ -42,7 +53,7 @@ export function InstallPrompt() {
   const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
-    if (isStandalone() || isSnoozed()) return;
+    if (isStandalone() || isSettled() || isSnoozed()) return;
 
     // Let the page settle before nudging; the check runs at fire time.
     const timer = setTimeout(() => {
@@ -54,7 +65,7 @@ export function InstallPrompt() {
       setInstallEvent(e as BeforeInstallPromptEvent);
       setPlatform('android');
     };
-    const onInstalled = () => setPlatform(null);
+    const onInstalled = () => settle();
     window.addEventListener('beforeinstallprompt', onPrompt);
     window.addEventListener('appinstalled', onInstalled);
     return () => {
@@ -64,8 +75,15 @@ export function InstallPrompt() {
     };
   }, []);
 
+  /** "Not now" / the X — back in an hour. */
   function dismiss() {
     localStorage.setItem(DISMISSED_KEY, String(Date.now()));
+    setPlatform(null);
+  }
+
+  /** Installed, or finished reading the guide — don't ask again. */
+  function settle() {
+    localStorage.setItem(SETTLED_KEY, '1');
     setPlatform(null);
   }
 
@@ -73,7 +91,7 @@ export function InstallPrompt() {
     if (!installEvent) return;
     await installEvent.prompt();
     const { outcome } = await installEvent.userChoice;
-    if (outcome === 'accepted') setPlatform(null);
+    if (outcome === 'accepted') settle();
     else dismiss();
   }
 
@@ -106,7 +124,7 @@ export function InstallPrompt() {
             <CloseButton size="sm" onClick={dismiss} aria-label={t.pwa.notNow} />
           </Group>
           <InstallGuideSteps platform="ios" />
-          <Button fullWidth size="compact-md" onClick={dismiss}>
+          <Button fullWidth size="compact-md" onClick={settle}>
             {t.pwa.done}
           </Button>
         </Stack>
