@@ -72,6 +72,31 @@ export async function listMessages(conversationId: string) {
     .orderBy(asc(messages.createdAt));
 }
 
+/**
+ * Mark the newest still-pending story-draft card in a conversation as acted on, so a
+ * reload renders it as history (the ✓ receipt chip) instead of re-offering a live card
+ * for a story that was already saved or discarded.
+ */
+export async function resolveDraftCard(conversationId: string) {
+  const recent = await db
+    .select({ id: messages.id, metadata: messages.metadata })
+    .from(messages)
+    .where(and(eq(messages.conversationId, conversationId), eq(messages.role, 'assistant')))
+    .orderBy(desc(messages.createdAt));
+
+  const pending = recent.find((m) => {
+    const meta = m.metadata as { storyDraft?: unknown; draftResolved?: boolean } | null;
+    return meta?.storyDraft && !meta.draftResolved;
+  });
+  if (!pending) return;
+
+  const meta = pending.metadata as Record<string, unknown>;
+  await db
+    .update(messages)
+    .set({ metadata: { ...meta, draftResolved: true } })
+    .where(eq(messages.id, pending.id));
+}
+
 export async function addMessage(
   conversationId: string,
   role: ChatRole,

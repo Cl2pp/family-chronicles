@@ -12,6 +12,7 @@ import {
   getConversation,
   listConversationAttachments,
   listMessages,
+  resolveDraftCard,
   type AttachmentInput,
 } from '@/lib/conversations';
 import { runAgent, type ChatTurn } from '@/lib/ai/agent';
@@ -106,8 +107,15 @@ async function respondAndStore(
     .map((m) => ({ role: m.role as ChatTurn['role'], content: m.content }));
 
   const result = await runAgent(history, ctx);
-  // Persist receipts on the assistant message so the ✓ chips survive a reload.
-  const metadata = result.receipts.length ? { receipts: result.receipts } : undefined;
+  // Persist receipts and any draft card on the assistant message so the ✓ chips and the
+  // reviewable card both survive a reload (a phone backgrounding the PWA, say).
+  const metadata =
+    result.receipts.length || result.storyDraft
+      ? {
+          ...(result.receipts.length ? { receipts: result.receipts } : {}),
+          ...(result.storyDraft ? { storyDraft: result.storyDraft } : {}),
+        }
+      : undefined;
   await addMessage(conversationId, 'assistant', result.reply, metadata);
   // Record the draft card as a system event so later turns know it exists and
   // that only the user can act on it (prevents "should I save it?" re-drafts).
@@ -117,9 +125,7 @@ async function respondAndStore(
       conversationId,
       'system',
       `[A story draft card "${draftTitle}" is now showing. Only the user can save or discard it ` +
-        'on the card; a note will appear here once they do. Do not draft it again or offer to save it. ' +
-        'Exception: if no saved/discarded note ever appears and the user asks about this story again, ' +
-        'the card was lost (e.g. page reload) — draft it afresh then.]',
+        'on the card; a note will appear here once they do. Do not draft it again or offer to save it.]',
     );
   }
 
@@ -301,6 +307,7 @@ export async function acceptStory(input: {
       detail: 'View story',
       href: `/stories/${story.id}`,
     };
+    await resolveDraftCard(conversationId);
     await addMessage(
       conversationId,
       'system',
@@ -340,6 +347,7 @@ export async function applyStoryUpdate(input: {
       detail: 'View story',
       href: `/stories/${input.storyId}`,
     };
+    await resolveDraftCard(convo.id);
     await addMessage(
       convo.id,
       'system',
@@ -361,6 +369,7 @@ export async function discardStoryDraft(input: {
   const user = await requireUser();
   const convo = await getConversation(input.conversationId);
   if (!convo || convo.userId !== user.id) return;
+  await resolveDraftCard(input.conversationId);
   await addMessage(
     input.conversationId,
     'system',
