@@ -49,6 +49,7 @@ export default async function ChatPage({
     <ChatView
       conversationId={convo?.id ?? null}
       initialMessages={initialMessages}
+      lastActivityAt={convo?.updatedAt.getTime() ?? null}
       chronicle={active ? { id: active.id, name: active.name } : undefined}
       autoPrompt={intent === 'add-story' ? t.chat.addStoryPrompt : undefined}
     />

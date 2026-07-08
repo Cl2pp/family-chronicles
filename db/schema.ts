@@ -227,6 +227,8 @@ export const conversations = pgTable('conversations', {
     .notNull()
     .references(() => user.id, { onDelete: 'cascade' }),
   title: text('title'),
+  /** Set when the user starts a new chat — a closed conversation is kept as history but never resumed. */
+  closedAt: timestamp('closed_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });

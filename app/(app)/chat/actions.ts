@@ -7,6 +7,7 @@ import { resolveActiveChronicle, getChronicle, getMembership } from '@/lib/chron
 import {
   addAttachments,
   addMessage,
+  closeConversation,
   createConversation,
   getConversation,
   listConversationAttachments,
@@ -199,6 +200,17 @@ export async function sendVoiceMessage(input: {
 
   const result = await respondAndStore(conversationId, ctx, previousChronicleId);
   return { ...result, transcript };
+}
+
+/**
+ * Close the current conversation ("New chat"): it stays stored as history (stories
+ * keep linking back to it), but a reload/reopen will start fresh instead of resuming it.
+ */
+export async function endConversation(conversationId: string): Promise<void> {
+  const user = await requireUser();
+  const convo = await getConversation(conversationId);
+  if (!convo || convo.userId !== user.id) return;
+  await closeConversation(conversationId);
 }
 
 /** Reverse an applied structural action from a receipt's Undo button. */
