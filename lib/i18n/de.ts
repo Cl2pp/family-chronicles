@@ -338,6 +338,22 @@ export const de: Dictionary = {
     title: 'Du bist offline',
     text: 'Family Chronicle braucht für diese Seite eine Verbindung. Prüfe dein Netzwerk und versuch es noch einmal — deine Geschichten sind sicher und warten auf dich.',
   },
+  pwa: {
+    bannerTitle: 'Family Chronicle auf deinen Home-Bildschirm',
+    bannerBody:
+      'Öffnet sich im Vollbild wie eine App — ein Tipp und du bist bei deinen Geschichten.',
+    showMeHow: 'So geht’s',
+    install: 'Installieren',
+    notNow: 'Später',
+    guideTitle: 'Zum Home-Bildschirm hinzufügen',
+    iosStep1: 'Tippe auf das Teilen-Symbol in der Browserleiste.',
+    iosStep2: 'Scrolle nach unten und tippe auf „Zum Home-Bildschirm“.',
+    iosStep3:
+      'Tippe auf „Hinzufügen“ — Family Chronicle liegt jetzt wie eine App auf deinem Home-Bildschirm.',
+    iosSafariHint:
+      'Du siehst „Zum Home-Bildschirm“ nicht? Öffne family.clepp.de in Safari und versuch es dort.',
+    done: 'Alles klar',
+  },
   dates: {
     circa: (year: string) => `um ${year}`,
   },
