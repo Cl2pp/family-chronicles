@@ -30,6 +30,7 @@ import {
 import { AudioRecorder, type RecordedAudio } from '@/components/audio-recorder';
 import { MOBILE_TABBAR_OFFSET } from '@/components/app-shell';
 import { CONVERSATION_IDLE_MS } from '@/lib/chat-idle';
+import { PHOTO_ACCEPT, readDimensions } from '@/lib/uploads';
 import { useI18n } from '@/lib/i18n/client';
 import { MessageRow } from './message-row';
 import { endConversation, presignUpload, sendMessage, sendVoiceMessage } from './actions';
@@ -39,28 +40,42 @@ import type { ChatAttachment, Msg } from './types';
 const setupSuggestionIcons = [IconBook2, IconUserPlus, IconMicrophone];
 const familySuggestionIcons = [IconMoodKid, IconHeart, IconUsersPlus];
 
+/** Photos attachable to one message. */
+const MAX_PHOTOS = 20;
+
 interface PendingPhoto {
   s3Key: string;
   mimeType: string;
   bytes: number;
+  width: number | null;
+  height: number | null;
   previewUrl: string;
 }
 
-/** Upload a blob straight to storage via a presigned PUT; returns its S3 key. */
+/**
+ * Upload a blob straight to storage via a presigned PUT.
+ *
+ * The server signs a canonical content type (`audio/webm`, not the recorder's
+ * `audio/webm;codecs=opus`) and the exact byte length — both are part of the signature,
+ * so the PUT must echo the type the server returned rather than the browser's own.
+ */
 async function uploadBlob(
   kind: 'audio' | 'photo',
   blob: Blob,
-  mimeType: string,
-  filename?: string,
-): Promise<string> {
-  const { url, s3Key } = await presignUpload({ kind, mimeType, filename });
+  rawMimeType: string,
+): Promise<{ s3Key: string; mimeType: string }> {
+  const { url, s3Key, mimeType } = await presignUpload({
+    kind,
+    mimeType: rawMimeType,
+    bytes: blob.size,
+  });
   const res = await fetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': mimeType },
     body: blob,
   });
   if (!res.ok) throw new Error('Upload failed');
-  return s3Key;
+  return { s3Key, mimeType };
 }
 
 export function ChatView({
@@ -142,12 +157,14 @@ export function ChatView({
     try {
       const res = await sendMessage({
         conversationId,
-        text: trimmed || t.chat.herePhotos,
+        text: trimmed,
         attachments: pendingPhotos.map((p) => ({
           kind: 'photo',
           s3Key: p.s3Key,
           mimeType: p.mimeType,
           bytes: p.bytes,
+          width: p.width,
+          height: p.height,
         })),
       });
       setConversationId(res.conversationId);
@@ -164,19 +181,31 @@ export function ChatView({
 
   async function pickPhotos(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const chosen = Array.from(files).slice(0, 20);
+    const chosen = Array.from(files).slice(0, MAX_PHOTOS);
     try {
       const uploaded = await Promise.all(
-        chosen.map(async (file) => ({
-          s3Key: await uploadBlob('photo', file, file.type, file.name),
-          mimeType: file.type,
-          bytes: file.size,
-          previewUrl: URL.createObjectURL(file),
-        })),
+        chosen.map(async (file) => {
+          const [{ s3Key, mimeType }, size] = await Promise.all([
+            uploadBlob('photo', file, file.type),
+            readDimensions(file),
+          ]);
+          return {
+            s3Key,
+            mimeType,
+            bytes: file.size,
+            width: size?.width ?? null,
+            height: size?.height ?? null,
+            previewUrl: URL.createObjectURL(file),
+          };
+        }),
       );
-      setPhotos((p) => [...p, ...uploaded].slice(0, 20));
-    } catch {
-      pushError();
+      setPhotos((p) => [...p, ...uploaded].slice(0, MAX_PHOTOS));
+    } catch (err) {
+      // Size/type rejections come back from the presign action with a usable message.
+      setMessages((m) => [
+        ...m,
+        { role: 'assistant', content: err instanceof Error ? err.message : t.chat.somethingWentWrong },
+      ]);
     }
   }
 
@@ -194,11 +223,11 @@ export function ChatView({
     const pending: Msg = { role: 'user', content: '', attachments: [{ kind: 'audio', url: previewUrl }] };
     setMessages((m) => [...m, pending]);
     try {
-      const s3Key = await uploadBlob('audio', audio.blob, audio.mimeType, `note.${audio.mimeType.includes('mp4') ? 'mp4' : 'webm'}`);
+      const { s3Key, mimeType } = await uploadBlob('audio', audio.blob, audio.mimeType);
       const res = await sendVoiceMessage({
         conversationId,
         s3Key,
-        mimeType: audio.mimeType,
+        mimeType,
         bytes: audio.blob.size,
         durationSec: audio.durationSec,
       });
@@ -406,7 +435,7 @@ export function ChatView({
           <input
             ref={fileRef}
             type="file"
-            accept="image/*"
+            accept={PHOTO_ACCEPT}
             multiple
             hidden
             onChange={(e) => {

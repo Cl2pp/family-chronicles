@@ -52,7 +52,7 @@ export default async function ChatPage({
         attachments: await Promise.all(
           (attachMap.get(m.id) ?? []).map(async (a) => ({
             kind: a.kind,
-            url: await presignGet(a.s3Key),
+            url: await presignGet(a.s3Key, a.mimeType),
           })),
         ),
       };

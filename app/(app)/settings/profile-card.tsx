@@ -16,10 +16,9 @@ import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { IconCamera } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
+import { MAX_AVATAR_BYTES, PHOTO_ACCEPT } from '@/lib/uploads';
 import { presignAvatarUpload, saveAvatar, updateDisplayName } from './account-actions';
 import { SignOutButton } from './sign-out-button';
-
-const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 
 function initials(name: string) {
   return name
@@ -57,13 +56,15 @@ export function ProfileCard({
     }
     setUploading(true);
     try {
-      const { url, s3Key } = await presignAvatarUpload({
+      const { url, s3Key, mimeType } = await presignAvatarUpload({
         mimeType: file.type,
-        filename: file.name,
+        bytes: file.size,
       });
+      // Content-Type is part of the signature — send back the canonical type the
+      // server signed, not the browser's raw `file.type`.
       const res = await fetch(url, {
         method: 'PUT',
-        headers: { 'Content-Type': file.type },
+        headers: { 'Content-Type': mimeType },
         body: file,
       });
       if (!res.ok) throw new Error(t.account.uploadFailed);
@@ -104,7 +105,7 @@ export function ProfileCard({
             {initials(name)}
           </Avatar>
           <Stack gap={4}>
-            <FileButton onChange={handleAvatar} accept="image/png,image/jpeg,image/webp">
+            <FileButton onChange={handleAvatar} accept={PHOTO_ACCEPT}>
               {(props) => (
                 <Button
                   {...props}

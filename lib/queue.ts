@@ -4,7 +4,11 @@ import { env } from '@/lib/env';
 /** Job queue names. */
 export const QUEUES = {
   style: 'style',
+  sweepOrphans: 'sweep-orphans',
 } as const;
+
+/** Nightly, off-peak — the sweep lists every object under the upload prefixes. */
+export const SWEEP_ORPHANS_CRON = '17 4 * * *';
 
 export interface StyleJob {
   storyId: string;

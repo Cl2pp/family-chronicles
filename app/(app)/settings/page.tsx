@@ -5,6 +5,7 @@ import { db } from '@/db';
 import { account } from '@/db/schema';
 import { requireUser } from '@/lib/session';
 import { presignGet } from '@/lib/s3';
+import { imageTypeForKey } from '@/lib/uploads';
 import { resolveActiveChronicle } from '@/lib/chronicles';
 import { type AccessRole } from '@/lib/permissions';
 import { getI18n } from '@/lib/i18n/server';
@@ -24,7 +25,7 @@ export default async function SettingsPage() {
 
   const [{ chronicles, active }, avatarUrl, credential] = await Promise.all([
     resolveActiveChronicle(user.id, activeCookie),
-    user.image ? presignGet(user.image) : null,
+    user.image ? presignGet(user.image, imageTypeForKey(user.image)) : null,
     db.query.account.findFirst({
       where: and(eq(account.userId, user.id), eq(account.providerId, 'credential')),
       columns: { id: true },
