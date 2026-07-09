@@ -332,7 +332,12 @@ export const assets = pgTable(
     durationSec: integer('duration_sec'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (t) => [index('assets_story_idx').on(t.storyId)],
+  (t) => [
+    index('assets_story_idx').on(t.storyId),
+    // One story never holds the same object twice — an accepted draft re-run must
+    // not duplicate the photos it already carried over.
+    uniqueIndex('assets_story_key_uq').on(t.storyId, t.s3Key),
+  ],
 );
 
 /** In-chat uploads (voice/photos) before a story is accepted. */
@@ -350,6 +355,13 @@ export const messageAttachments = pgTable(
     width: integer('width'),
     height: integer('height'),
     durationSec: integer('duration_sec'),
+    /**
+     * The story that claimed this upload, once a draft card was accepted. A chat can
+     * produce several stories; each takes only the uploads not yet claimed, so photo
+     * #3 doesn't end up attached to the story that was saved before it was sent.
+     * Nulled (not deleted) if that story is deleted — the row still renders in chat.
+     */
+    storyId: uuid('story_id').references(() => stories.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (t) => [index('message_attachments_message_idx').on(t.messageId)],

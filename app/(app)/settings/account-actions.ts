@@ -8,19 +8,18 @@ import { people } from '@/db/schema';
 import { auth } from '@/lib/auth';
 import { requireUser } from '@/lib/session';
 import { buildKey, deleteObject, presignPut } from '@/lib/s3';
+import { validateUpload } from '@/lib/uploads';
 
 /** A presigned URL the browser uses to PUT a new avatar straight to storage. */
 export async function presignAvatarUpload(input: {
   mimeType: string;
-  filename?: string;
-}): Promise<{ url: string; s3Key: string }> {
+  bytes: number;
+}): Promise<{ url: string; s3Key: string; mimeType: string }> {
   await requireUser();
-  if (!input.mimeType.startsWith('image/')) {
-    throw new Error('Avatars must be an image.');
-  }
-  const s3Key = buildKey('avatars', input.filename ?? input.mimeType.replace('/', '.'));
-  const url = await presignPut(s3Key, input.mimeType);
-  return { url, s3Key };
+  const upload = validateUpload('avatar', input.mimeType, input.bytes);
+  const s3Key = buildKey('avatars', upload.ext);
+  const url = await presignPut(s3Key, upload.mimeType, upload.bytes);
+  return { url, s3Key, mimeType: upload.mimeType };
 }
 
 /** Point the account (and its linked person, if any) at an uploaded avatar. */

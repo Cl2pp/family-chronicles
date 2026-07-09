@@ -1,17 +1,5 @@
 import { notFound } from 'next/navigation';
-import {
-  Alert,
-  Badge,
-  Box,
-  Button,
-  Divider,
-  Group,
-  Image,
-  SimpleGrid,
-  Stack,
-  Text,
-  Title,
-} from '@mantine/core';
+import { Alert, Badge, Box, Button, Divider, Group, Stack, Text, Title } from '@mantine/core';
 import { IconAlertTriangle, IconArrowLeft } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
 import { canUserEditStory, chroniclesForStory, getStoryForUser, listAssets } from '@/lib/stories';
@@ -26,6 +14,7 @@ import { SourceAccordion } from './source-accordion';
 import { ShareControl } from './share-control';
 import { EditControl } from './edit-control';
 import { AddPhotosControl } from './add-photos-control';
+import { PhotoGallery } from './photo-gallery';
 
 function paragraphs(text: string): string[] {
   return text
@@ -66,11 +55,13 @@ export default async function StoryDetailPage({
     Promise.all(
       photoAssets.map(async (a) => ({
         id: a.id,
-        url: await presignGet(a.s3Key),
+        url: await presignGet(a.s3Key, a.mimeType),
         caption: a.caption,
+        width: a.width,
+        height: a.height,
       })),
     ),
-    audioAsset ? presignGet(audioAsset.s3Key) : Promise.resolve(null),
+    audioAsset ? presignGet(audioAsset.s3Key, audioAsset.mimeType) : Promise.resolve(null),
   ]);
 
   const meta = storyStatusMeta(story.status, t);
@@ -173,18 +164,12 @@ export default async function StoryDetailPage({
               {canEdit && <AddPhotosControl storyId={story.id} />}
             </Group>
             {photos.length > 0 && (
-              <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
-                {photos.map((p) => (
-                  <Image
-                    key={p.id}
-                    src={p.url}
-                    alt={p.caption ?? story.title}
-                    radius="md"
-                    fit="cover"
-                    h={200}
-                  />
-                ))}
-              </SimpleGrid>
+              <PhotoGallery
+                storyId={story.id}
+                photos={photos}
+                canEdit={canEdit}
+                storyTitle={story.title}
+              />
             )}
           </Stack>
         )}

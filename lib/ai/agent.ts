@@ -1,4 +1,5 @@
 import type {
+  ChatCompletionContentPart,
   ChatCompletionMessageParam,
 } from 'openai/resources/chat/completions';
 import { env } from '@/lib/env';
@@ -12,6 +13,8 @@ import { toOpenAISchemas, toolsByName, type Receipt, type StoryDraft, type ToolC
 export interface ChatTurn {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  /** Presigned URLs of photos the user attached to this turn (user turns only). */
+  imageUrls?: string[];
 }
 
 export interface AgentResult {
@@ -36,11 +39,31 @@ How to work:
 - The draft card is the ONLY way a story gets saved. You cannot save it and must NEVER ask "should I save it?" — the user saves or discards it on the card. Bracketed [system] notes in the conversation tell you when a card was saved or discarded; trust them. A card stays on screen across reloads until the user acts on it, so never call draft_story again for the same story unless the user asks for changes before saving (and if they do, note in your reply that the previous card should be discarded).
 - Never record the same event twice. If a memory sounds like one that may already be recorded, check list_stories first: when a matching story exists, offer to update it (get_story → update_story) instead of drafting a duplicate.
 - To CHANGE an existing story (rewrite it, fix a fact, weave in new details the user just told you): call get_story to read the current text, then update_story with the COMPLETE revised story — same memoir rules, and never drop facts that are still true. It shows a review card too; keep your reply short.
+- The user may attach PHOTOS. You can see them. Use what they show — who is in them, the place, the era, the occasion — to ask better questions and to ground the story. Never invent details you cannot actually see, and never describe a photo back to the user as if listing its contents; talk about the memory, not the image file. Photos the user sends are saved with the story automatically.
 - Read tools (list_chronicles, get_family_tree, list_stories, get_story) are free — use them to check current state before acting or to answer questions.
 - Tree edits: a person has at most TWO parents. Before linking parents, call get_family_tree and check the existing relationships — connect each parent only to their own children. Use unrelate_people to remove a wrong link (the people stay in the tree).
 - Confirm first only when something is ambiguous or hard to undo. Adding people/relationships is fine to do directly.
 - If a tool returns an error, explain it plainly and suggest the fix; never pretend an action succeeded.
 - Keep replies concise and friendly. Never output raw JSON or tool names to the user.`;
+
+/**
+ * How many of the conversation's most recent photos ride along to the model. A long
+ * chat can accumulate dozens; every one costs tokens on every subsequent turn.
+ */
+const MAX_IMAGES = 8;
+
+interface MergedTurn {
+  role: 'user' | 'assistant';
+  content: string;
+  imageUrls: string[];
+  /** Photos the turn carried, even if none of them ended up being sent. */
+  photoCount: number;
+}
+
+/** Stands in for photos the model won't receive, so the turn never silently vanishes. */
+function photoNote(count: number): string {
+  return `[The user attached ${count} photo${count === 1 ? '' : 's'}, not shown to you.]`;
+}
 
 /**
  * Flatten the stored conversation into turns the model will accept.
@@ -53,20 +76,58 @@ How to work:
  * is replayed from storage on every turn. They ride along as the bracketed user notes the
  * system prompt already tells the model to trust. Consecutive user turns are merged so
  * the array stays strictly alternating.
+ *
+ * A user turn carrying photos becomes multimodal content so the agent can actually see
+ * what it's being asked to write about. Only the newest `MAX_IMAGES` survive.
  */
-function toModelTurns(history: ChatTurn[]): Array<{ role: 'user' | 'assistant'; content: string }> {
-  const turns: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+function toModelTurns(history: ChatTurn[]): ChatCompletionMessageParam[] {
+  const merged: MergedTurn[] = [];
   for (const turn of history) {
-    if (!turn.content.trim()) continue;
     const role = turn.role === 'assistant' ? 'assistant' : 'user';
-    const prev = turns[turns.length - 1];
+    // Count photos before vision is applied: a photo-only turn is still a turn, even
+    // when the model won't see the images.
+    const photoCount = role === 'user' ? (turn.imageUrls?.length ?? 0) : 0;
+    const imageUrls = env.AGENT_VISION && role === 'user' ? [...(turn.imageUrls ?? [])] : [];
+    if (!turn.content.trim() && photoCount === 0) continue;
+
+    const prev = merged[merged.length - 1];
     if (role === 'user' && prev?.role === 'user') {
-      prev.content = `${prev.content}\n\n${turn.content}`;
+      prev.content = [prev.content, turn.content].filter((c) => c.trim()).join('\n\n');
+      prev.imageUrls.push(...imageUrls);
+      prev.photoCount += photoCount;
       continue;
     }
-    turns.push({ role, content: turn.content });
+    merged.push({ role, content: turn.content, imageUrls, photoCount });
   }
-  return turns;
+
+  // Budget images from the end of the conversation backwards — the photos the user
+  // just sent matter more than ones from twenty turns ago.
+  let budget = MAX_IMAGES;
+  for (let i = merged.length - 1; i >= 0; i--) {
+    const urls = merged[i].imageUrls;
+    const keep = Math.min(budget, urls.length);
+    merged[i].imageUrls = urls.slice(urls.length - keep);
+    budget -= keep;
+  }
+
+  return merged.map((turn) => {
+    // Photos the model never received (vision off, or past the budget) still get a
+    // note — otherwise a photo-only turn would drop out of the history entirely.
+    const unsent = turn.photoCount - turn.imageUrls.length;
+    const text = [turn.content, unsent > 0 ? photoNote(unsent) : '']
+      .filter((c) => c.trim())
+      .join('\n\n');
+
+    if (turn.role === 'assistant' || turn.imageUrls.length === 0) {
+      return { role: turn.role, content: text };
+    }
+    const parts: ChatCompletionContentPart[] = turn.imageUrls.map((url) => ({
+      type: 'image_url',
+      image_url: { url },
+    }));
+    if (text) parts.unshift({ type: 'text', text });
+    return { role: 'user', content: parts };
+  });
 }
 
 /** A short note describing the current chronicle context for the system prompt. */
@@ -87,6 +148,7 @@ export async function runAgent(history: ChatTurn[], ctx: ToolContext): Promise<A
     { role: 'system', content: BASE_SYSTEM + contextNote(ctx) },
     ...toModelTurns(history),
   ];
+
   const schemas = toOpenAISchemas();
   const receipts: Receipt[] = [];
   let storyDraft: StoryDraft | null = null;

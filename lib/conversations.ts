@@ -131,22 +131,27 @@ export async function addAttachments(messageId: string, items: AttachmentInput[]
   );
 }
 
-/** All attachments in a conversation, oldest first (e.g. to copy onto a story). */
-export async function listConversationAttachments(conversationId: string) {
-  return db
+/** Photo attachments on a set of messages, so the agent can actually see them. */
+export async function photosByMessage(messageIds: string[]) {
+  const map = new Map<string, Array<{ s3Key: string; mimeType: string }>>();
+  if (messageIds.length === 0) return map;
+  const rows = await db
     .select({
-      kind: messageAttachments.kind,
+      messageId: messageAttachments.messageId,
       s3Key: messageAttachments.s3Key,
       mimeType: messageAttachments.mimeType,
-      bytes: messageAttachments.bytes,
-      width: messageAttachments.width,
-      height: messageAttachments.height,
-      durationSec: messageAttachments.durationSec,
     })
     .from(messageAttachments)
-    .innerJoin(messages, eq(messageAttachments.messageId, messages.id))
-    .where(eq(messages.conversationId, conversationId))
+    .where(
+      and(inArray(messageAttachments.messageId, messageIds), eq(messageAttachments.kind, 'photo')),
+    )
     .orderBy(asc(messageAttachments.createdAt));
+  for (const r of rows) {
+    const arr = map.get(r.messageId) ?? [];
+    arr.push({ s3Key: r.s3Key, mimeType: r.mimeType });
+    map.set(r.messageId, arr);
+  }
+  return map;
 }
 
 /** Attachments grouped by message id, for a set of messages. */
