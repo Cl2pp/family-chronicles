@@ -74,9 +74,12 @@ export default async function StoryDetailPage({
         .map(async (a) => [a.id, await presignGet(a.thumbS3Key!, 'image/webp')] as const),
     ),
   );
+  // Only Safari can render HEIC — for those, the (larger) thumbnail is the
+  // best displayable version we have, so the lightbox uses it too.
+  const isHeic = (mimeType: string) => /^image\/hei[cf]$/.test(mimeType.split(';')[0].trim());
   const photos = photoAssets.map((a) => ({
     id: a.id,
-    url: presigned.get(a.id)!,
+    url: (isHeic(a.mimeType) ? presignedThumbs.get(a.id) : undefined) ?? presigned.get(a.id)!,
     thumbUrl: presignedThumbs.get(a.id) ?? presigned.get(a.id)!,
     caption: a.caption,
     width: a.width,
