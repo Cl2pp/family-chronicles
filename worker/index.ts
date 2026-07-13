@@ -1,8 +1,9 @@
 import 'dotenv/config';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db';
-import { stories } from '@/db/schema';
+import { assets, stories } from '@/db/schema';
 import {
+  enqueueThumbnail,
   getBoss,
   QUEUES,
   SWEEP_ORPHANS_CRON,
@@ -86,6 +87,27 @@ async function handleSweepOrphans() {
   }
 }
 
+/**
+ * Queue a thumbnail job for every stored photo that doesn't have one yet, so
+ * photos from before the thumbnail feature get backfilled by simply deploying.
+ * Runs on every start; the job skips rows that already carry a thumb key, so
+ * restarts only cost this one scan.
+ */
+async function backfillMissingThumbnails() {
+  try {
+    const missing = await db
+      .select({ s3Key: assets.s3Key })
+      .from(assets)
+      .where(and(eq(assets.kind, 'photo'), isNull(assets.thumbS3Key)));
+    const keys = [...new Set(missing.map((m) => m.s3Key))];
+    for (const s3Key of keys) await enqueueThumbnail({ s3Key });
+    if (keys.length) console.log(`[worker] queued ${keys.length} missing thumbnail(s)`);
+  } catch (err) {
+    // e.g. the worker deployed before web ran the migration — the next restart catches up.
+    console.error('[worker] thumbnail backfill scan failed:', err);
+  }
+}
+
 async function main() {
   const boss = await getBoss();
 
@@ -105,6 +127,8 @@ async function main() {
     await handleSweepOrphans();
   });
   await boss.schedule(QUEUES.sweepOrphans, SWEEP_ORPHANS_CRON);
+
+  await backfillMissingThumbnails();
 
   console.log(
     '[worker] ready — listening for style + transcode + thumbnail jobs; orphan sweep scheduled',
