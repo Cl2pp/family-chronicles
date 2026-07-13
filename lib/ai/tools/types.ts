@@ -16,6 +16,10 @@ export interface StoryProposal {
   summary: string;
   body: string;
   eventYear: number | null;
+  /** 1–12; refines eventYear. Optional so draft cards persisted before it existed still accept. */
+  eventMonth?: number | null;
+  /** 1–31; only meaningful together with eventMonth. */
+  eventDay?: number | null;
   people: string[];
   /**
    * The user's own words the draft/revision is based on, verbatim. On accept it becomes

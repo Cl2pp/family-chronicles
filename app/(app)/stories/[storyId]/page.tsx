@@ -11,7 +11,7 @@ import {
 } from '@/lib/stories';
 import { familyTagsByStory } from '@/lib/family-tags';
 import { listChroniclesForUser } from '@/lib/chronicles';
-import { formatEventDate } from '@/lib/dates';
+import { eventDateToParts, formatEventDate, formatFullDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
 import { getI18n } from '@/lib/i18n/server';
 import { presignGet } from '@/lib/s3';
@@ -149,6 +149,9 @@ export default async function StoryDetailPage({
             {t.stories.by(story.submitterName)}
             {date ? ` · ${date}` : ''}
           </Text>
+          <Text size="sm" c="dimmed" mt={-8}>
+            {t.story.recordedOn(formatFullDate(story.createdAt, locale))}
+          </Text>
           {familyTags.length > 0 && (
             <Group gap="xs" align="center">
               <Text size="sm" c="dimmed">
@@ -181,7 +184,7 @@ export default async function StoryDetailPage({
                 title: story.title,
                 summary: story.summary ?? '',
                 body: story.bodyStyled ?? story.bodyOriginal ?? '',
-                eventYear: story.eventDate ? story.eventDate.getUTCFullYear() : null,
+                eventDate: eventDateToParts(story.eventDate, story.eventDatePrecision),
               }}
             />
           )}

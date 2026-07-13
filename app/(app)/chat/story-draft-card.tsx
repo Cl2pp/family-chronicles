@@ -5,6 +5,11 @@ import { Button, Card, Group, Text, TextInput, Textarea } from '@mantine/core';
 import { IconSparkles } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
 import type { StoryDraft } from '@/lib/ai/tools';
+import {
+  EventDateInput,
+  eventDateValueFromParts,
+  eventDateValueToParts,
+} from '@/components/event-date-input';
 import { acceptStory, applyStoryUpdate, discardStoryDraft } from './actions';
 import type { MsgResult } from './types';
 
@@ -29,7 +34,13 @@ export function StoryDraftCard({
   const isUpdate = Boolean(updateStoryId);
   const [title, setTitle] = useState(proposal.title);
   const [body, setBody] = useState(proposal.body);
-  const [year, setYear] = useState(proposal.eventYear ? String(proposal.eventYear) : '');
+  const [date, setDate] = useState(
+    eventDateValueFromParts({
+      year: proposal.eventYear,
+      month: proposal.eventMonth ?? null,
+      day: proposal.eventDay ?? null,
+    }),
+  );
 
   async function discard() {
     // Tell the conversation first so the note can't race the user's next message;
@@ -51,7 +62,15 @@ export function StoryDraftCard({
   async function accept() {
     setBusy(true);
     try {
-      const edited = { ...proposal, title, body, eventYear: year ? Number(year) : null };
+      const parts = eventDateValueToParts(date);
+      const edited = {
+        ...proposal,
+        title,
+        body,
+        eventYear: parts.year,
+        eventMonth: parts.month,
+        eventDay: parts.day,
+      };
       if (updateStoryId) {
         const res = await applyStoryUpdate({ storyId: updateStoryId, proposal: edited, conversationId });
         onResult({ kind: 'story-update', storyId: res.storyId, chronicleName, title });
@@ -96,13 +115,7 @@ export function StoryDraftCard({
         maxRows={14}
         mb="xs"
       />
-      <TextInput
-        label={t.chat.draftYear}
-        value={year}
-        onChange={(e) => setYear(e.currentTarget.value.replace(/[^0-9]/g, ''))}
-        w={140}
-        mb="md"
-      />
+      <EventDateInput value={date} onChange={setDate} mb="md" />
       <Group gap="xs">
         <Button size="xs" onClick={accept} loading={busy}>
           {isUpdate ? t.common.saveChanges : t.chat.acceptSave}
