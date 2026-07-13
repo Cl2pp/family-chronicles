@@ -44,6 +44,14 @@ export const draftStoryTool = defineTool({
     title: z.string().min(1).describe('A short, specific title.'),
     summary: z.string().describe('One short sentence on what the story is about.'),
     body: z.string().min(1).describe('The third-person memoir prose.'),
+    sourceText: z
+      .string()
+      .min(1)
+      .describe(
+        "The user's own words this story is based on — their messages from this conversation " +
+          'quoted VERBATIM (their language, first person, unpolished). Never reword, summarize, ' +
+          "or translate; it is kept as the story's source material for traceability.",
+      ),
     eventYear: z.number().int().nullish().describe('The year the events happened, if known.'),
     people: z.array(z.string()).describe('Names of people featured in the story.'),
     confirmedNew: z
@@ -98,6 +106,7 @@ export const draftStoryTool = defineTool({
           body: args.body,
           eventYear: args.eventYear ?? null,
           people: args.people ?? [],
+          sourceText: args.sourceText,
         },
         chronicleId: gate.chronicleId,
         chronicleName: ctx.activeChronicleName ?? 'your chronicle',
@@ -189,6 +198,15 @@ export const updateStoryTool = defineTool({
     title: z.string().min(1).describe('The (possibly unchanged) title.'),
     summary: z.string().describe('One short sentence on what the story is about.'),
     body: z.string().min(1).describe('The complete revised third-person memoir prose.'),
+    newSourceText: z
+      .string()
+      .nullish()
+      .describe(
+        'Any NEW first-hand material the user provided for this revision — their messages from ' +
+          'this conversation quoted VERBATIM (their language, first person). It is appended to ' +
+          "the story's source history on save. Omit when the revision only rewords what is " +
+          'already recorded.',
+      ),
     eventYear: z
       .number()
       .int()
@@ -220,6 +238,7 @@ export const updateStoryTool = defineTool({
           body: args.body,
           eventYear: args.eventYear ?? (s.eventDate ? s.eventDate.getUTCFullYear() : null),
           people: [],
+          sourceText: args.newSourceText ?? null,
         },
         chronicleId: chronicles[0]?.id ?? '',
         chronicleName: chronicles[0]?.name ?? 'your chronicle',

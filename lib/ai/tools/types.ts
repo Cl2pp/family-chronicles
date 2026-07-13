@@ -17,6 +17,12 @@ export interface StoryProposal {
   body: string;
   eventYear: number | null;
   people: string[];
+  /**
+   * The user's own words the draft/revision is based on, verbatim. On accept it becomes
+   * (new story) or is appended to (revision) the story's source material (`bodyOriginal`).
+   * Optional so draft cards persisted before this field existed still accept.
+   */
+  sourceText?: string | null;
 }
 
 /** A story draft handed to the client for review, bound to its target chronicle. */
