@@ -94,9 +94,36 @@ export function ChatView({
 
   const sending = busyLabel !== null;
 
+  // Height of the visible area while the keyboard overlays it, null when it doesn't.
+  const [keyboardViewportH, setKeyboardViewportH] = useState<number | null>(null);
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, busyLabel]);
+  }, [messages, busyLabel, keyboardViewportH]);
+
+  // iOS never resizes the layout viewport for the keyboard (no `interactive-widget`
+  // support in WebKit) — it pans the whole app upward to reveal the focused input,
+  // scrolling the header away and sometimes leaving the view stuck half-shifted.
+  // Instead, size the chat column to the visual viewport (what's actually visible)
+  // and pin the window, so the composer sits above the keyboard without any panning.
+  // On Android `interactive-widget=resizes-content` already shrinks the layout
+  // viewport, so the visual viewport matches `window.innerHeight` and this stays inert.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    function update() {
+      if (!vv) return;
+      const overlaid = window.innerHeight - vv.height > 80;
+      setKeyboardViewportH(overlaid ? Math.round(vv.height) : null);
+      if (overlaid) window.scrollTo(0, 0);
+    }
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
 
   // A resumed PWA can sit on a days-old render without ever hitting the server.
   // When the app returns to the foreground past the idle window, drop the stale
@@ -260,7 +287,13 @@ export function ChatView({
       px="md"
       // On mobile the fixed bottom tab bar eats into the viewport; size the chat
       // column to what's actually visible so the header and composer never scroll away.
-      h={{ base: `calc(100dvh - ${MOBILE_TABBAR_OFFSET}px)`, sm: '100dvh' }}
+      // While the keyboard overlays the page (iOS), the tab bar is hidden behind it —
+      // use the visible height as-is, no offset.
+      h={
+        keyboardViewportH !== null
+          ? keyboardViewportH
+          : { base: `calc(100dvh - ${MOBILE_TABBAR_OFFSET}px)`, sm: '100dvh' }
+      }
       style={{ display: 'flex', flexDirection: 'column' }}
     >
       {!empty && (
