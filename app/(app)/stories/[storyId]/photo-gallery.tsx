@@ -27,20 +27,31 @@ export interface GalleryPhoto {
   height: number | null;
 }
 
-/** Grid of a story's photos; clicking one opens a lightbox with its caption. */
+/**
+ * Grid of a story's photos; clicking one opens a lightbox with its caption.
+ * With `initialVisible`, only the first few photos show and the rest hide
+ * behind a "see more" tile until expanded.
+ */
 export function PhotoGallery({
   storyId,
   photos,
   canEdit,
   storyTitle,
+  initialVisible,
 }: {
   storyId: string;
   photos: GalleryPhoto[];
   canEdit: boolean;
   storyTitle: string;
+  initialVisible?: number;
 }) {
   const { t } = useI18n();
   const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  const limit = expanded ? photos.length : (initialVisible ?? photos.length);
+  const shown = photos.slice(0, limit);
+  const hiddenCount = photos.length - shown.length;
 
   const active = openIndex === null ? null : photos[openIndex];
 
@@ -51,7 +62,7 @@ export function PhotoGallery({
   return (
     <>
       <SimpleGrid cols={{ base: 2, md: 3 }} spacing={{ base: 'xs', sm: 'md' }}>
-        {photos.map((p, i) => (
+        {shown.map((p, i) => (
           <Stack key={p.id} gap={4}>
             <UnstyledButton
               onClick={() => setOpenIndex(i)}
@@ -72,6 +83,40 @@ export function PhotoGallery({
             )}
           </Stack>
         ))}
+        {hiddenCount > 0 && (
+          <UnstyledButton
+            onClick={() => setExpanded(true)}
+            aria-label={t.story.seeMorePhotos(hiddenCount)}
+          >
+            <Box pos="relative">
+              <Image
+                src={photos[limit].url}
+                alt=""
+                radius="md"
+                fit="cover"
+                h={{ base: 140, sm: 200 }}
+              />
+              <Stack
+                gap={0}
+                align="center"
+                justify="center"
+                pos="absolute"
+                style={{
+                  inset: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.55)',
+                  borderRadius: 'var(--mantine-radius-md)',
+                }}
+              >
+                <Text c="white" fw={700} fz={24}>
+                  +{hiddenCount}
+                </Text>
+                <Text c="white" size="sm">
+                  {t.story.seeMore}
+                </Text>
+              </Stack>
+            </Box>
+          </UnstyledButton>
+        )}
       </SimpleGrid>
 
       <Modal

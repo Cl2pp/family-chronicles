@@ -205,14 +205,7 @@ export default async function StoryDetailPage({
           </Alert>
         )}
 
-        {/* What it's about */}
-        {story.summary && (
-          <Text size="lg" c="slate.7">
-            {story.summary}
-          </Text>
-        )}
-
-        {/* Photos */}
+        {/* Photos — the story's visual banner, right at the top */}
         {(photos.length > 0 || canEdit) && (
           <CollapsibleSection
             title={t.story.photos}
@@ -224,9 +217,17 @@ export default async function StoryDetailPage({
                 photos={photos}
                 canEdit={canEdit}
                 storyTitle={story.title}
+                initialVisible={2}
               />
             )}
           </CollapsibleSection>
+        )}
+
+        {/* What it's about */}
+        {story.summary && (
+          <Text size="lg" c="slate.7">
+            {story.summary}
+          </Text>
         )}
 
         {/* The story */}

@@ -310,6 +310,8 @@ export const en = {
     addPhotos: 'Add photos',
     photoUploadFailed: 'Upload failed. Please try again.',
     viewPhoto: 'View photo',
+    seeMore: 'See more',
+    seeMorePhotos: (n: number) => (n === 1 ? 'See 1 more photo' : `See ${n} more photos`),
     previousPhoto: 'Previous photo',
     nextPhoto: 'Next photo',
     editCaption: 'Edit caption',
