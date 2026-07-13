@@ -4,15 +4,22 @@
     {
       "name": "web",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "BETTER_AUTH_URL=\"http://localhost:$PORT\" npm run dev"],
+      "runtimeArgs": [
+        "-c",
+        "BETTER_AUTH_URL=\"http://localhost:$PORT\" npm run dev"
+      ],
       "port": 3000,
       "autoPort": true
     },
     {
       "name": "web-prod",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "start"],
-      "port": 3000
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "BETTER_AUTH_URL=\"http://localhost:$PORT\" npm run start"
+      ],
+      "port": 3000,
+      "autoPort": true
     }
   ]
 }

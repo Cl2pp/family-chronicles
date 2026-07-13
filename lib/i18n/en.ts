@@ -14,6 +14,7 @@ export const en = {
     undone: 'Undone',
     retry: 'Retry',
     share: 'Share',
+    appUpdatedReloading: 'The app was updated — reloading the latest version…',
   },
   nav: {
     chat: 'Chat',

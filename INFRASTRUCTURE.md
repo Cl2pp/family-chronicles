@@ -166,6 +166,16 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 Each app builds the same Dockerfile separately. Builds take ~2–4 min on this box (swap covers the
 Next build's memory spike).
 
+**Version skew after deploys**: each Docker build writes `.deployment-id` (from Coolify's
+`SOURCE_COMMIT` build arg, or a build timestamp) and `next.config.ts` uses it as Next's
+`deploymentId`. Without it, PWA clients that kept an old page open across a redeploy hit
+"Failed to find Server Action" (the old bundle's action IDs no longer exist on the new server) and
+silently stay broken until a manual reload. With it, Next hard-reloads on navigation skew, and
+`components/deployment-guard.tsx` reloads stale clients when a dead action is called or when the
+resumed app's id no longer matches `/api/version`. Occasional "Failed to find Server Action"
+warnings in the web logs right after a deploy are expected — that's an old client being told to
+reload itself.
+
 ## 10. Operating & debugging (over SSH)
 
 Containers are named by Coolify; **find them dynamically** (the `-<id>` suffix changes each deploy):

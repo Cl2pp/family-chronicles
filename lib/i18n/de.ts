@@ -12,6 +12,7 @@ export const de: Dictionary = {
     undone: 'Rückgängig gemacht',
     retry: 'Erneut versuchen',
     share: 'Teilen',
+    appUpdatedReloading: 'Die App wurde aktualisiert — die neueste Version wird geladen …',
   },
   nav: {
     chat: 'Chat',
