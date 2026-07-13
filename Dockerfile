@@ -16,6 +16,12 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # Real secrets aren't present at image-build time; skip env validation here.
 ENV SKIP_ENV_VALIDATION=1
+# Version-skew protection: stamp this deployment. next.config.ts reads the file
+# during `next build` here AND during `next start` in the runtime stage (the
+# whole /app dir is copied), so client and server always agree. Coolify passes
+# SOURCE_COMMIT; the timestamp fallback covers other builders.
+ARG SOURCE_COMMIT
+RUN echo "${SOURCE_COMMIT:-$(date +%Y%m%d%H%M%S)}" > .deployment-id
 RUN npm run build
 
 # ── runtime ──────────────────────────────────────────────────────────────────
