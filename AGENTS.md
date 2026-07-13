@@ -36,6 +36,9 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
 - Voice notes recorded as WebM/Opus are re-encoded to AAC (`.m4a`) by the worker's
   `transcode` job — Safari/iOS can't play Opus. Prefer-AAC recording lives in
   `components/audio-recorder.tsx`.
+- Photos get a downscaled WebP (`assets.thumb_s3_key`, worker's `thumbnail` job via
+  sharp, `lib/thumbnails.ts`). Banners and grids load the thumbnail; only the
+  lightbox fetches the full-size original.
 
 ## Commands
 - `npm run dev` — web dev server

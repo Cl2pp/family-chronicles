@@ -1,0 +1,1 @@
+ALTER TABLE "assets" ADD COLUMN "thumb_s3_key" text;

@@ -350,6 +350,8 @@ export const assets = pgTable(
     }),
     kind: assetKind('kind').notNull(),
     s3Key: text('s3_key').notNull(),
+    /** Downscaled WebP for grids/banners, written by the worker's `thumbnail` job. */
+    thumbS3Key: text('thumb_s3_key'),
     mimeType: text('mime_type').notNull(),
     bytes: integer('bytes'),
     caption: text('caption'),

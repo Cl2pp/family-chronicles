@@ -6,6 +6,7 @@ export const QUEUES = {
   style: 'style',
   sweepOrphans: 'sweep-orphans',
   transcode: 'transcode',
+  thumbnail: 'thumbnail',
 } as const;
 
 /** Nightly, off-peak — the sweep lists every object under the upload prefixes. */
@@ -17,6 +18,11 @@ export interface StyleJob {
 
 /** Re-encode a stored voice note into a format every browser can play. */
 export interface TranscodeJob {
+  s3Key: string;
+}
+
+/** Downscale a stored photo into a thumbnail for grids and banners. */
+export interface ThumbnailJob {
   s3Key: string;
 }
 
@@ -51,4 +57,9 @@ export async function enqueueStyle(data: StyleJob): Promise<void> {
 export async function enqueueTranscode(data: TranscodeJob): Promise<void> {
   const boss = await getBoss();
   await boss.send(QUEUES.transcode, data);
+}
+
+export async function enqueueThumbnail(data: ThumbnailJob): Promise<void> {
+  const boss = await getBoss();
+  await boss.send(QUEUES.thumbnail, data);
 }

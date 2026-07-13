@@ -21,7 +21,10 @@ import { updatePhotoCaption } from './actions';
 
 export interface GalleryPhoto {
   id: string;
+  /** Full-size original — loaded only when the lightbox opens. */
   url: string;
+  /** Small version for the grid (falls back to `url` while no thumbnail exists). */
+  thumbUrl: string;
   caption: string | null;
   width: number | null;
   height: number | null;
@@ -69,7 +72,7 @@ export function PhotoGallery({
               aria-label={p.caption ?? t.story.viewPhoto}
             >
               <Image
-                src={p.url}
+                src={p.thumbUrl}
                 alt={p.caption ?? storyTitle}
                 radius="md"
                 fit="cover"
@@ -90,7 +93,7 @@ export function PhotoGallery({
           >
             <Box pos="relative">
               <Image
-                src={photos[limit].url}
+                src={photos[limit].thumbUrl}
                 alt=""
                 radius="md"
                 fit="cover"

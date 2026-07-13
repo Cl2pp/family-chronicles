@@ -1,12 +1,21 @@
 import 'dotenv/config';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db';
-import { stories } from '@/db/schema';
-import { getBoss, QUEUES, SWEEP_ORPHANS_CRON, type StyleJob, type TranscodeJob } from '@/lib/queue';
+import { assets, stories } from '@/db/schema';
+import {
+  enqueueThumbnail,
+  getBoss,
+  QUEUES,
+  SWEEP_ORPHANS_CRON,
+  type StyleJob,
+  type ThumbnailJob,
+  type TranscodeJob,
+} from '@/lib/queue';
 import { styleStory } from '@/lib/ai/openrouter';
 import { styleContextForStory } from '@/lib/stories';
 import { sweepOrphanedObjects } from '@/lib/orphans';
 import { transcodeAudioObject } from '@/lib/transcode';
+import { generateThumbnail } from '@/lib/thumbnails';
 
 async function markFailed(storyId: string, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
@@ -56,6 +65,17 @@ async function handleTranscode(data: TranscodeJob) {
   }
 }
 
+/** Downscale a stored photo so lists and grids don't ship camera originals. */
+async function handleThumbnail(data: ThumbnailJob) {
+  try {
+    const result = await generateThumbnail(data.s3Key);
+    console.log(`[worker] thumbnail ${data.s3Key}: ${result}`);
+  } catch (err) {
+    // Views fall back to the full-size original — slower, but nothing is lost.
+    console.error(`[worker] thumbnail failed for ${data.s3Key}:`, err);
+  }
+}
+
 /** Reclaim storage from uploads whose owning row was never written. */
 async function handleSweepOrphans() {
   try {
@@ -64,6 +84,27 @@ async function handleSweepOrphans() {
   } catch (err) {
     // A failed sweep costs disk, not data — never take the worker down for it.
     console.error('[worker] orphan sweep failed:', err);
+  }
+}
+
+/**
+ * Queue a thumbnail job for every stored photo that doesn't have one yet, so
+ * photos from before the thumbnail feature get backfilled by simply deploying.
+ * Runs on every start; the job skips rows that already carry a thumb key, so
+ * restarts only cost this one scan.
+ */
+async function backfillMissingThumbnails() {
+  try {
+    const missing = await db
+      .select({ s3Key: assets.s3Key })
+      .from(assets)
+      .where(and(eq(assets.kind, 'photo'), isNull(assets.thumbS3Key)));
+    const keys = [...new Set(missing.map((m) => m.s3Key))];
+    for (const s3Key of keys) await enqueueThumbnail({ s3Key });
+    if (keys.length) console.log(`[worker] queued ${keys.length} missing thumbnail(s)`);
+  } catch (err) {
+    // e.g. the worker deployed before web ran the migration — the next restart catches up.
+    console.error('[worker] thumbnail backfill scan failed:', err);
   }
 }
 
@@ -78,12 +119,20 @@ async function main() {
     for (const job of jobs) await handleTranscode(job.data);
   });
 
+  await boss.work<ThumbnailJob>(QUEUES.thumbnail, async (jobs) => {
+    for (const job of jobs) await handleThumbnail(job.data);
+  });
+
   await boss.work(QUEUES.sweepOrphans, async () => {
     await handleSweepOrphans();
   });
   await boss.schedule(QUEUES.sweepOrphans, SWEEP_ORPHANS_CRON);
 
-  console.log('[worker] ready — listening for style + transcode jobs; orphan sweep scheduled');
+  await backfillMissingThumbnails();
+
+  console.log(
+    '[worker] ready — listening for style + transcode + thumbnail jobs; orphan sweep scheduled',
+  );
 }
 
 main().catch((err) => {
