@@ -87,25 +87,42 @@ async function handleSweepOrphans() {
   }
 }
 
+const BACKFILL_RETRY_MS = 60_000;
+const BACKFILL_MAX_TRIES = 30;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Queue a thumbnail job for every stored photo that doesn't have one yet, so
  * photos from before the thumbnail feature get backfilled by simply deploying.
  * Runs on every start; the job skips rows that already carry a thumb key, so
  * restarts only cost this one scan.
+ *
+ * Deploys are per-app and the worker usually wins the race, so the first scan
+ * can run before web has applied the `thumb_s3_key` migration. Retry for up
+ * to half an hour instead of writing the backfill off until the next restart.
  */
 async function backfillMissingThumbnails() {
-  try {
-    const missing = await db
-      .select({ s3Key: assets.s3Key })
-      .from(assets)
-      .where(and(eq(assets.kind, 'photo'), isNull(assets.thumbS3Key)));
-    const keys = [...new Set(missing.map((m) => m.s3Key))];
-    for (const s3Key of keys) await enqueueThumbnail({ s3Key });
-    if (keys.length) console.log(`[worker] queued ${keys.length} missing thumbnail(s)`);
-  } catch (err) {
-    // e.g. the worker deployed before web ran the migration — the next restart catches up.
-    console.error('[worker] thumbnail backfill scan failed:', err);
+  for (let attempt = 1; attempt <= BACKFILL_MAX_TRIES; attempt++) {
+    try {
+      const missing = await db
+        .select({ s3Key: assets.s3Key })
+        .from(assets)
+        .where(and(eq(assets.kind, 'photo'), isNull(assets.thumbS3Key)));
+      const keys = [...new Set(missing.map((m) => m.s3Key))];
+      for (const s3Key of keys) await enqueueThumbnail({ s3Key });
+      if (keys.length) console.log(`[worker] queued ${keys.length} missing thumbnail(s)`);
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[worker] thumbnail backfill scan failed (attempt ${attempt}/${BACKFILL_MAX_TRIES}), ` +
+          `retrying in ${BACKFILL_RETRY_MS / 1000}s — migrations probably pending: ${msg}`,
+      );
+      await sleep(BACKFILL_RETRY_MS);
+    }
   }
+  console.error('[worker] thumbnail backfill gave up — restart the worker once web has migrated');
 }
 
 async function main() {
@@ -128,7 +145,8 @@ async function main() {
   });
   await boss.schedule(QUEUES.sweepOrphans, SWEEP_ORPHANS_CRON);
 
-  await backfillMissingThumbnails();
+  // Fire-and-forget: it retries internally while jobs are already being served.
+  void backfillMissingThumbnails();
 
   console.log(
     '[worker] ready — listening for style + transcode + thumbnail jobs; orphan sweep scheduled',
