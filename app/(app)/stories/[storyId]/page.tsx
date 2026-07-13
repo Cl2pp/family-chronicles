@@ -65,9 +65,19 @@ export default async function StoryDetailPage({
       assets.map(async (a) => [a.id, await presignGet(a.s3Key, a.mimeType)] as const),
     ),
   );
+  // Grids and banners load the worker-generated thumbnail; only the lightbox
+  // fetches the full-size original. Photos without one yet fall back to it.
+  const presignedThumbs = new Map(
+    await Promise.all(
+      photoAssets
+        .filter((a) => a.thumbS3Key)
+        .map(async (a) => [a.id, await presignGet(a.thumbS3Key!, 'image/webp')] as const),
+    ),
+  );
   const photos = photoAssets.map((a) => ({
     id: a.id,
     url: presigned.get(a.id)!,
+    thumbUrl: presignedThumbs.get(a.id) ?? presigned.get(a.id)!,
     caption: a.caption,
     width: a.width,
     height: a.height,
@@ -97,7 +107,11 @@ export default async function StoryDetailPage({
       .map((a) => ({ id: a.id, url: presigned.get(a.id)!, durationSec: a.durationSec })),
     photos: photoAssets
       .filter((a) => contributionIdFor(a) === c.id)
-      .map((a) => ({ id: a.id, url: presigned.get(a.id)!, caption: a.caption })),
+      .map((a) => ({
+        id: a.id,
+        url: presignedThumbs.get(a.id) ?? presigned.get(a.id)!,
+        caption: a.caption,
+      })),
   }));
 
   // Stories from before the contributions table (not yet backfilled) still get the

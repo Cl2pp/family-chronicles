@@ -16,6 +16,7 @@ import {
 import { familyTagsByStory } from '@/lib/family-tags';
 import { eventDateToParts, partsToEventDate } from '@/lib/dates';
 import { deleteObject, presignGet } from '@/lib/s3';
+import { enqueueThumbnail } from '@/lib/queue';
 
 export type DatePrecision = 'day' | 'month' | 'year' | 'circa';
 export type InputType = 'text' | 'voice' | 'chat';
@@ -177,6 +178,14 @@ export async function addStoryPhotoContribution(
       .values(assetRows(storyId, items, contribution.id))
       .onConflictDoNothing();
   });
+  await enqueuePhotoThumbnails(items);
+}
+
+/** Queue thumbnail generation for freshly linked photo assets. */
+async function enqueuePhotoThumbnails(items: { kind: string; s3Key: string }[]) {
+  for (const item of items) {
+    if (item.kind === 'photo') await enqueueThumbnail({ s3Key: item.s3Key });
+  }
 }
 
 /**
@@ -197,7 +206,7 @@ export async function claimChatAssetsForStory(
   storyId: string,
   contributorId: string,
 ) {
-  await db.transaction(async (tx) => {
+  const claimed = await db.transaction(async (tx) => {
     const rows = await tx
       .select({
         id: messageAttachments.id,
@@ -213,7 +222,7 @@ export async function claimChatAssetsForStory(
       .innerJoin(messages, eq(messageAttachments.messageId, messages.id))
       .where(and(eq(messages.conversationId, conversationId), isNull(messageAttachments.storyId)))
       .orderBy(asc(messageAttachments.createdAt));
-    if (rows.length === 0) return;
+    if (rows.length === 0) return [];
 
     const [latest] = await tx
       .select({ id: contributions.id })
@@ -240,7 +249,9 @@ export async function claimChatAssetsForStory(
         ),
       );
     await tx.insert(assets).values(assetRows(storyId, rows, contributionId)).onConflictDoNothing();
+    return rows;
   });
+  await enqueuePhotoThumbnails(claimed);
 }
 
 export async function listAssets(storyId: string) {
@@ -310,11 +321,16 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
   }
 
   const photos = await db
-    .select({ storyId: assets.storyId, s3Key: assets.s3Key, mimeType: assets.mimeType })
+    .select({
+      storyId: assets.storyId,
+      s3Key: assets.s3Key,
+      thumbS3Key: assets.thumbS3Key,
+      mimeType: assets.mimeType,
+    })
     .from(assets)
     .where(and(inArray(assets.storyId, ids), eq(assets.kind, 'photo')))
     .orderBy(asc(assets.createdAt));
-  const photosByStory = new Map<string, { s3Key: string; mimeType: string }[]>();
+  const photosByStory = new Map<string, (typeof photos)[number][]>();
   for (const p of photos) {
     const arr = photosByStory.get(p.storyId) ?? [];
     arr.push(p);
@@ -324,7 +340,12 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
   await Promise.all(
     [...photosByStory.entries()].map(async ([storyId, list]) => {
       const urls = await Promise.all(
-        list.slice(0, BANNER_PHOTO_LIMIT).map((p) => presignGet(p.s3Key, p.mimeType)),
+        list
+          .slice(0, BANNER_PHOTO_LIMIT)
+          // Banners are small — serve the worker-generated thumbnail when it exists.
+          .map((p) =>
+            p.thumbS3Key ? presignGet(p.thumbS3Key, 'image/webp') : presignGet(p.s3Key, p.mimeType),
+          ),
       );
       bannerByStory.set(storyId, urls);
     }),
@@ -544,14 +565,18 @@ export async function deleteStoryForUser(
   await db.delete(stories).where(eq(stories.id, storyId));
 
   const keys = [...new Set(storyAssets.map((a) => a.s3Key))];
-  if (keys.length) {
-    const referenced = await db
-      .select({ s3Key: messageAttachments.s3Key })
-      .from(messageAttachments)
-      .where(inArray(messageAttachments.s3Key, keys));
+  // Thumbnails are derived — nothing else references them, so they always go.
+  const thumbKeys = [...new Set(storyAssets.map((a) => a.thumbS3Key).filter(Boolean))] as string[];
+  if (keys.length || thumbKeys.length) {
+    const referenced = keys.length
+      ? await db
+          .select({ s3Key: messageAttachments.s3Key })
+          .from(messageAttachments)
+          .where(inArray(messageAttachments.s3Key, keys))
+      : [];
     const keep = new Set(referenced.map((r) => r.s3Key));
     const results = await Promise.allSettled(
-      keys.filter((k) => !keep.has(k)).map((k) => deleteObject(k)),
+      [...keys.filter((k) => !keep.has(k)), ...thumbKeys].map((k) => deleteObject(k)),
     );
     for (const r of results) {
       if (r.status === 'rejected') {
