@@ -36,6 +36,17 @@ export const viewport: Viewport = {
   themeColor: '#2563eb',
   width: 'device-width',
   initialScale: 1,
+  // iOS zooms the whole page when a focused input renders under 16px; capping the
+  // scale disables that focus-zoom while pinch-zoom stays available (iOS 10+ ignores
+  // these caps for user-initiated zoom). Belt-and-braces with the 16px input rule
+  // in globals.css.
+  maximumScale: 1,
+  userScalable: false,
+  // Chrome/Firefox on Android: shrink the layout viewport (and thus 100dvh) when
+  // the keyboard opens, so bottom composers sit above it instead of the browser
+  // panning the page. Safari/iOS has no support and keeps its overlay behavior —
+  // the chat view compensates via the visualViewport API.
+  interactiveWidget: 'resizes-content',
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
