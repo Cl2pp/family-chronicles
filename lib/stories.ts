@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   assets,
@@ -15,7 +15,7 @@ import {
 } from '@/db/schema';
 import { familyTagsByStory } from '@/lib/family-tags';
 import { eventDateToParts, partsToEventDate } from '@/lib/dates';
-import { deleteObject } from '@/lib/s3';
+import { deleteObject, presignGet } from '@/lib/s3';
 
 export type DatePrecision = 'day' | 'month' | 'year' | 'circa';
 export type InputType = 'text' | 'voice' | 'chat';
@@ -285,9 +285,14 @@ export interface StoryListItem {
   /** Derived family tags: the union of the tags of everyone in the story. */
   familyTags: string[];
   photoCount: number;
+  /** Presigned URLs of the story's first photos (upload order), for list banners. */
+  bannerPhotoUrls: string[];
 }
 
-type StoryRow = Omit<StoryListItem, 'chronicleIds' | 'familyTags' | 'photoCount'>;
+type StoryRow = Omit<StoryListItem, 'chronicleIds' | 'familyTags' | 'photoCount' | 'bannerPhotoUrls'>;
+
+/** How many photos a story-list banner shows at most. */
+const BANNER_PHOTO_LIMIT = 3;
 
 async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
   const ids = rows.map((r) => r.id);
@@ -305,11 +310,25 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
   }
 
   const photos = await db
-    .select({ storyId: assets.storyId, count: sql<number>`count(*)::int` })
+    .select({ storyId: assets.storyId, s3Key: assets.s3Key, mimeType: assets.mimeType })
     .from(assets)
     .where(and(inArray(assets.storyId, ids), eq(assets.kind, 'photo')))
-    .groupBy(assets.storyId);
-  const photoByStory = new Map(photos.map((p) => [p.storyId, p.count]));
+    .orderBy(asc(assets.createdAt));
+  const photosByStory = new Map<string, { s3Key: string; mimeType: string }[]>();
+  for (const p of photos) {
+    const arr = photosByStory.get(p.storyId) ?? [];
+    arr.push(p);
+    photosByStory.set(p.storyId, arr);
+  }
+  const bannerByStory = new Map<string, string[]>();
+  await Promise.all(
+    [...photosByStory.entries()].map(async ([storyId, list]) => {
+      const urls = await Promise.all(
+        list.slice(0, BANNER_PHOTO_LIMIT).map((p) => presignGet(p.s3Key, p.mimeType)),
+      );
+      bannerByStory.set(storyId, urls);
+    }),
+  );
 
   const tagsByStory = await familyTagsByStory(ids);
 
@@ -317,7 +336,8 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
     ...r,
     chronicleIds: chronByStory.get(r.id) ?? [],
     familyTags: tagsByStory.get(r.id) ?? [],
-    photoCount: photoByStory.get(r.id) ?? 0,
+    photoCount: photosByStory.get(r.id)?.length ?? 0,
+    bannerPhotoUrls: bannerByStory.get(r.id) ?? [],
   }));
 }
 

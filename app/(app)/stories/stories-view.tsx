@@ -9,6 +9,7 @@ import {
   Card,
   Chip,
   Group,
+  Image,
   SegmentedControl,
   SimpleGrid,
   Stack,
@@ -72,6 +73,22 @@ function StoryCard({ story }: { story: StoryListItem }) {
       padding="md"
       bg="white"
     >
+      {story.bannerPhotoUrls.length > 0 && (
+        <Card.Section mb="sm">
+          <Group gap={2} wrap="nowrap">
+            {story.bannerPhotoUrls.map((url, i) => (
+              <Image
+                key={url}
+                src={url}
+                alt={i === 0 ? story.title : ''}
+                h={120}
+                fit="cover"
+                style={{ flex: 1, minWidth: 0 }}
+              />
+            ))}
+          </Group>
+        </Card.Section>
+      )}
       <Stack gap={6}>
         <Group justify="space-between" align="flex-start" wrap="nowrap" gap="sm">
           <Text fw={600} lineClamp={2} style={{ flex: 1 }}>

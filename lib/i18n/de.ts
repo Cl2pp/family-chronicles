@@ -321,6 +321,9 @@ export const de: Dictionary = {
     addPhotos: 'Fotos hinzufügen',
     photoUploadFailed: 'Hochladen fehlgeschlagen. Bitte versuch es noch einmal.',
     viewPhoto: 'Foto ansehen',
+    seeMore: 'Mehr anzeigen',
+    seeMorePhotos: (n: number) =>
+      n === 1 ? '1 weiteres Foto ansehen' : `${n} weitere Fotos ansehen`,
     previousPhoto: 'Vorheriges Foto',
     nextPhoto: 'Nächstes Foto',
     editCaption: 'Bildunterschrift bearbeiten',
