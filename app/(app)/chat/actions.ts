@@ -10,14 +10,19 @@ import {
   closeConversation,
   createConversation,
   getConversation,
-  listConversationAttachments,
   listMessages,
+  photosByMessage,
   resolveDraftCard,
   type AttachmentInput,
 } from '@/lib/conversations';
 import { runAgent, type ChatTurn } from '@/lib/ai/agent';
 import type { Receipt, StoryDraft, StoryProposal, ToolContext, UndoAction } from '@/lib/ai/tools';
-import { addStoryAssets, applyStoryEdit, createStory, listChronicleStoryTexts } from '@/lib/stories';
+import {
+  applyStoryEdit,
+  claimChatAssetsForStory,
+  createStory,
+  listChronicleStoryTexts,
+} from '@/lib/stories';
 import { normalizeText } from '@/lib/story-similarity';
 import {
   canUserEditPerson,
@@ -28,7 +33,8 @@ import {
 } from '@/lib/people';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { yearToDate } from '@/lib/dates';
-import { buildKey, getObjectBuffer, presignPut } from '@/lib/s3';
+import { buildKey, getObjectBuffer, presignGet, presignPut } from '@/lib/s3';
+import { validateUpload } from '@/lib/uploads';
 import { transcribeAudio } from '@/lib/ai/groq';
 
 /** Throw unless the user can contribute to the chronicle (create stories / tree). */
@@ -41,17 +47,31 @@ async function assertContributor(chronicleId: string, userId: string) {
   return membership;
 }
 
-/** A presigned URL the browser uses to PUT an in-chat upload straight to storage. */
+/**
+ * A presigned URL the browser uses to PUT an in-chat upload straight to storage.
+ * Returns the canonical MIME type to store — `validateUpload` normalizes it, and the
+ * signature pins both it and the byte length.
+ */
 export async function presignUpload(input: {
   kind: 'audio' | 'photo';
   mimeType: string;
-  filename?: string;
-}): Promise<{ url: string; s3Key: string }> {
+  bytes: number;
+}): Promise<{ url: string; s3Key: string; mimeType: string }> {
   await requireUser();
+  const upload = validateUpload(input.kind, input.mimeType, input.bytes);
   const prefix = input.kind === 'audio' ? 'chat/audio' : 'chat/photos';
-  const s3Key = buildKey(prefix, input.filename ?? input.mimeType.replace('/', '.'));
-  const url = await presignPut(s3Key, input.mimeType);
-  return { url, s3Key };
+  const s3Key = buildKey(prefix, upload.ext);
+  const url = await presignPut(s3Key, upload.mimeType, upload.bytes);
+  return { url, s3Key, mimeType: upload.mimeType };
+}
+
+/**
+ * Attachments arrive from the client, so the key it hands back must be one we just
+ * signed for that purpose — not a guess at someone's avatar or another story's photo.
+ */
+function assertChatUpload(kind: 'audio' | 'photo', s3Key: string) {
+  const prefix = kind === 'audio' ? 'chat/audio/' : 'chat/photos/';
+  if (!s3Key.startsWith(prefix)) throw new Error('Invalid upload.');
 }
 
 export interface SendResult {
@@ -102,9 +122,21 @@ async function respondAndStore(
   previousChronicleId: string | undefined,
 ): Promise<SendResult> {
   const stored = await listMessages(conversationId);
-  const history: ChatTurn[] = stored
-    .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
-    .map((m) => ({ role: m.role as ChatTurn['role'], content: m.content }));
+  const turns = stored.filter(
+    (m) => m.role === 'user' || m.role === 'assistant' || m.role === 'system',
+  );
+  // Photos ride along as images so the agent can see what the story is about. The URLs
+  // are presigned reads the model's provider fetches server-side.
+  const photoKeys = await photosByMessage(turns.filter((m) => m.role === 'user').map((m) => m.id));
+  const history: ChatTurn[] = await Promise.all(
+    turns.map(async (m) => ({
+      role: m.role as ChatTurn['role'],
+      content: m.content,
+      imageUrls: await Promise.all(
+        (photoKeys.get(m.id) ?? []).map((p) => presignGet(p.s3Key, p.mimeType)),
+      ),
+    })),
+  );
 
   const result = await runAgent(history, ctx);
   // Persist receipts and any draft card on the assistant message so the ✓ chips and the
@@ -155,7 +187,10 @@ export async function sendMessage(input: {
 }): Promise<SendResult> {
   const user = await requireUser();
   const text = input.text.trim();
-  if (!text) throw new Error('Empty message');
+  const attachments = input.attachments ?? [];
+  // Photos alone are a message — the agent sees them.
+  if (!text && attachments.length === 0) throw new Error('Empty message');
+  for (const a of attachments) assertChatUpload(a.kind, a.s3Key);
 
   const previousChronicleId = (await cookies()).get('activeChronicleId')?.value;
   const { active } = await resolveActiveChronicle(user.id, previousChronicleId);
@@ -163,7 +198,7 @@ export async function sendMessage(input: {
 
   const conversationId = await resolveConversation(input.conversationId, ctx.activeChronicleId, user.id);
   const message = await addMessage(conversationId, 'user', text);
-  if (input.attachments?.length) await addAttachments(message.id, input.attachments);
+  if (attachments.length) await addAttachments(message.id, attachments);
 
   return respondAndStore(conversationId, ctx, previousChronicleId);
 }
@@ -177,6 +212,7 @@ export async function sendVoiceMessage(input: {
   durationSec?: number | null;
 }): Promise<SendResult & { transcript: string }> {
   const user = await requireUser();
+  assertChatUpload('audio', input.s3Key);
 
   let transcript: string;
   try {
@@ -299,9 +335,9 @@ export async function acceptStory(input: {
   });
 
   // Carry the chat's raw uploads (voice + photos) onto the story for traceability.
+  // Only the ones no earlier story from this chat already claimed.
   if (conversationId) {
-    const attachments = await listConversationAttachments(conversationId);
-    await addStoryAssets(story.id, attachments);
+    await claimChatAssetsForStory(conversationId, story.id);
     // The receipt on the note renders as a persistent ✓ chip in the chat.
     const chronicle = await getChronicle(input.chronicleId);
     const receipt: Receipt = {

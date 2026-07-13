@@ -1,10 +1,11 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   assets,
   chronicles,
   memberships,
   messageAttachments,
+  messages,
   stories,
   storyChronicles,
   storyPeople,
@@ -101,25 +102,75 @@ export interface AssetInput {
   durationSec?: number | null;
 }
 
+function assetRows(storyId: string, items: AssetInput[]) {
+  return items.map((a) => ({
+    storyId,
+    kind: a.kind,
+    s3Key: a.s3Key,
+    mimeType: a.mimeType,
+    bytes: a.bytes ?? null,
+    width: a.width ?? null,
+    height: a.height ?? null,
+    durationSec: a.durationSec ?? null,
+  }));
+}
+
 /** Persist audio/photo assets for a story (e.g. copied from an accepted chat). */
 export async function addStoryAssets(storyId: string, items: AssetInput[]) {
   if (items.length === 0) return;
-  await db.insert(assets).values(
-    items.map((a) => ({
-      storyId,
-      kind: a.kind,
-      s3Key: a.s3Key,
-      mimeType: a.mimeType,
-      bytes: a.bytes ?? null,
-      width: a.width ?? null,
-      height: a.height ?? null,
-      durationSec: a.durationSec ?? null,
-    })),
-  );
+  await db.insert(assets).values(assetRows(storyId, items)).onConflictDoNothing();
+}
+
+/**
+ * Move a chat's not-yet-claimed uploads onto a story, oldest first.
+ *
+ * One conversation can produce several stories. Copying *every* attachment each time
+ * would hand story #2 the photos — and every voice note — that belonged to story #1, so
+ * each attachment is claimed exactly once, by the first story accepted after it was sent.
+ * Claim and insert share a transaction; neither happens without the other.
+ */
+export async function claimChatAssetsForStory(conversationId: string, storyId: string) {
+  await db.transaction(async (tx) => {
+    const rows = await tx
+      .select({
+        id: messageAttachments.id,
+        kind: messageAttachments.kind,
+        s3Key: messageAttachments.s3Key,
+        mimeType: messageAttachments.mimeType,
+        bytes: messageAttachments.bytes,
+        width: messageAttachments.width,
+        height: messageAttachments.height,
+        durationSec: messageAttachments.durationSec,
+      })
+      .from(messageAttachments)
+      .innerJoin(messages, eq(messageAttachments.messageId, messages.id))
+      .where(and(eq(messages.conversationId, conversationId), isNull(messageAttachments.storyId)))
+      .orderBy(asc(messageAttachments.createdAt));
+    if (rows.length === 0) return;
+
+    await tx
+      .update(messageAttachments)
+      .set({ storyId })
+      .where(
+        inArray(
+          messageAttachments.id,
+          rows.map((r) => r.id),
+        ),
+      );
+    await tx.insert(assets).values(assetRows(storyId, rows)).onConflictDoNothing();
+  });
 }
 
 export async function listAssets(storyId: string) {
-  return db.select().from(assets).where(eq(assets.storyId, storyId));
+  return db.select().from(assets).where(eq(assets.storyId, storyId)).orderBy(asc(assets.createdAt));
+}
+
+/** Set or clear a photo's caption. The story id scopes it — callers check edit rights. */
+export async function setAssetCaption(storyId: string, assetId: string, caption: string | null) {
+  await db
+    .update(assets)
+    .set({ caption })
+    .where(and(eq(assets.id, assetId), eq(assets.storyId, storyId)));
 }
 
 const storyListColumns = {
