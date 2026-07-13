@@ -21,11 +21,10 @@ export const auth = betterAuth({
     enabled: true,
   },
   session: {
-    // Private family app on trusted devices: keep people signed in for a year.
     // The session (and its cookie) slides — any visit at least a day after the
-    // last refresh re-issues both — so only a full year of absence logs you out.
-    // The better-auth default of 7 days is what kept logging out pinned PWAs.
-    expiresIn: 60 * 60 * 24 * 365,
+    // last refresh re-issues both — so only a month of absence logs you out.
+    // (The better-auth default is 7 days.)
+    expiresIn: 60 * 60 * 24 * 30,
     updateAge: 60 * 60 * 24,
   },
   plugins: [
