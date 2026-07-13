@@ -217,7 +217,7 @@ export default async function StoryDetailPage({
                 photos={photos}
                 canEdit={canEdit}
                 storyTitle={story.title}
-                initialVisible={4}
+                initialVisible={3}
               />
             )}
           </CollapsibleSection>
