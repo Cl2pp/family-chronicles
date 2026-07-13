@@ -365,9 +365,11 @@ export function FamilyTree({
     for (const [childId, pps] of parentPosOfChild) {
       const child = pos.get(childId);
       if (!child) continue;
+      // Rows are top-aligned, so compare tops: cards in the same row can have
+      // different heights (born-surname line, life span), which shifts midY.
       const sideBySide =
         pps.length === 2 &&
-        Math.abs(pps[0].midY - pps[1].midY) < 4 &&
+        Math.abs(pps[0].top - pps[1].top) < 4 &&
         Math.abs(pps[0].cx - pps[1].cx) < CARD_WIDTH * 2;
       if (sideBySide) {
         const x = (pps[0].cx + pps[1].cx) / 2;
