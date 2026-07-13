@@ -28,7 +28,8 @@ RUN npm run build
 FROM base AS runtime
 ENV NODE_ENV=production
 # curl is needed for Coolify's container healthcheck (alpine ships without it).
-RUN apk add --no-cache curl
+# ffmpeg re-encodes WebM/Opus voice notes to AAC in the worker (Safari can't play Opus).
+RUN apk add --no-cache curl ffmpeg
 COPY --from=build /app ./
 RUN chmod +x ./docker-entrypoint.sh
 EXPOSE 3000

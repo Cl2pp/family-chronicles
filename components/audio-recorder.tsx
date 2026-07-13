@@ -12,7 +12,17 @@ export interface RecordedAudio {
 }
 
 function pickMimeType(): string {
-  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+  // AAC-in-MP4 first: it's the one format every browser (incl. Safari/iOS) can also
+  // PLAY back — family members listen on different devices than the one that recorded.
+  // WebM/Opus recordings are transcoded to AAC by a worker job after upload.
+  // Only the explicit AAC codec string — a bare 'audio/mp4' could legally be granted
+  // with an Opus track inside, which is exactly the playback problem being avoided.
+  const candidates = [
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg',
+  ];
   if (typeof MediaRecorder === 'undefined') return '';
   for (const t of candidates) {
     if (MediaRecorder.isTypeSupported(t)) return t;

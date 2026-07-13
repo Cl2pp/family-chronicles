@@ -30,6 +30,12 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
 - Story lifecycle: `draft → processing → ready | failed`. Voice flow:
   upload audio to S3 → create story (`processing`) → `transcribe` job → `style` job → `ready`.
 - Keep raw inputs forever (audio/photos in `assets`) for traceability.
+- Source material is tracked per **contribution** (`contributions` table; who/when/verbatim
+  text, assets link via `assets.contribution_id`) — the story page renders these as a
+  timeline. Every flow that adds source (accept, chat revision, photo add) writes one.
+- Voice notes recorded as WebM/Opus are re-encoded to AAC (`.m4a`) by the worker's
+  `transcode` job — Safari/iOS can't play Opus. Prefer-AAC recording lives in
+  `components/audio-recorder.tsx`.
 
 ## Commands
 - `npm run dev` — web dev server

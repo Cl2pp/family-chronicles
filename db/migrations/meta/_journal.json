@@ -57,6 +57,13 @@
       "when": 1783540513640,
       "tag": "0007_add_story_asset_claim",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783944991180,
+      "tag": "0008_add_contributions",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import { env } from '@/lib/env';
 export const QUEUES = {
   style: 'style',
   sweepOrphans: 'sweep-orphans',
+  transcode: 'transcode',
 } as const;
 
 /** Nightly, off-peak — the sweep lists every object under the upload prefixes. */
@@ -12,6 +13,11 @@ export const SWEEP_ORPHANS_CRON = '17 4 * * *';
 
 export interface StyleJob {
   storyId: string;
+}
+
+/** Re-encode a stored voice note into a format every browser can play. */
+export interface TranscodeJob {
+  s3Key: string;
 }
 
 const globalForBoss = globalThis as unknown as { __boss?: Promise<PgBoss> };
@@ -40,4 +46,9 @@ export async function getBoss(): Promise<PgBoss> {
 export async function enqueueStyle(data: StyleJob): Promise<void> {
   const boss = await getBoss();
   await boss.send(QUEUES.style, data);
+}
+
+export async function enqueueTranscode(data: TranscodeJob): Promise<void> {
+  const boss = await getBoss();
+  await boss.send(QUEUES.transcode, data);
 }

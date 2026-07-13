@@ -81,6 +81,18 @@ export async function getObjectBuffer(key: string): Promise<Buffer> {
   return Buffer.from(bytes);
 }
 
+/** Upload an object from memory (used by the worker to store transcoded audio). */
+export async function putObjectBuffer(key: string, body: Buffer, contentType: string): Promise<void> {
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: env.S3_BUCKET,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    }),
+  );
+}
+
 export async function deleteObject(key: string): Promise<void> {
   await s3.send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
 }
