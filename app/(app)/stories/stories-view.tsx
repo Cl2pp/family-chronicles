@@ -237,6 +237,9 @@ function Bubbles({ groups }: { groups: YearGroup[] }) {
   );
 }
 
+/** Sentinel filter value for stories with no tagged people (so no derived family). */
+const NO_FAMILY = '__no-family__';
+
 export function StoriesView({ stories }: { stories: StoryListItem[] }) {
   const { t } = useI18n();
   const [view, setView] = useState<ViewMode>('timeline');
@@ -250,12 +253,21 @@ export function StoriesView({ stories }: { stories: StoryListItem[] }) {
     return [...all].sort((a, b) => a.localeCompare(b));
   }, [stories]);
 
-  // No filter selected → show all; otherwise keep stories carrying any selected tag.
+  // Untagged stories would silently vanish under any family selection — give them
+  // their own explicit bucket instead.
+  const hasUntagged = useMemo(() => stories.some((s) => s.familyTags.length === 0), [stories]);
+
+  // No filter selected → show all; otherwise keep stories carrying any selected tag
+  // (the "no family" bucket keeps the untagged ones).
   const visible = useMemo(
     () =>
       tags.length === 0
         ? stories
-        : stories.filter((s) => s.familyTags.some((tag) => tags.includes(tag))),
+        : stories.filter(
+            (s) =>
+              s.familyTags.some((tag) => tags.includes(tag)) ||
+              (tags.includes(NO_FAMILY) && s.familyTags.length === 0),
+          ),
     [stories, tags],
   );
 
@@ -288,7 +300,7 @@ export function StoriesView({ stories }: { stories: StoryListItem[] }) {
         </Group>
       </Group>
 
-      {tagOptions.length > 1 && (
+      {(tagOptions.length > 1 || (tagOptions.length > 0 && hasUntagged)) && (
         <Group gap="xs" align="center">
           <Text size="sm" c="dimmed">
             {t.stories.show}
@@ -303,6 +315,11 @@ export function StoriesView({ stories }: { stories: StoryListItem[] }) {
                   {tag}
                 </Chip>
               ))}
+              {hasUntagged && (
+                <Chip value={NO_FAMILY} size="sm" variant="light">
+                  {t.stories.noFamily}
+                </Chip>
+              )}
             </Group>
           </Chip.Group>
         </Group>

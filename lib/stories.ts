@@ -7,6 +7,7 @@ import {
   memberships,
   messageAttachments,
   messages,
+  people,
   stories,
   storyChronicles,
   storyPeople,
@@ -99,6 +100,37 @@ export async function shareStoryToChronicle(storyId: string, chronicleId: string
     .insert(storyChronicles)
     .values({ storyId, chronicleId, sharedBy: userId })
     .onConflictDoNothing();
+}
+
+/** People tagged in a story (they drive the story's derived family tags). */
+export async function listStoryPeople(storyId: string) {
+  return db
+    .select({
+      id: people.id,
+      displayName: people.displayName,
+      familyName: people.familyName,
+    })
+    .from(storyPeople)
+    .innerJoin(people, eq(storyPeople.personId, people.id))
+    .where(eq(storyPeople.storyId, storyId))
+    .orderBy(asc(people.displayName));
+}
+
+/** Tag people in an existing story. Already-tagged people are skipped. */
+export async function addPeopleToStory(storyId: string, personIds: string[]) {
+  if (personIds.length === 0) return;
+  await db
+    .insert(storyPeople)
+    .values(personIds.map((personId) => ({ storyId, personId })))
+    .onConflictDoNothing();
+}
+
+/** Remove people tags from a story (the people themselves are untouched). */
+export async function removePeopleFromStory(storyId: string, personIds: string[]) {
+  if (personIds.length === 0) return;
+  await db
+    .delete(storyPeople)
+    .where(and(eq(storyPeople.storyId, storyId), inArray(storyPeople.personId, personIds)));
 }
 
 export interface AssetInput {

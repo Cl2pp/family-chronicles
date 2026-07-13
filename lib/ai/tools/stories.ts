@@ -1,17 +1,22 @@
 import { z } from 'zod';
 import { listChroniclesForUser } from '@/lib/chronicles';
+import { listChroniclePeople } from '@/lib/people';
+import { matchPeopleByName } from '@/lib/person-match';
 import {
+  addPeopleToStory,
   canUserEditStory,
   chroniclesForStory,
   listChronicleStoryTexts,
   listStoriesForUser,
+  listStoryPeople,
+  removePeopleFromStory,
   shareStoryToChronicle,
   type StoryListItem,
 } from '@/lib/stories';
 import { findLikelyDuplicates } from '@/lib/story-similarity';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { defineTool, type ToolContext } from './types';
-import { ensureContributor } from './util';
+import { ensureContributor, resolvePerson } from './util';
 
 /** Find one of the user's stories by exact title (case-insensitive) or id. */
 async function resolveStory(
@@ -95,9 +100,26 @@ export const draftStoryTool = defineTool({
       }
     }
 
+    // On save, named people are connected to the story (they drive its family tags) —
+    // but only the ones that resolve to tree members. Warn about the rest now, while
+    // there is still time to add them before the user accepts the draft.
+    let message = 'Draft prepared and shown to the user for review. Await their edits and acceptance.';
+    if (args.people?.length) {
+      const treePeople = await listChroniclePeople(gate.chronicleId);
+      const { unmatched } = matchPeopleByName(treePeople, args.people);
+      if (unmatched.length) {
+        message +=
+          ` NOTE: ${unmatched.map((n) => `"${n}"`).join(', ')} ` +
+          (unmatched.length === 1 ? 'is' : 'are') +
+          ' not in the family tree, so the story cannot be connected to them (or their family) ' +
+          'when saved. Tell the user and offer to add them with add_person first — if they are ' +
+          'added before the draft is accepted, the connection will work.';
+      }
+    }
+
     return {
       ok: true,
-      message: 'Draft prepared and shown to the user for review. Await their edits and acceptance.',
+      message,
       storyDraft: {
         proposal: {
           kind: 'story',
@@ -157,8 +179,9 @@ export const shareStoryTool = defineTool({
 export const getStoryTool = defineTool({
   name: 'get_story',
   description:
-    'Read one story in full (title, summary, body, year, status) by its title or id. Always call ' +
-    'this before update_story so the revision starts from the current text.',
+    'Read one story in full (title, summary, body, year, status, tagged people, family tags) by ' +
+    'its title or id. Always call this before update_story so the revision starts from the ' +
+    'current text, and before tag_story_people to see who is already connected.',
   schema: z.object({
     story: z.string().min(1).describe('The story title (or id) to read.'),
   }),
@@ -166,6 +189,7 @@ export const getStoryTool = defineTool({
     const found = await resolveStory(ctx, args.story);
     if ('error' in found) return { ok: false, error: found.error };
     const s = found.story;
+    const tagged = await listStoryPeople(s.id);
     return {
       ok: true,
       message: JSON.stringify({
@@ -175,6 +199,8 @@ export const getStoryTool = defineTool({
         body: s.bodyStyled ?? s.bodyOriginal,
         eventYear: s.eventDate ? s.eventDate.getUTCFullYear() : null,
         status: s.status,
+        people: tagged.map((p) => p.displayName),
+        familyTags: s.familyTags,
       }),
     };
   },
@@ -243,6 +269,104 @@ export const updateStoryTool = defineTool({
         chronicleId: chronicles[0]?.id ?? '',
         chronicleName: chronicles[0]?.name ?? 'your chronicle',
       },
+    };
+  },
+});
+
+/** Shared gate for (un)tagging: resolve the story, check edit rights and contributor access. */
+async function resolveStoryForTagging(
+  ctx: ToolContext,
+  ref: string,
+): Promise<{ story: StoryListItem; chronicleId: string } | { error: string }> {
+  const gate = await ensureContributor(ctx);
+  if ('error' in gate) return gate;
+  const found = await resolveStory(ctx, ref);
+  if ('error' in found) return found;
+  if (!(await canUserEditStory(found.story.id, ctx.userId))) {
+    return { error: "Only the story's author or a chronicle owner can change who is tagged in it." };
+  }
+  return { story: found.story, chronicleId: gate.chronicleId };
+}
+
+/**
+ * tag_story_people — connect tree members to an existing story. The story's family
+ * tags (and its visibility under the stories-page family filter) derive from these links.
+ */
+export const tagStoryPeopleTool = defineTool({
+  name: 'tag_story_people',
+  description:
+    'Connect one or more people from the family tree to an existing story — e.g. to reconnect a ' +
+    "story to a person (and thereby their family) after the fact. The story's family tags derive " +
+    'from its tagged people. People must already be in the tree (add_person first if not). ' +
+    'Call get_story first to see who is already tagged. Contributor access required.',
+  schema: z.object({
+    story: z.string().min(1).describe('The story title (or id) to tag people in.'),
+    people: z.array(z.string().min(1)).min(1).describe('Names of tree members to connect.'),
+  }),
+  async execute(args, ctx) {
+    const gate = await resolveStoryForTagging(ctx, args.story);
+    if ('error' in gate) return { ok: false, error: gate.error };
+    const { story, chronicleId } = gate;
+
+    const matched: { id: string; displayName: string }[] = [];
+    const problems: string[] = [];
+    for (const name of args.people) {
+      const found = await resolvePerson(chronicleId, name);
+      if ('error' in found) problems.push(found.error);
+      else matched.push(found.person);
+    }
+    if (matched.length === 0) {
+      return { ok: false, error: `No one could be tagged: ${problems.join(' ')}` };
+    }
+
+    await addPeopleToStory(story.id, matched.map((p) => p.id));
+    const names = matched.map((p) => p.displayName).join(', ');
+    return {
+      ok: true,
+      message:
+        `Tagged ${names} in "${story.title}".` +
+        (problems.length ? ` Some people could not be tagged: ${problems.join(' ')}` : ''),
+      receipt: { label: `Tagged ${names}`, detail: `in "${story.title}"`, href: `/stories/${story.id}` },
+    };
+  },
+});
+
+/** untag_story_people — disconnect people from a story (the people themselves are kept). */
+export const untagStoryPeopleTool = defineTool({
+  name: 'untag_story_people',
+  description:
+    'Remove the connection between a story and one or more tagged people — e.g. when someone was ' +
+    'tagged by mistake. The people stay in the tree; only the story link is removed. ' +
+    'Contributor access required.',
+  schema: z.object({
+    story: z.string().min(1).describe('The story title (or id) to untag people from.'),
+    people: z.array(z.string().min(1)).min(1).describe('Names of tagged people to disconnect.'),
+  }),
+  async execute(args, ctx) {
+    const gate = await resolveStoryForTagging(ctx, args.story);
+    if ('error' in gate) return { ok: false, error: gate.error };
+    const { story } = gate;
+
+    // Resolve against the story's own tagged people — they may have left the chronicle.
+    const tagged = await listStoryPeople(story.id);
+    const { matched, unmatched } = matchPeopleByName(tagged, args.people);
+    if (matched.length === 0) {
+      return {
+        ok: false,
+        error: `None of ${args.people.map((n) => `"${n}"`).join(', ')} are tagged in "${story.title}".`,
+      };
+    }
+
+    await removePeopleFromStory(story.id, matched.map((p) => p.id));
+    const names = matched.map((p) => p.displayName).join(', ');
+    return {
+      ok: true,
+      message:
+        `Untagged ${names} from "${story.title}".` +
+        (unmatched.length
+          ? ` Not tagged in it (so nothing to remove): ${unmatched.map((n) => `"${n}"`).join(', ')}.`
+          : ''),
+      receipt: { label: `Untagged ${names}`, detail: `from "${story.title}"`, href: `/stories/${story.id}` },
     };
   },
 });

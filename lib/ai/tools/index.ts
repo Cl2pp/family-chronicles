@@ -19,6 +19,8 @@ import {
   getStoryTool,
   listStoriesTool,
   shareStoryTool,
+  tagStoryPeopleTool,
+  untagStoryPeopleTool,
   updateStoryTool,
 } from './stories';
 import { inviteMemberTool } from './members';
@@ -44,6 +46,8 @@ export const tools: Tool[] = [
   updateChronicleSettingsTool,
   inviteMemberTool,
   shareStoryTool,
+  tagStoryPeopleTool,
+  untagStoryPeopleTool,
   // review-then-save
   draftStoryTool,
   updateStoryTool,

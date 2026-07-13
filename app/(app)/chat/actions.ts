@@ -31,6 +31,7 @@ import {
   listChroniclePeople,
   removeRelationship,
 } from '@/lib/people';
+import { matchPeopleByName } from '@/lib/person-match';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { yearToDate } from '@/lib/dates';
 import { buildKey, getObjectBuffer, presignGet, presignPut } from '@/lib/s3';
@@ -315,14 +316,13 @@ export async function acceptStory(input: {
   );
   if (duplicate) return { storyId: duplicate.id };
 
-  // Resolve any named people to existing tree members in this chronicle (best-effort).
+  // Resolve any named people to existing tree members in this chronicle (best-effort,
+  // forgiving: "Ava" matches "Ava Naoko"). Unmatched names are dropped — draft_story
+  // already warned the agent about them before the card was shown.
   let personIds: string[] = [];
   if (p.people?.length) {
     const chroniclePeople = await listChroniclePeople(input.chronicleId);
-    const byName = new Map(chroniclePeople.map((fp) => [fp.displayName.toLowerCase(), fp.id]));
-    personIds = p.people
-      .map((name) => byName.get(name.trim().toLowerCase()))
-      .filter((id): id is string => Boolean(id));
+    personIds = matchPeopleByName(chroniclePeople, p.people).matched.map((fp) => fp.id);
   }
 
   const story = await createStory({
