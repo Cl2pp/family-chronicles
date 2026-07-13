@@ -275,6 +275,7 @@ export const en = {
     viewBubbles: 'Bubbles',
     show: 'Show:',
     allFamilies: 'All families',
+    noFamily: 'No family',
     noneInFamilies: 'No stories in the selected families.',
     undated: 'Undated',
     storyCount: (n: number) => (n === 1 ? '1 story' : `${n} stories`),

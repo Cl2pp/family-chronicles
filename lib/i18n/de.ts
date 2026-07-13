@@ -286,6 +286,7 @@ export const de: Dictionary = {
     viewBubbles: 'Blasen',
     show: 'Zeige:',
     allFamilies: 'Alle Familien',
+    noFamily: 'Ohne Familie',
     noneInFamilies: 'Keine Geschichten in den ausgewählten Familien.',
     undated: 'Ohne Datum',
     storyCount: (n: number) => (n === 1 ? '1 Geschichte' : `${n} Geschichten`),
