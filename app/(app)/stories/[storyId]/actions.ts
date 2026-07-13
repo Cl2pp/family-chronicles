@@ -24,13 +24,15 @@ export async function retryStory(storyId: string) {
   revalidatePath(`/stories/${storyId}`);
 }
 
-/** Save a manual edit of a story (title/summary/body/year) from its detail page. */
+/** Save a manual edit of a story (title/summary/body/date) from its detail page. */
 export async function updateStoryDetails(input: {
   storyId: string;
   title: string;
   summary: string;
   body: string;
   eventYear: number | null;
+  eventMonth: number | null;
+  eventDay: number | null;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const user = await requireUser();
   const result = await applyStoryEdit({
@@ -40,6 +42,8 @@ export async function updateStoryDetails(input: {
     summary: input.summary.trim() || null,
     body: input.body,
     eventYear: input.eventYear,
+    eventMonth: input.eventMonth,
+    eventDay: input.eventDay,
   });
   if (result.ok) {
     revalidatePath(`/stories/${input.storyId}`);

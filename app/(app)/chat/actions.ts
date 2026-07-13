@@ -32,7 +32,7 @@ import {
   removeRelationship,
 } from '@/lib/people';
 import { canContribute, type AccessRole } from '@/lib/permissions';
-import { yearToDate } from '@/lib/dates';
+import { partsToEventDate } from '@/lib/dates';
 import { buildKey, getObjectBuffer, presignGet, presignPut } from '@/lib/s3';
 import { validateUpload } from '@/lib/uploads';
 import { transcribeAudio } from '@/lib/ai/groq';
@@ -335,8 +335,7 @@ export async function acceptStory(input: {
     bodyStyled: p.body,
     inputType: 'chat',
     status: 'ready',
-    eventDate: yearToDate(p.eventYear),
-    eventDatePrecision: p.eventYear ? 'year' : null,
+    ...partsToEventDate({ year: p.eventYear, month: p.eventMonth, day: p.eventDay }),
     conversationId,
     chronicleIds: [input.chronicleId],
     personIds,
@@ -382,6 +381,8 @@ export async function applyStoryUpdate(input: {
     summary: p.summary || null,
     body: p.body,
     eventYear: p.eventYear,
+    eventMonth: p.eventMonth ?? null,
+    eventDay: p.eventDay ?? null,
     appendSource: p.sourceText ?? null,
   });
   if (!result.ok) throw new Error(result.error);

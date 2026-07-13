@@ -13,7 +13,7 @@ import {
   user,
 } from '@/db/schema';
 import { familyTagsByStory } from '@/lib/family-tags';
-import { yearToDate } from '@/lib/dates';
+import { eventDateToParts, partsToEventDate } from '@/lib/dates';
 import { deleteObject } from '@/lib/s3';
 
 export type DatePrecision = 'day' | 'month' | 'year' | 'circa';
@@ -392,8 +392,8 @@ export async function canUserEditStory(storyId: string, userId: string): Promise
  * `bodyOriginal` and assets are never rewritten — existing source stays verbatim. When the
  * edit carries NEW first-hand material (`appendSource`, e.g. what the user told the chat
  * agent), it is appended to `bodyOriginal` under a dated marker so the source history grows
- * with the story. A finer-grained event date (day/month/circa) is preserved when the year
- * itself didn't change.
+ * with the story. The event date only changes when its visible parts (year/month/day)
+ * changed — so a 'circa' date survives edits that leave the year alone.
  */
 export async function applyStoryEdit(input: {
   storyId: string;
@@ -402,6 +402,8 @@ export async function applyStoryEdit(input: {
   summary: string | null;
   body: string;
   eventYear: number | null;
+  eventMonth?: number | null;
+  eventDay?: number | null;
   /** New raw source material to append to `bodyOriginal` (verbatim user words), if any. */
   appendSource?: string | null;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -414,16 +416,22 @@ export async function applyStoryEdit(input: {
     return { ok: false, error: 'This story can only be edited once it is ready.' };
   }
 
-  const currentYear = story.eventDate ? story.eventDate.getUTCFullYear() : null;
+  const current = eventDateToParts(story.eventDate, story.eventDatePrecision);
   const set: Partial<typeof stories.$inferInsert> = {
     title: input.title.trim() || story.title,
     summary: input.summary,
     bodyStyled: input.body,
     updatedAt: new Date(),
   };
-  if (input.eventYear !== currentYear) {
-    set.eventDate = yearToDate(input.eventYear);
-    set.eventDatePrecision = input.eventYear ? 'year' : null;
+  const { eventDate, eventDatePrecision } = partsToEventDate({
+    year: input.eventYear,
+    month: input.eventMonth,
+    day: input.eventDay,
+  });
+  const next = eventDateToParts(eventDate, eventDatePrecision);
+  if (next.year !== current.year || next.month !== current.month || next.day !== current.day) {
+    set.eventDate = eventDate;
+    set.eventDatePrecision = eventDatePrecision;
   }
   const addition = input.appendSource?.trim();
   if (addition) {
