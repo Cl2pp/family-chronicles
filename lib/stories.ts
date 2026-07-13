@@ -338,9 +338,12 @@ export async function canUserEditStory(storyId: string, userId: string): Promise
 }
 
 /**
- * Apply a reviewed edit to a ready story. Only `bodyStyled` (+ title/summary/date) change;
- * `bodyOriginal` and assets stay untouched as the raw source. A finer-grained event date
- * (day/month/circa) is preserved when the year itself didn't change.
+ * Apply a reviewed edit to a ready story. `bodyStyled` (+ title/summary/date) is replaced;
+ * `bodyOriginal` and assets are never rewritten — existing source stays verbatim. When the
+ * edit carries NEW first-hand material (`appendSource`, e.g. what the user told the chat
+ * agent), it is appended to `bodyOriginal` under a dated marker so the source history grows
+ * with the story. A finer-grained event date (day/month/circa) is preserved when the year
+ * itself didn't change.
  */
 export async function applyStoryEdit(input: {
   storyId: string;
@@ -349,6 +352,8 @@ export async function applyStoryEdit(input: {
   summary: string | null;
   body: string;
   eventYear: number | null;
+  /** New raw source material to append to `bodyOriginal` (verbatim user words), if any. */
+  appendSource?: string | null;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!(await canUserEditStory(input.storyId, input.userId))) {
     return { ok: false, error: "Only the story's author or a chronicle owner can edit it." };
@@ -369,6 +374,13 @@ export async function applyStoryEdit(input: {
   if (input.eventYear !== currentYear) {
     set.eventDate = yearToDate(input.eventYear);
     set.eventDatePrecision = input.eventYear ? 'year' : null;
+  }
+  const addition = input.appendSource?.trim();
+  if (addition) {
+    const marker = `— ${new Date().toISOString().slice(0, 10)} —`;
+    set.bodyOriginal = [story.bodyOriginal?.trim(), marker, addition]
+      .filter(Boolean)
+      .join('\n\n');
   }
   await db.update(stories).set(set).where(eq(stories.id, input.storyId));
   return { ok: true };

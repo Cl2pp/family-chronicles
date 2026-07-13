@@ -321,7 +321,9 @@ export async function acceptStory(input: {
     userId: user.id,
     title: p.title || 'Untitled story',
     summary: p.summary || null,
-    bodyOriginal: p.body,
+    // The user's verbatim words are the raw source; the styled draft is only a
+    // fallback for cards persisted before sourceText existed.
+    bodyOriginal: p.sourceText?.trim() || p.body,
     bodyStyled: p.body,
     inputType: 'chat',
     status: 'ready',
@@ -372,6 +374,7 @@ export async function applyStoryUpdate(input: {
     summary: p.summary || null,
     body: p.body,
     eventYear: p.eventYear,
+    appendSource: p.sourceText ?? null,
   });
   if (!result.ok) throw new Error(result.error);
 
