@@ -50,14 +50,20 @@ export function PhotoGallery({
 
   return (
     <>
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
+      <SimpleGrid cols={{ base: 2, md: 3 }} spacing={{ base: 'xs', sm: 'md' }}>
         {photos.map((p, i) => (
           <Stack key={p.id} gap={4}>
             <UnstyledButton
               onClick={() => setOpenIndex(i)}
               aria-label={p.caption ?? t.story.viewPhoto}
             >
-              <Image src={p.url} alt={p.caption ?? storyTitle} radius="md" fit="cover" h={200} />
+              <Image
+                src={p.url}
+                alt={p.caption ?? storyTitle}
+                radius="md"
+                fit="cover"
+                h={{ base: 140, sm: 200 }}
+              />
             </UnstyledButton>
             {p.caption && (
               <Text size="sm" c="dimmed" lineClamp={2}>
