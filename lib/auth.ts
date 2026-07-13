@@ -1,6 +1,5 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { magicLink } from 'better-auth/plugins';
 import { db } from '@/db';
 import * as schema from '@/db/schema';
 import { env } from '@/lib/env';
@@ -27,15 +26,6 @@ export const auth = betterAuth({
     expiresIn: 60 * 60 * 24 * 30,
     updateAge: 60 * 60 * 24,
   },
-  plugins: [
-    magicLink({
-      sendMagicLink: async ({ email, url }) => {
-        // TODO: wire a real email provider (Resend/SMTP). For now, log the link
-        // so it works in local/dev without an email service.
-        console.log(`[magic-link] for ${email}: ${url}`);
-      },
-    }),
-  ],
 });
 
 export type Session = typeof auth.$Infer.Session;

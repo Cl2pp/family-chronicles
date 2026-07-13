@@ -5,7 +5,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Anchor,
   Button,
-  Divider,
   Paper,
   PasswordInput,
   Stack,
@@ -48,22 +47,6 @@ function LoginForm() {
     router.refresh();
   }
 
-  async function sendMagicLink() {
-    if (!/^\S+@\S+\.\S+$/.test(form.values.email)) {
-      form.setFieldError('email', t.auth.enterEmailFirst);
-      return;
-    }
-    const { error } = await authClient.signIn.magicLink({
-      email: form.values.email,
-      callbackURL: next,
-    });
-    notifications.show(
-      error
-        ? { color: 'red', message: error.message ?? t.auth.couldNotSendLink }
-        : { message: t.auth.magicLinkSent },
-    );
-  }
-
   return (
     <Paper withBorder p="xl" radius="md">
       <Title order={2} mb="lg">
@@ -82,11 +65,6 @@ function LoginForm() {
           </Button>
         </Stack>
       </form>
-
-      <Divider label={t.common.or} my="lg" />
-      <Button variant="default" fullWidth onClick={sendMagicLink}>
-        {t.auth.magicLinkButton}
-      </Button>
 
       <Text size="sm" mt="lg" ta="center">
         {t.auth.noAccountYet}{' '}
