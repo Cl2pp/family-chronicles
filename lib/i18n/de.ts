@@ -37,11 +37,6 @@ export const de: Dictionary = {
     password: 'Passwort',
     signIn: 'Anmelden',
     signInFailed: 'Anmeldung fehlgeschlagen',
-    magicLinkButton: 'Magic-Link per E-Mail senden',
-    magicLinkSent:
-      'Magic-Link verschickt. In der Entwicklung wird er in der Server-Konsole ausgegeben.',
-    couldNotSendLink: 'Link konnte nicht gesendet werden',
-    enterEmailFirst: 'Gib zuerst deine E-Mail-Adresse ein',
     enterValidEmail: 'Gib eine gültige E-Mail-Adresse ein',
     atLeast8Chars: 'Mindestens 8 Zeichen',
     noAccountYet: 'Noch kein Konto?',

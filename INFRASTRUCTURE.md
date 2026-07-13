@@ -217,8 +217,9 @@ done (the creds never leave the box).
 
 ## 12. Outstanding / future work
 
-- **Magic-link email**: `lib/auth.ts` currently logs the link to the server console — wire a real
-  email provider (Resend/SMTP) before relying on magic-link.
+- **Magic-link email**: removed for now (the link was only logged to the server console, so the
+  login button silently did nothing in production). Re-add the better-auth `magicLink` plugin once
+  a real email provider (Resend/SMTP) is wired.
 - **Voice transcription** needs a real `GROQ_API_KEY` (still a placeholder unless set).
 - **Backups**: enable Coolify scheduled Postgres dumps to R2 (and optionally Hetzner snapshots).
   Media already lives durably in R2.
