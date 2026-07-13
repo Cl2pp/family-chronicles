@@ -264,7 +264,6 @@ export const de: Dictionary = {
     storyDraft: 'Geschichten-Entwurf',
     draftTitle: 'Titel',
     draftStory: 'Geschichte',
-    draftYear: 'Jahr (optional)',
     acceptSave: 'Annehmen & speichern',
     discard: 'Verwerfen',
     couldNotUndo: 'Das konnte nicht rückgängig gemacht werden. Bitte versuch es noch einmal.',
@@ -322,7 +321,7 @@ export const de: Dictionary = {
     editStoryLabel: 'Geschichte',
     editStoryDescription:
       'Änderungen betreffen die nacherzählte Geschichte; das Original-Transkript bleibt unberührt.',
-    editYearLabel: 'Jahr (optional)',
+    recordedOn: (date: string) => `Festgehalten am ${date}`,
     sharePlaceholder: 'In eine andere Chronik teilen…',
     addPhotos: 'Fotos hinzufügen',
     photoUploadFailed: 'Hochladen fehlgeschlagen. Bitte versuch es noch einmal.',
@@ -382,5 +381,13 @@ export const de: Dictionary = {
   },
   dates: {
     circa: (year: string) => `um ${year}`,
+    eventDateLabel: 'Wann ist es passiert? (optional)',
+    eventDateHint: 'Nur das Jahr ist nötig — Monat und Tag kannst du ergänzen, wenn du sie weißt.',
+    day: 'Tag',
+    month: 'Monat',
+    year: 'Jahr',
+    dayPlaceholder: 'TT',
+    monthPlaceholder: 'MM',
+    yearPlaceholder: 'JJJJ',
   },
 };

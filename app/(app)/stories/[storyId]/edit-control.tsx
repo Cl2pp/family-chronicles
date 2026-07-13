@@ -5,15 +5,21 @@ import { Alert, Button, Card, Divider, Group, Text, TextInput, Textarea } from '
 import { IconPencil, IconTrash } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { useI18n } from '@/lib/i18n/client';
+import type { EventDateParts } from '@/lib/dates';
+import {
+  EventDateInput,
+  eventDateValueFromParts,
+  eventDateValueToParts,
+} from '@/components/event-date-input';
 import { deleteStory, updateStoryDetails } from './actions';
 
-/** Inline edit form for a story's title, summary, retold text and year. */
+/** Inline edit form for a story's title, summary, retold text and date. */
 export function EditControl({
   storyId,
   initial,
 }: {
   storyId: string;
-  initial: { title: string; summary: string; body: string; eventYear: number | null };
+  initial: { title: string; summary: string; body: string; eventDate: EventDateParts };
 }) {
   const router = useRouter();
   const { t } = useI18n();
@@ -21,7 +27,7 @@ export function EditControl({
   const [title, setTitle] = useState(initial.title);
   const [summary, setSummary] = useState(initial.summary);
   const [body, setBody] = useState(initial.body);
-  const [year, setYear] = useState(initial.eventYear ? String(initial.eventYear) : '');
+  const [date, setDate] = useState(eventDateValueFromParts(initial.eventDate));
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -45,12 +51,15 @@ export function EditControl({
   function save() {
     setError(null);
     startTransition(async () => {
+      const parts = eventDateValueToParts(date);
       const res = await updateStoryDetails({
         storyId,
         title,
         summary,
         body,
-        eventYear: year ? Number(year) : null,
+        eventYear: parts.year,
+        eventMonth: parts.month,
+        eventDay: parts.day,
       });
       if (!res.ok) {
         setError(res.error);
@@ -103,13 +112,7 @@ export function EditControl({
         maxRows={20}
         mb="xs"
       />
-      <TextInput
-        label={t.story.editYearLabel}
-        value={year}
-        onChange={(e) => setYear(e.currentTarget.value.replace(/[^0-9]/g, ''))}
-        w={140}
-        mb="md"
-      />
+      <EventDateInput value={date} onChange={setDate} mb="md" />
       <Group gap="xs">
         <Button size="xs" onClick={save} loading={pending} disabled={!body.trim() || !title.trim()}>
           {t.common.saveChanges}

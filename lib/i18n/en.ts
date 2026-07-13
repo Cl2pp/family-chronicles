@@ -253,7 +253,6 @@ export const en = {
     storyDraft: 'Story draft',
     draftTitle: 'Title',
     draftStory: 'Story',
-    draftYear: 'Year (optional)',
     acceptSave: 'Accept & save',
     discard: 'Discard',
     couldNotUndo: 'Could not undo that. Please try again.',
@@ -310,7 +309,7 @@ export const en = {
     editSummaryLabel: 'Summary',
     editStoryLabel: 'Story',
     editStoryDescription: 'Edits change the retold story; the original transcript stays untouched.',
-    editYearLabel: 'Year (optional)',
+    recordedOn: (date: string) => `Recorded on ${date}`,
     sharePlaceholder: 'Share to another chronicle…',
     addPhotos: 'Add photos',
     photoUploadFailed: 'Upload failed. Please try again.',
@@ -364,6 +363,14 @@ export const en = {
   },
   dates: {
     circa: (year: string) => `around ${year}`,
+    eventDateLabel: 'When did it happen? (optional)',
+    eventDateHint: 'Only the year is needed — add month and day if you know them.',
+    day: 'Day',
+    month: 'Month',
+    year: 'Year',
+    dayPlaceholder: 'DD',
+    monthPlaceholder: 'MM',
+    yearPlaceholder: 'YYYY',
   },
 };
 

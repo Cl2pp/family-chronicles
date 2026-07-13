@@ -14,6 +14,7 @@ import {
   type StoryListItem,
 } from '@/lib/stories';
 import { findLikelyDuplicates } from '@/lib/story-similarity';
+import { eventDateToParts } from '@/lib/dates';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { defineTool, type ToolContext } from './types';
 import { ensureContributor, resolvePerson } from './util';
@@ -58,6 +59,20 @@ export const draftStoryTool = defineTool({
           "or translate; it is kept as the story's source material for traceability.",
       ),
     eventYear: z.number().int().nullish().describe('The year the events happened, if known.'),
+    eventMonth: z
+      .number()
+      .int()
+      .min(1)
+      .max(12)
+      .nullish()
+      .describe('The month (1-12) the events happened — only if the user actually said it.'),
+    eventDay: z
+      .number()
+      .int()
+      .min(1)
+      .max(31)
+      .nullish()
+      .describe('The day of month (1-31) — only if the user gave the exact date.'),
     people: z.array(z.string()).describe('Names of people featured in the story.'),
     confirmedNew: z
       .boolean()
@@ -127,6 +142,8 @@ export const draftStoryTool = defineTool({
           summary: args.summary ?? '',
           body: args.body,
           eventYear: args.eventYear ?? null,
+          eventMonth: args.eventMonth ?? null,
+          eventDay: args.eventDay ?? null,
           people: args.people ?? [],
           sourceText: args.sourceText,
         },
@@ -190,6 +207,7 @@ export const getStoryTool = defineTool({
     if ('error' in found) return { ok: false, error: found.error };
     const s = found.story;
     const tagged = await listStoryPeople(s.id);
+    const parts = eventDateToParts(s.eventDate, s.eventDatePrecision);
     return {
       ok: true,
       message: JSON.stringify({
@@ -197,7 +215,9 @@ export const getStoryTool = defineTool({
         title: s.title,
         summary: s.summary,
         body: s.bodyStyled ?? s.bodyOriginal,
-        eventYear: s.eventDate ? s.eventDate.getUTCFullYear() : null,
+        eventYear: parts.year,
+        eventMonth: parts.month,
+        eventDay: parts.day,
         status: s.status,
         people: tagged.map((p) => p.displayName),
         familyTags: s.familyTags,
@@ -238,6 +258,20 @@ export const updateStoryTool = defineTool({
       .int()
       .nullish()
       .describe('The year the events happened. Pass the current year unless it changed.'),
+    eventMonth: z
+      .number()
+      .int()
+      .min(1)
+      .max(12)
+      .nullish()
+      .describe('The month (1-12), if known. Pass the current month unless it changed.'),
+    eventDay: z
+      .number()
+      .int()
+      .min(1)
+      .max(31)
+      .nullish()
+      .describe('The day of month (1-31), if known. Pass the current day unless it changed.'),
   }),
   async execute(args, ctx) {
     const found = await resolveStory(ctx, args.story);
@@ -252,6 +286,12 @@ export const updateStoryTool = defineTool({
     }
 
     const chronicles = await chroniclesForStory(s.id);
+    // When the model omits the year, keep the story's current date untouched.
+    const current = eventDateToParts(s.eventDate, s.eventDatePrecision);
+    const date =
+      args.eventYear != null
+        ? { year: args.eventYear, month: args.eventMonth ?? null, day: args.eventDay ?? null }
+        : current;
     return {
       ok: true,
       message: 'Revision prepared and shown to the user for review. Await their edits and acceptance.',
@@ -262,7 +302,9 @@ export const updateStoryTool = defineTool({
           title: args.title,
           summary: args.summary ?? '',
           body: args.body,
-          eventYear: args.eventYear ?? (s.eventDate ? s.eventDate.getUTCFullYear() : null),
+          eventYear: date.year,
+          eventMonth: date.month,
+          eventDay: date.day,
           people: [],
           sourceText: args.newSourceText ?? null,
         },
