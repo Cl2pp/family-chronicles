@@ -20,6 +20,13 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
+  session: {
+    // The session (and its cookie) slides — any visit at least a day after the
+    // last refresh re-issues both — so only a month of absence logs you out.
+    // (The better-auth default is 7 days.)
+    expiresIn: 60 * 60 * 24 * 30,
+    updateAge: 60 * 60 * 24,
+  },
   plugins: [
     magicLink({
       sendMagicLink: async ({ email, url }) => {
