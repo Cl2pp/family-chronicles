@@ -3,6 +3,7 @@ import { db } from '@/db';
 import {
   assets,
   chronicles,
+  contributions,
   memberships,
   messageAttachments,
   messages,
@@ -80,6 +81,14 @@ export async function createStory(input: {
       input.chronicleIds,
       input.personIds ?? [],
     );
+    // The initial source material is the first entry of the story's contribution timeline.
+    if (input.bodyOriginal?.trim()) {
+      await tx.insert(contributions).values({
+        storyId: created.id,
+        contributedBy: input.userId,
+        text: input.bodyOriginal.trim(),
+      });
+    }
     return created;
   });
 }
@@ -102,9 +111,10 @@ export interface AssetInput {
   durationSec?: number | null;
 }
 
-function assetRows(storyId: string, items: AssetInput[]) {
+function assetRows(storyId: string, items: AssetInput[], contributionId: string | null) {
   return items.map((a) => ({
     storyId,
+    contributionId,
     kind: a.kind,
     s3Key: a.s3Key,
     mimeType: a.mimeType,
@@ -115,10 +125,26 @@ function assetRows(storyId: string, items: AssetInput[]) {
   }));
 }
 
-/** Persist audio/photo assets for a story (e.g. copied from an accepted chat). */
-export async function addStoryAssets(storyId: string, items: AssetInput[]) {
+/**
+ * Persist photos added on the story page as their own contribution, so the
+ * source-material timeline shows who added them and when.
+ */
+export async function addStoryPhotoContribution(
+  storyId: string,
+  userId: string,
+  items: AssetInput[],
+) {
   if (items.length === 0) return;
-  await db.insert(assets).values(assetRows(storyId, items)).onConflictDoNothing();
+  await db.transaction(async (tx) => {
+    const [contribution] = await tx
+      .insert(contributions)
+      .values({ storyId, contributedBy: userId, text: null })
+      .returning();
+    await tx
+      .insert(assets)
+      .values(assetRows(storyId, items, contribution.id))
+      .onConflictDoNothing();
+  });
 }
 
 /**
@@ -128,8 +154,17 @@ export async function addStoryAssets(storyId: string, items: AssetInput[]) {
  * would hand story #2 the photos — and every voice note — that belonged to story #1, so
  * each attachment is claimed exactly once, by the first story accepted after it was sent.
  * Claim and insert share a transaction; neither happens without the other.
+ *
+ * Claimed assets are linked to the story's newest contribution (the one the accept or
+ * revision that triggered this claim just wrote); if the save carried no new text, a
+ * media-only contribution by `contributorId` is created so the uploads still show
+ * who/when on the source timeline.
  */
-export async function claimChatAssetsForStory(conversationId: string, storyId: string) {
+export async function claimChatAssetsForStory(
+  conversationId: string,
+  storyId: string,
+  contributorId: string,
+) {
   await db.transaction(async (tx) => {
     const rows = await tx
       .select({
@@ -148,6 +183,21 @@ export async function claimChatAssetsForStory(conversationId: string, storyId: s
       .orderBy(asc(messageAttachments.createdAt));
     if (rows.length === 0) return;
 
+    const [latest] = await tx
+      .select({ id: contributions.id })
+      .from(contributions)
+      .where(eq(contributions.storyId, storyId))
+      .orderBy(desc(contributions.createdAt))
+      .limit(1);
+    let contributionId = latest?.id ?? null;
+    if (!contributionId) {
+      const [created] = await tx
+        .insert(contributions)
+        .values({ storyId, contributedBy: contributorId, text: null })
+        .returning();
+      contributionId = created.id;
+    }
+
     await tx
       .update(messageAttachments)
       .set({ storyId })
@@ -157,7 +207,7 @@ export async function claimChatAssetsForStory(conversationId: string, storyId: s
           rows.map((r) => r.id),
         ),
       );
-    await tx.insert(assets).values(assetRows(storyId, rows)).onConflictDoNothing();
+    await tx.insert(assets).values(assetRows(storyId, rows, contributionId)).onConflictDoNothing();
   });
 }
 
@@ -382,8 +432,40 @@ export async function applyStoryEdit(input: {
       .filter(Boolean)
       .join('\n\n');
   }
-  await db.update(stories).set(set).where(eq(stories.id, input.storyId));
+  await db.transaction(async (tx) => {
+    await tx.update(stories).set(set).where(eq(stories.id, input.storyId));
+    if (addition) {
+      await tx.insert(contributions).values({
+        storyId: input.storyId,
+        contributedBy: input.userId,
+        text: addition,
+      });
+    }
+  });
   return { ok: true };
+}
+
+export interface StoryContribution {
+  id: string;
+  contributorName: string | null;
+  text: string | null;
+  createdAt: Date;
+}
+
+/** A story's source-material timeline entries, oldest first, with contributor names. */
+export async function listContributions(storyId: string): Promise<StoryContribution[]> {
+  const rows = await db
+    .select({
+      id: contributions.id,
+      contributorName: user.name,
+      text: contributions.text,
+      createdAt: contributions.createdAt,
+    })
+    .from(contributions)
+    .leftJoin(user, eq(contributions.contributedBy, user.id))
+    .where(eq(contributions.storyId, storyId))
+    .orderBy(asc(contributions.createdAt));
+  return rows;
 }
 
 /**

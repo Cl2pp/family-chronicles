@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import {
-  addStoryAssets,
+  addStoryPhotoContribution,
   applyStoryEdit,
   canUserEditStory,
   deleteStoryForUser,
@@ -87,8 +87,9 @@ export async function addStoryPhotos(input: {
   if (input.photos.some((p) => !p.s3Key.startsWith('stories/photos/'))) {
     return { ok: false, error: 'Invalid upload.' };
   }
-  await addStoryAssets(
+  await addStoryPhotoContribution(
     input.storyId,
+    user.id,
     input.photos.map((p) => ({
       kind: 'photo' as const,
       s3Key: p.s3Key,

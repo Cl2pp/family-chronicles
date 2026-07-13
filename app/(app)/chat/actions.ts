@@ -36,6 +36,7 @@ import { yearToDate } from '@/lib/dates';
 import { buildKey, getObjectBuffer, presignGet, presignPut } from '@/lib/s3';
 import { validateUpload } from '@/lib/uploads';
 import { transcribeAudio } from '@/lib/ai/groq';
+import { enqueueTranscode } from '@/lib/queue';
 
 /** Throw unless the user can contribute to the chronicle (create stories / tree). */
 async function assertContributor(chronicleId: string, userId: string) {
@@ -239,6 +240,13 @@ export async function sendVoiceMessage(input: {
       durationSec: input.durationSec ?? null,
     },
   ]);
+  // WebM/Opus recordings are silent on Safari/iOS — re-encode to AAC in the background.
+  // (The job checks the stored MIME type and skips anything already playable.)
+  try {
+    await enqueueTranscode({ s3Key: input.s3Key });
+  } catch (err) {
+    console.error(`Failed to enqueue transcode for ${input.s3Key}:`, err);
+  }
 
   const result = await respondAndStore(conversationId, ctx, previousChronicleId);
   return { ...result, transcript };
@@ -337,7 +345,7 @@ export async function acceptStory(input: {
   // Carry the chat's raw uploads (voice + photos) onto the story for traceability.
   // Only the ones no earlier story from this chat already claimed.
   if (conversationId) {
-    await claimChatAssetsForStory(conversationId, story.id);
+    await claimChatAssetsForStory(conversationId, story.id, user.id);
     // The receipt on the note renders as a persistent ✓ chip in the chat.
     const chronicle = await getChronicle(input.chronicleId);
     const receipt: Receipt = {
@@ -381,6 +389,10 @@ export async function applyStoryUpdate(input: {
   // Only write the note if the conversation belongs to the caller.
   const convo = input.conversationId ? await getConversation(input.conversationId) : null;
   if (convo && convo.userId === user.id) {
+    // A revision claims the chat's new uploads too — the voice notes and photos the
+    // user sent while telling the new details. Without this they stay stranded on the
+    // conversation (or get grabbed by the next accepted story).
+    await claimChatAssetsForStory(convo.id, input.storyId, user.id);
     const receipt: Receipt = {
       label: `Updated "${p.title}"`,
       detail: 'View story',

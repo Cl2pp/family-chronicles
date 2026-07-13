@@ -314,6 +314,28 @@ export const storyPeople = pgTable(
   (t) => [uniqueIndex('story_people_uq').on(t.storyId, t.personId)],
 );
 
+/**
+ * One act of contributing source material to a story: a story save, a chat revision
+ * that carried new first-hand material, or photos added on the story page. The story
+ * page renders these as the "source material" timeline — who added what, when.
+ * `stories.body_original` stays the concatenated feed the styling job reads.
+ */
+export const contributions = pgTable(
+  'contributions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    storyId: uuid('story_id')
+      .notNull()
+      .references(() => stories.id, { onDelete: 'cascade' }),
+    /** Who contributed it; null once that account is deleted. */
+    contributedBy: text('contributed_by').references(() => user.id, { onDelete: 'set null' }),
+    /** The contributor's words, verbatim (typed text or a voice transcript). Null for photo-only additions. */
+    text: text('text'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('contributions_story_idx').on(t.storyId)],
+);
+
 /** Raw inputs kept for traceability: original voice messages and photos. */
 export const assets = pgTable(
   'assets',
@@ -322,6 +344,10 @@ export const assets = pgTable(
     storyId: uuid('story_id')
       .notNull()
       .references(() => stories.id, { onDelete: 'cascade' }),
+    /** The contribution this asset arrived with, for the source-material timeline. */
+    contributionId: uuid('contribution_id').references(() => contributions.id, {
+      onDelete: 'set null',
+    }),
     kind: assetKind('kind').notNull(),
     s3Key: text('s3_key').notNull(),
     mimeType: text('mime_type').notNull(),

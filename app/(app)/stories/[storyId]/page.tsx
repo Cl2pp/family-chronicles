@@ -2,15 +2,22 @@ import { notFound } from 'next/navigation';
 import { Alert, Badge, Box, Button, Divider, Group, Stack, Text, Title } from '@mantine/core';
 import { IconAlertTriangle, IconArrowLeft } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
-import { canUserEditStory, chroniclesForStory, getStoryForUser, listAssets } from '@/lib/stories';
+import {
+  canUserEditStory,
+  chroniclesForStory,
+  getStoryForUser,
+  listAssets,
+  listContributions,
+} from '@/lib/stories';
 import { familyTagsByStory } from '@/lib/family-tags';
 import { listChroniclesForUser } from '@/lib/chronicles';
 import { formatEventDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
 import { getI18n } from '@/lib/i18n/server';
 import { presignGet } from '@/lib/s3';
+import { CollapsibleSection } from '@/components/collapsible-section';
 import { RetryButton } from './retry-button';
-import { SourceAccordion } from './source-accordion';
+import { SourceTimeline, type ContributionView } from './source-timeline';
 import { ShareControl } from './share-control';
 import { EditControl } from './edit-control';
 import { AddPhotosControl } from './add-photos-control';
@@ -34,13 +41,15 @@ export default async function StoryDetailPage({
   const story = await getStoryForUser(storyId, user.id);
   if (!story) notFound();
 
-  const [shareChronicles, assets, userChronicles, canEdit, tagsByStory] = await Promise.all([
-    chroniclesForStory(storyId),
-    listAssets(storyId),
-    listChroniclesForUser(user.id),
-    canUserEditStory(storyId, user.id),
-    familyTagsByStory([storyId]),
-  ]);
+  const [shareChronicles, assets, userChronicles, canEdit, tagsByStory, contributions] =
+    await Promise.all([
+      chroniclesForStory(storyId),
+      listAssets(storyId),
+      listChroniclesForUser(user.id),
+      canUserEditStory(storyId, user.id),
+      familyTagsByStory([storyId]),
+      listContributions(storyId),
+    ]);
   const familyTags = tagsByStory.get(storyId) ?? [];
 
   const sharedIds = new Set(shareChronicles.map((f) => f.id));
@@ -49,20 +58,64 @@ export default async function StoryDetailPage({
     .map((f) => ({ id: f.id, name: f.name }));
 
   const photoAssets = assets.filter((a) => a.kind === 'photo');
-  const audioAsset = assets.find((a) => a.kind === 'audio');
+  const audioAssets = assets.filter((a) => a.kind === 'audio');
 
-  const [photos, audioUrl] = await Promise.all([
-    Promise.all(
-      photoAssets.map(async (a) => ({
-        id: a.id,
-        url: await presignGet(a.s3Key, a.mimeType),
-        caption: a.caption,
-        width: a.width,
-        height: a.height,
-      })),
+  const presigned = new Map(
+    await Promise.all(
+      assets.map(async (a) => [a.id, await presignGet(a.s3Key, a.mimeType)] as const),
     ),
-    audioAsset ? presignGet(audioAsset.s3Key, audioAsset.mimeType) : Promise.resolve(null),
-  ]);
+  );
+  const photos = photoAssets.map((a) => ({
+    id: a.id,
+    url: presigned.get(a.id)!,
+    caption: a.caption,
+    width: a.width,
+    height: a.height,
+  }));
+
+  /**
+   * Group assets under their contribution for the source timeline. Assets that predate
+   * the contributions table (or were claimed before backfill) fall back to the newest
+   * contribution that isn't younger than they are — that's the save that brought them.
+   */
+  function contributionIdFor(asset: (typeof assets)[number]): string | null {
+    if (asset.contributionId) return asset.contributionId;
+    if (contributions.length === 0) return null;
+    const notYounger = contributions.filter(
+      (c) => c.createdAt.getTime() <= asset.createdAt.getTime() + 60_000,
+    );
+    return (notYounger[notYounger.length - 1] ?? contributions[0]).id;
+  }
+
+  const contributionViews: ContributionView[] = contributions.map((c) => ({
+    id: c.id,
+    contributorName: c.contributorName,
+    createdAt: c.createdAt.toISOString(),
+    text: c.text,
+    audio: audioAssets
+      .filter((a) => contributionIdFor(a) === c.id)
+      .map((a) => ({ id: a.id, url: presigned.get(a.id)!, durationSec: a.durationSec })),
+    photos: photoAssets
+      .filter((a) => contributionIdFor(a) === c.id)
+      .map((a) => ({ id: a.id, url: presigned.get(a.id)!, caption: a.caption })),
+  }));
+
+  // Stories from before the contributions table (not yet backfilled) still get the
+  // timeline: their whole source is one entry by the submitter, dated to the story.
+  if (contributionViews.length === 0 && (story.bodyOriginal || audioAssets.length > 0)) {
+    contributionViews.push({
+      id: 'legacy',
+      contributorName: story.submitterName,
+      createdAt: story.createdAt.toISOString(),
+      text: story.bodyOriginal,
+      audio: audioAssets.map((a) => ({
+        id: a.id,
+        url: presigned.get(a.id)!,
+        durationSec: a.durationSec,
+      })),
+      photos: [],
+    });
+  }
 
   const meta = storyStatusMeta(story.status, t);
   const date = formatEventDate(story.eventDate, story.eventDatePrecision, locale);
@@ -158,11 +211,10 @@ export default async function StoryDetailPage({
 
         {/* Photos */}
         {(photos.length > 0 || canEdit) && (
-          <Stack gap="sm">
-            <Group gap="sm" align="center">
-              <Title order={3}>{t.story.photos}</Title>
-              {canEdit && <AddPhotosControl storyId={story.id} />}
-            </Group>
+          <CollapsibleSection
+            title={t.story.photos}
+            action={canEdit ? <AddPhotosControl storyId={story.id} /> : undefined}
+          >
             {photos.length > 0 && (
               <PhotoGallery
                 storyId={story.id}
@@ -171,12 +223,11 @@ export default async function StoryDetailPage({
                 storyTitle={story.title}
               />
             )}
-          </Stack>
+          </CollapsibleSection>
         )}
 
         {/* The story */}
-        <Stack gap="sm">
-          <Title order={3}>{t.story.theStory}</Title>
+        <CollapsibleSection title={t.story.theStory}>
           {styledParas.length > 0 ? (
             <Box maw="68ch">
               <Stack gap="md">
@@ -206,18 +257,18 @@ export default async function StoryDetailPage({
               {t.story.noRetoldText}
             </Text>
           )}
-        </Stack>
+        </CollapsibleSection>
 
-        {/* Dive deeper */}
-        {(story.bodyOriginal || audioUrl || story.conversationId) && (
+        {/* Source material */}
+        {contributionViews.length > 0 && (
           <>
             <Divider label={t.story.diveDeeper} labelPosition="center" />
-            <SourceAccordion
-              audioUrl={audioUrl}
-              originalParas={story.bodyOriginal ? paragraphs(story.bodyOriginal) : []}
-              inputType={story.inputType}
-              fromConversation={Boolean(story.conversationId)}
-            />
+            <CollapsibleSection title={t.story.sourceMaterial}>
+              <SourceTimeline
+                contributions={contributionViews}
+                fromConversation={Boolean(story.conversationId)}
+              />
+            </CollapsibleSection>
           </>
         )}
       </Stack>
