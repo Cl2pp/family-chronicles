@@ -85,6 +85,13 @@
       "when": 1784021799873,
       "tag": "0011_crazy_logan",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784029584707,
+      "tag": "0012_dizzy_anthem",
+      "breakpoints": true
     }
   ]
 }

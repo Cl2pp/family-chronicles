@@ -437,6 +437,12 @@ export const books = pgTable(
     pageCount: integer('page_count'),
     previewS3Key: text('preview_s3_key'),
     printS3Key: text('print_s3_key'),
+    /** Layout plan (lib/book-layout-plan.ts) — what goes where; the renderer's input. */
+    layoutPlan: jsonb('layout_plan'),
+    /** Who last wrote layoutPlan: the heuristic auto-layouter, an AI pass, or a manual edit. */
+    layoutSource: text('layout_source').notNull().default('auto'),
+    /** Content changed since layoutPlan was made (paragraph counts/photos may no longer match). */
+    layoutStale: boolean('layout_stale').notNull().default(false),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },

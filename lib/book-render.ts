@@ -6,18 +6,15 @@ import { db } from '@/db';
 import { assets, books, bookStories, chronicles, stories } from '@/db/schema';
 import { getObjectBuffer, putObjectBuffer } from '@/lib/s3';
 import { MIN_PAGES, MAX_PAGES } from '@/lib/gelato';
-import {
-  renderBookHtml,
-  type LayoutChapter,
-  type LayoutPhoto,
-  type LayoutVariant,
-} from '@/lib/book-layout';
+import { renderBookHtml, type LayoutChapterContent, type LayoutImage, type LayoutVariant } from '@/lib/book-layout';
+import { validateLayoutPlan, type LayoutPlan } from '@/lib/book-layout-plan';
+import { buildLayoutPlan, type AutoLayoutChapter } from '@/lib/book-autolayout';
 import { env } from '@/lib/env';
 
 /**
- * The worker side of book rendering: load content, embed photos, print the
- * layout to two PDFs (low-res watermarked preview + print-ready with bleed),
- * pad to Gelato's page rules, store both in S3, and update the book row.
+ * The worker side of book rendering: load content, build/refresh the layout plan,
+ * embed photos, print the plan to two PDFs (low-res watermarked preview + print-ready
+ * with bleed), pad to Gelato's page rules, store both in S3, and update the book row.
  *
  * Runs serially (see worker/index.ts) — Chromium plus large photos is the most
  * memory-hungry thing this app does.
@@ -32,18 +29,21 @@ const TRIM: Record<string, { w: number; h: number }> = {
 const PHOTO_WIDTH = { preview: 640, print: 2000 } as const;
 const JPEG_QUALITY = { preview: 55, print: 82 } as const;
 
-async function photoDataUri(
-  buffer: Buffer,
-  variant: LayoutVariant,
-): Promise<{ src: string; landscape: boolean }> {
+async function photoDataUri(buffer: Buffer, variant: LayoutVariant): Promise<string> {
   const img = sharp(buffer, { failOn: 'none' }).rotate(); // apply EXIF orientation
-  const meta = await img.metadata();
-  const landscape = (meta.width ?? 1) >= (meta.height ?? 1);
   const out = await img
     .resize({ width: PHOTO_WIDTH[variant], withoutEnlargement: true })
     .jpeg({ quality: JPEG_QUALITY[variant], mozjpeg: true })
     .toBuffer();
-  return { src: `data:image/jpeg;base64,${out.toString('base64')}`, landscape };
+  return `data:image/jpeg;base64,${out.toString('base64')}`;
+}
+
+/** EXIF-oriented pixel dimensions (width/height swapped for a 90°/270° orientation tag). */
+async function orientedDimensions(buffer: Buffer): Promise<{ width: number; height: number } | null> {
+  const meta = await sharp(buffer, { failOn: 'none' }).metadata();
+  if (!meta.width || !meta.height) return null;
+  const swapped = meta.orientation != null && meta.orientation >= 5 && meta.orientation <= 8;
+  return swapped ? { width: meta.height, height: meta.width } : { width: meta.width, height: meta.height };
 }
 
 function eventLabel(date: Date | null, precision: string | null): string | null {
@@ -60,24 +60,34 @@ function paragraphs(body: string): string[] {
     .filter(Boolean);
 }
 
+function wordCount(paragraph: string): number {
+  return paragraph.split(/\s+/).filter(Boolean).length;
+}
+
 interface PhotoRef {
   id: string;
   s3Key: string;
   /** Downscaled WebP (lib/thumbnails.ts), when already generated. */
   thumbS3Key: string | null;
   caption: string | null;
+  width: number | null;
+  height: number | null;
 }
 
 interface LoadedBook {
   row: typeof books.$inferSelect;
   chronicleName: string;
   chapters: Array<{
+    storyId: string;
     title: string;
     eventLabel: string | null;
     body: string;
     photoAssets: PhotoRef[];
   }>;
-  cover: PhotoRef | null;
+  /** Every photo of the book, regardless of a chapter's includePhotos flag — the
+   *  plan's cover heroAssetId (and a user's explicit cover pick) may reference one
+   *  even when its chapter excludes photos from the flowed text. */
+  allPhotosById: Map<string, PhotoRef>;
 }
 
 async function loadBook(bookId: string): Promise<LoadedBook> {
@@ -113,45 +123,102 @@ async function loadBook(bookId: string): Promise<LoadedBook> {
       s3Key: assets.s3Key,
       thumbS3Key: assets.thumbS3Key,
       caption: assets.caption,
+      width: assets.width,
+      height: assets.height,
     })
     .from(assets)
     .where(and(inArray(assets.storyId, storyIds), eq(assets.kind, 'photo')))
     .orderBy(asc(assets.createdAt));
-  const photosByStory = new Map<string, PhotoRef[]>();
-  for (const p of photoRows) {
-    const arr = photosByStory.get(p.storyId) ?? [];
-    arr.push({ id: p.id, s3Key: p.s3Key, thumbS3Key: p.thumbS3Key, caption: p.caption });
-    photosByStory.set(p.storyId, arr);
-  }
 
-  let cover: PhotoRef | null = null;
-  if (row.coverAssetId) {
-    const [c] = await db
-      .select({
-        id: assets.id,
-        s3Key: assets.s3Key,
-        thumbS3Key: assets.thumbS3Key,
-        caption: assets.caption,
-      })
-      .from(assets)
-      .where(eq(assets.id, row.coverAssetId))
-      .limit(1);
-    cover = c ?? null;
+  const photosByStory = new Map<string, PhotoRef[]>();
+  const allPhotosById = new Map<string, PhotoRef>();
+  for (const p of photoRows) {
+    const ref: PhotoRef = {
+      id: p.id,
+      s3Key: p.s3Key,
+      thumbS3Key: p.thumbS3Key,
+      caption: p.caption,
+      width: p.width,
+      height: p.height,
+    };
+    const arr = photosByStory.get(p.storyId) ?? [];
+    arr.push(ref);
+    photosByStory.set(p.storyId, arr);
+    allPhotosById.set(p.id, ref);
   }
-  // Fall back to the first photo in the book so covers are never blank grey.
-  if (!cover) cover = photoRows[0] ?? null;
 
   return {
     row,
     chronicleName: chron?.name ?? 'Family Chronicle',
     chapters: chapterRows.map((c) => ({
+      storyId: c.storyId,
       title: c.title,
       eventLabel: eventLabel(c.eventDate, c.eventDatePrecision),
       body: c.bodyStyled ?? c.bodyOriginal ?? '',
       photoAssets: c.includePhotos ? (photosByStory.get(c.storyId) ?? []) : [],
     })),
-    cover,
+    allPhotosById,
   };
+}
+
+/**
+ * Fills in `assets.width/height` for any photo missing them (older uploads, or
+ * assets created before dimensions were tracked), persisting the result so this
+ * only runs once per photo. The auto-layouter needs real geometry to reason about
+ * aspect ratio and resolution.
+ */
+async function backfillDimensions(allPhotosById: Map<string, PhotoRef>): Promise<void> {
+  for (const photo of allPhotosById.values()) {
+    if (photo.width && photo.height) continue;
+    try {
+      const buffer = await getObjectBuffer(photo.s3Key);
+      const dims = await orientedDimensions(buffer);
+      if (!dims) continue;
+      photo.width = dims.width;
+      photo.height = dims.height;
+      await db.update(assets).set({ width: dims.width, height: dims.height }).where(eq(assets.id, photo.id));
+    } catch (e) {
+      console.error(`[book-render] failed to read dimensions for ${photo.s3Key}:`, e);
+    }
+  }
+}
+
+/**
+ * Loads the book's stored layout plan, or builds a fresh one with the deterministic
+ * auto-layouter when there isn't one yet, it's stale, or it fails validation.
+ *
+ * `layout_source: 'edited'` (a future builder-UI/agent edit) is meant to require
+ * explicit user consent before being overwritten by a regeneration — that consent
+ * flow is phase 4. For now, an edited-but-stale plan is still rebuilt, same as auto.
+ */
+async function loadOrBuildPlan(bookId: string, loaded: LoadedBook): Promise<LayoutPlan> {
+  const { row } = loaded;
+
+  if (row.layoutPlan && !row.layoutStale) {
+    const validated = validateLayoutPlan(row.layoutPlan);
+    if (validated.ok) return validated.plan;
+    console.warn(`[book-render] stored layout plan for ${bookId} failed validation, rebuilding:`, validated.error);
+  }
+
+  const autoLayoutChapters: AutoLayoutChapter[] = loaded.chapters.map((c) => ({
+    storyId: c.storyId,
+    paragraphWordCounts: paragraphs(c.body).map(wordCount),
+    images: c.photoAssets
+      .filter((p): p is PhotoRef & { width: number; height: number } => !!p.width && !!p.height)
+      .map((p) => ({ assetId: p.id, width: p.width, height: p.height })),
+  }));
+
+  const plan = buildLayoutPlan({
+    coverAssetId: row.coverAssetId,
+    chapters: autoLayoutChapters,
+  });
+
+  await db
+    .update(books)
+    .set({ layoutPlan: plan, layoutSource: 'auto', layoutStale: false, updatedAt: new Date() })
+    .where(eq(books.id, bookId));
+
+  return plan;
 }
 
 /** Pad with blank pages to Gelato's rules: at least MIN_PAGES and an even count. */
@@ -172,69 +239,84 @@ async function padPdf(pdf: Buffer): Promise<{ padded: Buffer; pageCount: number 
   return { padded: Buffer.from(bytes), pageCount: count };
 }
 
+/** Every assetId the plan actually renders — cover hero plus every block reference. */
+function referencedAssetIds(plan: LayoutPlan): Set<string> {
+  const ids = new Set<string>();
+  if (plan.cover.heroAssetId) ids.add(plan.cover.heroAssetId);
+  for (const chapter of plan.chapters) {
+    for (const block of chapter.blocks) {
+      if (block.type === 'figure' || block.type === 'photo-page') ids.add(block.assetId);
+      if (block.type === 'photo-row' || block.type === 'photo-grid') {
+        for (const id of block.assetIds) ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
 async function renderVariant(
   browser: Browser,
   loaded: LoadedBook,
+  plan: LayoutPlan,
   variant: LayoutVariant,
 ): Promise<Buffer> {
-  // Embed photos at the variant's resolution; failures skip the photo, not the book.
+  // Embed only photos the plan references, at the variant's resolution. Failures
+  // skip the photo, not the book.
   //
   // Source selection: the preview targets 640px — exactly the thumbnail size — so
   // it reads the WebP thumbnail when one exists and skips downloading camera
   // originals. Print wants the original, but falls back to the thumbnail when the
   // original can't be decoded (e.g. HEIC, which sharp's prebuilt libvips can't
   // read) — a 640-1600px photo in print beats a missing one.
-  const photoCache = new Map<string, { src: string; landscape: boolean }>();
-  async function embed(photo: Pick<PhotoRef, 's3Key' | 'thumbS3Key'>) {
-    const hit = photoCache.get(photo.s3Key);
-    if (hit) return hit;
-    const sources =
-      variant === 'preview'
-        ? [photo.thumbS3Key ?? photo.s3Key]
-        : [photo.s3Key, ...(photo.thumbS3Key ? [photo.thumbS3Key] : [])];
-    let lastError: unknown;
-    for (const key of sources) {
-      try {
-        const data = await photoDataUri(await getObjectBuffer(key), variant);
-        photoCache.set(photo.s3Key, data);
-        return data;
-      } catch (e) {
-        lastError = e;
-        if (key !== sources[sources.length - 1]) {
-          console.warn(`[book-render] ${key} failed, trying thumbnail:`, e);
+  const srcCache = new Map<string, string>();
+  async function embed(photo: PhotoRef): Promise<LayoutImage | null> {
+    if (!photo.width || !photo.height) return null;
+    let src = srcCache.get(photo.s3Key);
+    if (!src) {
+      const sources =
+        variant === 'preview'
+          ? [photo.thumbS3Key ?? photo.s3Key]
+          : [photo.s3Key, ...(photo.thumbS3Key ? [photo.thumbS3Key] : [])];
+      let lastError: unknown;
+      for (const key of sources) {
+        try {
+          src = await photoDataUri(await getObjectBuffer(key), variant);
+          break;
+        } catch (e) {
+          lastError = e;
+          if (key !== sources[sources.length - 1]) {
+            console.warn(`[book-render] ${key} failed, trying thumbnail:`, e);
+          }
         }
       }
-    }
-    throw lastError;
-  }
-
-  const chapters: LayoutChapter[] = [];
-  for (const c of loaded.chapters) {
-    const photos: LayoutPhoto[] = [];
-    for (const p of c.photoAssets) {
-      try {
-        const { src, landscape } = await embed(p);
-        photos.push({ src, landscape, caption: p.caption });
-      } catch (e) {
-        console.error(`[book-render] skipping photo ${p.s3Key}:`, e);
+      if (!src) {
+        console.error(`[book-render] skipping photo ${photo.s3Key}:`, lastError);
+        return null;
       }
+      srcCache.set(photo.s3Key, src);
     }
-    chapters.push({
-      title: c.title,
-      eventLabel: c.eventLabel,
-      paragraphs: paragraphs(c.body),
-      photos,
-    });
+    return { assetId: photo.id, src, caption: photo.caption, width: photo.width, height: photo.height };
   }
 
-  let coverSrc: string | null = null;
-  if (loaded.cover) {
-    try {
-      coverSrc = (await embed(loaded.cover)).src;
-    } catch (e) {
-      console.error(`[book-render] cover photo failed:`, e);
-    }
+  const needed = referencedAssetIds(plan);
+  const resolved = new Map<string, LayoutImage>();
+  for (const id of needed) {
+    const photo = loaded.allPhotosById.get(id);
+    if (!photo) continue;
+    const img = await embed(photo);
+    if (img) resolved.set(id, img);
   }
+
+  const chapters: LayoutChapterContent[] = loaded.chapters.map((c) => ({
+    storyId: c.storyId,
+    title: c.title,
+    eventLabel: c.eventLabel,
+    paragraphs: paragraphs(c.body),
+    images: c.photoAssets.map((p) => resolved.get(p.id)).filter((i): i is LayoutImage => !!i),
+  }));
+
+  const coverImage =
+    plan.cover.heroAssetId != null ? (resolved.get(plan.cover.heroAssetId) ?? null) : null;
 
   const html = renderBookHtml({
     variant,
@@ -242,9 +324,10 @@ async function renderVariant(
     subtitle: loaded.row.subtitle,
     dedication: loaded.row.dedication,
     chronicleName: loaded.chronicleName,
-    coverSrc,
     trim: TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'],
+    plan,
     chapters,
+    coverImage,
     createdLabel: new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long' }),
     watermarkText: 'VORSCHAU · PREVIEW',
   });
@@ -267,6 +350,8 @@ async function renderVariant(
 /** The `render-book` job: render, pad, store, and flip the book's status. */
 export async function renderBook(bookId: string): Promise<void> {
   const loaded = await loadBook(bookId);
+  await backfillDimensions(loaded.allPhotosById);
+  const plan = await loadOrBuildPlan(bookId, loaded);
 
   const browser = await puppeteer.launch({
     executablePath: env.PUPPETEER_EXECUTABLE_PATH || undefined,
@@ -275,8 +360,8 @@ export async function renderBook(bookId: string): Promise<void> {
   let preview: Buffer;
   let print: Buffer;
   try {
-    preview = await renderVariant(browser, loaded, 'preview');
-    print = await renderVariant(browser, loaded, 'print');
+    preview = await renderVariant(browser, loaded, plan, 'preview');
+    print = await renderVariant(browser, loaded, plan, 'print');
   } finally {
     await browser.close();
   }

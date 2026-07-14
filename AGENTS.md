@@ -41,11 +41,15 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
   lightbox fetches the full-size original.
 - **Books**: stories can be typeset into a printable hardcover (`books`, `book_stories`,
   `book_orders`). ALL book mutations live in `lib/books.ts`; the UI (`app/(app)/books`) and
-  the chat agent (`lib/ai/tools/books.ts`) are thin wrappers over it. The worker's
-  `render-book` job (`lib/book-render.ts` + `lib/book-layout.ts`) prints HTML to preview +
-  print PDFs via Chromium. Pricing = Gelato quote (`lib/gelato.ts`); v1 ordering stops at an
-  admin email (`lib/email.ts`) — no payment, no Gelato order submission. Full plan:
-  `docs/BOOK_FEATURE_PLAN.md`.
+  the chat agent (`lib/ai/tools/books.ts`) are thin wrappers over it. Layout is data, not
+  code: a per-book JSON `layout_plan` (schema + validation in `lib/book-layout-plan.ts`,
+  deterministic heuristic producer in `lib/book-autolayout.ts`) says what goes where; the
+  worker's `render-book` job (`lib/book-render.ts`, rebuilding the plan when missing or
+  `layout_stale`) renders it via `lib/book-layout.ts` to preview + print PDFs through
+  Chromium. Pricing = Gelato quote (`lib/gelato.ts`); v1 ordering stops at an admin email
+  (`lib/email.ts`) — no payment, no Gelato order submission. Full plan:
+  `docs/BOOK_FEATURE_PLAN.md` (layout v2 plan: `docs/book-layout-plan` branch,
+  `docs/BOOK_LAYOUT_PLAN.md`).
 
 ## Commands
 - `npm run dev` — web dev server
