@@ -5,6 +5,7 @@ import { Group, Paper, Stack, Text } from '@mantine/core';
 import { useI18n } from '@/lib/i18n/client';
 import { ActionReceipts } from './action-receipts';
 import { MessageAttachments } from './message-attachments';
+import { MessageMarkdown } from './message-markdown';
 import { StoryDraftCard } from './story-draft-card';
 import type { Msg, MsgResult } from './types';
 
@@ -42,9 +43,7 @@ export function MessageRow({
     <Stack gap="xs" align="flex-start" maw="80%">
       {msg.content && (
         <Paper bg="slate.1" p="sm" radius="md">
-          <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-            {msg.content}
-          </Text>
+          <MessageMarkdown content={msg.content} />
         </Paper>
       )}
 

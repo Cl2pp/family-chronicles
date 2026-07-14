@@ -1,0 +1,110 @@
+/* Compact markdown styling for chat bubbles — tuned so a one-line reply
+   renders exactly like the plain <Text size="sm"> it replaces. */
+
+.root {
+  font-size: var(--mantine-font-size-sm);
+  line-height: var(--mantine-line-height);
+  overflow-wrap: break-word;
+}
+
+.root > :first-child {
+  margin-top: 0;
+}
+
+.root > :last-child {
+  margin-bottom: 0;
+}
+
+.root p,
+.root ul,
+.root ol,
+.root blockquote,
+.root pre,
+.root table {
+  margin: 0 0 0.6em;
+}
+
+.root ul,
+.root ol {
+  padding-left: 1.4em;
+}
+
+.root li {
+  margin: 0.15em 0;
+}
+
+.root h1,
+.root h2,
+.root h3,
+.root h4,
+.root h5,
+.root h6 {
+  font-weight: 600;
+  margin: 0.9em 0 0.35em;
+}
+
+.root h1 {
+  font-size: 1.15em;
+}
+
+.root h2 {
+  font-size: 1.1em;
+}
+
+.root h3,
+.root h4,
+.root h5,
+.root h6 {
+  font-size: 1em;
+}
+
+.root code {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 0.9em;
+  background: rgba(15, 23, 42, 0.07);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+.root pre {
+  background: rgba(15, 23, 42, 0.07);
+  border-radius: 8px;
+  padding: 0.6em 0.8em;
+  overflow-x: auto;
+}
+
+.root pre code {
+  background: none;
+  padding: 0;
+}
+
+.root blockquote {
+  border-left: 3px solid var(--mantine-color-slate-3);
+  padding: 0 0 0 0.75em;
+  color: var(--mantine-color-slate-6);
+}
+
+.root a {
+  color: var(--mantine-color-brand-6);
+  text-decoration: underline;
+}
+
+.root hr {
+  border: none;
+  border-top: 1px solid var(--mantine-color-slate-2);
+  margin: 0.75em 0;
+}
+
+.root table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.root th,
+.root td {
+  border: 1px solid var(--mantine-color-slate-3);
+  padding: 0.25em 0.6em;
+  text-align: left;
+}
