@@ -1,4 +1,4 @@
-import type { Block, LayoutPlan } from '@/lib/book-layout-plan';
+import type { Block, LayoutPlan, LayoutTheme } from '@/lib/book-layout-plan';
 import { PAGEDJS_POLYFILL_URL } from '@/lib/pagedjs';
 
 /**
@@ -51,6 +51,131 @@ export interface LayoutInput {
   /** Shown on the colophon page, e.g. "July 2026". */
   createdLabel: string;
   watermarkText?: string;
+}
+
+/**
+ * Theme → CSS-variables map (docs/BOOK_LAYOUT_PLAN.md §6 phase 4): every theme-dependent
+ * value the stylesheet needs, expressed once per theme. The stylesheet below is written
+ * ONCE and reads these through `var(--fc-*)` custom properties (emitted from
+ * `themeVarsCss`) — adding a theme means adding an entry here, never touching the CSS
+ * rules themselves. `pageNumberOuter` and `dropCapScale` are exceptions expressed as
+ * plain booleans/numbers rather than CSS values because they drive a couple of
+ * structural rules (which `@page` margin box to use, whether the drop cap enlarges at
+ * all) that a single custom property can't express on its own.
+ */
+interface ThemeTokens {
+  fontBody: string;
+  colorText: string;
+  colorMuted: string;
+  headingWeight: string;
+  chapterTitleSize: string;
+  kickerDisplay: string;
+  photoRadius: string;
+  photoGap: string;
+  paragraphGap: string;
+  chapterHeaderGap: string;
+  dropCapScale: string;
+  coverBg: string;
+  coverHeadingColor: string;
+  coverMutedColor: string;
+  coverFrameBorder: string;
+  /** true = page numbers sit in the outer bottom corner (alternating left/right by page
+   *  side); false = centered. */
+  pageNumberOuter: boolean;
+}
+
+const THEME_TOKENS: Record<LayoutTheme, ThemeTokens> = {
+  classic: {
+    fontBody: "Georgia, 'Noto Serif', 'DejaVu Serif', serif",
+    colorText: '#1e2430',
+    colorMuted: '#5a6372',
+    headingWeight: '600',
+    chapterTitleSize: '16pt',
+    kickerDisplay: 'block',
+    photoRadius: '1mm',
+    photoGap: '3.5mm',
+    paragraphGap: '3.2mm',
+    chapterHeaderGap: '6mm',
+    dropCapScale: '1.6',
+    coverBg: '#f4efe6',
+    coverHeadingColor: '#1a1712',
+    coverMutedColor: '#8d8471',
+    coverFrameBorder: '#ded4c2',
+    pageNumberOuter: false,
+  },
+  modern: {
+    // System-ui / Helvetica stack — a clean sans face instead of classic's serif.
+    fontBody: "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif",
+    colorText: '#1c1c1e',
+    colorMuted: '#6b6f76',
+    headingWeight: '800',
+    // Larger, bolder chapter titles; no small-caps kicker (see kickerDisplay).
+    chapterTitleSize: '22pt',
+    kickerDisplay: 'none',
+    // Square corners, tighter gaps between photos.
+    photoRadius: '0mm',
+    photoGap: '2.5mm',
+    // More whitespace around text and chapter openers.
+    paragraphGap: '4.2mm',
+    chapterHeaderGap: '11mm',
+    // No drop cap — reads as a clean, undecorated modern page.
+    dropCapScale: '1',
+    // Beige swapped for a near-white warm gray.
+    coverBg: '#f6f5f1',
+    coverHeadingColor: '#141414',
+    coverMutedColor: '#7a7d84',
+    coverFrameBorder: '#e2e0da',
+    pageNumberOuter: true,
+  },
+};
+
+/** Emits the `:root { --fc-*: …; }` block a theme's tokens resolve to. */
+function themeVarsCss(theme: ThemeTokens): string {
+  return `
+  :root {
+    --fc-font-body: ${theme.fontBody};
+    --fc-color-text: ${theme.colorText};
+    --fc-color-muted: ${theme.colorMuted};
+    --fc-heading-weight: ${theme.headingWeight};
+    --fc-chapter-title-size: ${theme.chapterTitleSize};
+    --fc-kicker-display: ${theme.kickerDisplay};
+    --fc-photo-radius: ${theme.photoRadius};
+    --fc-photo-gap: ${theme.photoGap};
+    --fc-paragraph-gap: ${theme.paragraphGap};
+    --fc-chapter-header-gap: ${theme.chapterHeaderGap};
+    --fc-dropcap-scale: ${theme.dropCapScale};
+    --fc-cover-bg: ${theme.coverBg};
+    --fc-cover-heading-color: ${theme.coverHeadingColor};
+    --fc-cover-muted-color: ${theme.coverMutedColor};
+    --fc-cover-frame-border: ${theme.coverFrameBorder};
+  }`;
+}
+
+/** The `@page` rule(s) for running page numbers: centered (classic) or the outer bottom
+ *  corner, alternating by page side (modern) — a per-theme structural difference no
+ *  custom property alone can express, since it's a different margin box per page side. */
+function pageNumberCss(theme: ThemeTokens): string {
+  const numberStyle = `font-family: var(--fc-font-body); font-size: 8pt; color: var(--fc-color-muted);`;
+  if (!theme.pageNumberOuter) {
+    return `
+  @page {
+    @bottom-center { content: counter(page); ${numberStyle} }
+  }
+  @page :first {
+    @bottom-center { content: ''; }
+  }`;
+  }
+  return `
+  @page :right {
+    @bottom-right { content: counter(page); ${numberStyle} }
+  }
+  @page :left {
+    @bottom-left { content: counter(page); ${numberStyle} }
+  }
+  @page :first {
+    @bottom-right { content: ''; }
+    @bottom-left { content: ''; }
+  }`;
 }
 
 const esc = (s: string) =>
@@ -167,6 +292,7 @@ function renderBlocks(blocks: Block[], content: LayoutChapterContent): string {
 }
 
 export function renderBookHtml(input: LayoutInput): string {
+  const theme = THEME_TOKENS[input.plan.theme];
   const bleed = input.variant === 'print' ? BLEED_MM : 0;
   const pageW = input.trim.w + bleed * 2;
   const pageH = input.trim.h + bleed * 2;
@@ -295,29 +421,25 @@ export function renderBookHtml(input: LayoutInput): string {
 <head>
 <meta charset="utf-8" />
 <style>
+${themeVarsCss(theme)}
   @page {
     size: ${pageW}mm ${pageH}mm;
     margin: ${m.top}mm ${m.outer}mm ${m.bottom}mm ${m.inner}mm;
-    @bottom-center {
-      content: counter(page);
-      font-family: Georgia, 'Noto Serif', 'DejaVu Serif', serif;
-      font-size: 8pt;
-      color: #9aa1ad;
-    }
   }
+${pageNumberCss(theme)}
   /* The cover is the first page, bleeds to the physical edge, and never shows a
-     running page number. */
+     running page number (the ':first' overrides above clear whichever margin box
+     the theme uses). */
   @page :first {
     margin: 0;
-    @bottom-center { content: ''; }
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
-    font-family: Georgia, 'Noto Serif', 'DejaVu Serif', serif;
+    font-family: var(--fc-font-body);
     font-size: 10.5pt;
     line-height: 1.55;
-    color: #1e2430;
+    color: var(--fc-color-text);
   }
 
   /* Full-page sections (cover, title, toc, colophon) */
@@ -327,8 +449,8 @@ export function renderBookHtml(input: LayoutInput): string {
   .cover.framed {
     width: ${pageW}mm;
     height: ${pageH}mm;
-    background: #f4efe6;
-    color: #1e1b16;
+    background: var(--fc-cover-bg);
+    color: var(--fc-cover-heading-color);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -343,7 +465,7 @@ export function renderBookHtml(input: LayoutInput): string {
     margin: 0 auto 10mm;
     background: #fff;
     padding: 3mm;
-    border: 0.3mm solid #ded4c2;
+    border: 0.3mm solid var(--fc-cover-frame-border);
     box-shadow: 0 4mm 9mm rgba(40, 32, 20, 0.22);
   }
   .cover.framed .cover-frame img {
@@ -354,18 +476,18 @@ export function renderBookHtml(input: LayoutInput): string {
   }
   .cover.framed h1 {
     font-size: 25pt;
-    font-weight: 600;
-    color: #1a1712;
+    font-weight: var(--fc-heading-weight);
+    color: var(--fc-cover-heading-color);
     margin: 0 0 4mm;
   }
   .cover.framed .subtitle {
     font-size: 12.5pt;
-    color: #6b6153;
+    color: var(--fc-cover-muted-color);
     margin: 0 0 3mm;
   }
   .cover.framed .chronicle {
     font-size: 10pt;
-    color: #8d8471;
+    color: var(--fc-cover-muted-color);
     font-variant: small-caps;
     letter-spacing: 0.1em;
     margin: 0;
@@ -398,38 +520,40 @@ export function renderBookHtml(input: LayoutInput): string {
   .cover.full-bleed .subtitle { font-size: 13pt; margin: 0; opacity: 0.85; }
 
   .title-page { text-align: center; padding-top: 30%; }
-  .title-page h1 { font-size: 22pt; font-weight: 600; margin: 0 0 4mm; }
-  .title-page .subtitle { font-size: 12pt; color: #5a6372; margin: 0 0 12mm; }
-  .title-page .chronicle { font-variant: small-caps; letter-spacing: 0.08em; color: #5a6372; }
-  .title-page .dedication { margin-top: 18mm; font-style: italic; color: #444c5c; }
+  .title-page h1 { font-size: 22pt; font-weight: var(--fc-heading-weight); margin: 0 0 4mm; }
+  .title-page .subtitle { font-size: 12pt; color: var(--fc-color-muted); margin: 0 0 12mm; }
+  .title-page .chronicle { font-variant: small-caps; letter-spacing: 0.08em; color: var(--fc-color-muted); }
+  .title-page .dedication { margin-top: 18mm; font-style: italic; color: var(--fc-color-muted); }
 
-  .toc h2 { font-size: 14pt; margin: 0 0 8mm; }
+  .toc h2 { font-size: 14pt; margin: 0 0 8mm; font-weight: var(--fc-heading-weight); }
   .toc ol { list-style: none; margin: 0; padding: 0; }
   .toc li {
     display: flex; justify-content: space-between; gap: 6mm;
     padding: 1.6mm 0; border-bottom: 0.2mm dotted #b9c0cc;
     font-size: 10pt;
   }
-  .toc-year { color: #5a6372; white-space: nowrap; }
+  .toc-year { color: var(--fc-color-muted); white-space: nowrap; }
 
   .chapter { page-break-before: right; }
   /* Clears floated figures at the end of the chapter so nothing spills into the
      next page's margin. */
   .chapter::after { content: ''; display: table; clear: both; }
-  .chapter header { margin-bottom: 6mm; }
+  .chapter header { margin-bottom: var(--fc-chapter-header-gap); }
   .chapter-year {
+    display: var(--fc-kicker-display);
     font-variant: small-caps; letter-spacing: 0.12em;
-    color: #8a93a3; margin: 0 0 1mm; font-size: 9pt;
+    color: var(--fc-color-muted); margin: 0 0 1mm; font-size: 9pt;
   }
-  .chapter h2 { font-size: 16pt; font-weight: 600; margin: 0; }
-  .chapter p { margin: 0 0 3.2mm; text-align: justify; hyphens: auto; }
+  .chapter h2 { font-size: var(--fc-chapter-title-size); font-weight: var(--fc-heading-weight); margin: 0; }
+  .chapter p { margin: 0 0 var(--fc-paragraph-gap); text-align: justify; hyphens: auto; }
   /* Direct child only — a nested <p> (a photo-page caption, a float-wrap paragraph)
-     is also ":first-of-type" among its own siblings and must not get a drop cap. */
-  .chapter > p:first-of-type::first-letter { font-size: 1.6em; }
+     is also ":first-of-type" among its own siblings and must not get a drop cap.
+     Themes without a drop cap (e.g. modern) set --fc-dropcap-scale to 1. */
+  .chapter > p:first-of-type::first-letter { font-size: calc(1em * var(--fc-dropcap-scale)); }
 
   figure { margin: 0 0 5mm; page-break-inside: avoid; }
-  figure img { display: block; border-radius: 1mm; }
-  figcaption, .caption { font-size: 8.5pt; color: #5a6372; margin-top: 1.5mm; font-style: italic; }
+  figure img { display: block; border-radius: var(--fc-photo-radius); }
+  figcaption, .caption { font-size: 8.5pt; color: var(--fc-color-muted); margin-top: 1.5mm; font-style: italic; }
 
   /* One landscape hero, full column width, uncropped. */
   figure.figure-full { width: 100%; }
@@ -462,7 +586,7 @@ export function renderBookHtml(input: LayoutInput): string {
      fragments as a single block, which is what "avoid" actually needs here. */
   .photo-row {
     display: flex;
-    gap: 3.5mm;
+    gap: var(--fc-photo-gap);
     margin: 5mm 0;
     page-break-inside: avoid;
     break-inside: avoid;
@@ -473,7 +597,7 @@ export function renderBookHtml(input: LayoutInput): string {
   /* 3-4 leftover images. 3 => one dominant + two stacked; 4 => 2x2. */
   .photo-grid {
     display: flex;
-    gap: 3.5mm;
+    gap: var(--fc-photo-gap);
     height: 88mm;
     margin: 5mm 0;
     page-break-inside: avoid;
@@ -491,12 +615,12 @@ export function renderBookHtml(input: LayoutInput): string {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 3.5mm;
+    gap: var(--fc-photo-gap);
   }
   .photo-grid.grid-3 > .grid-3-stack figure { flex: 1; min-height: 0; }
 
   .photo-grid.grid-4 { flex-wrap: wrap; }
-  .photo-grid.grid-4 figure { width: calc(50% - 1.75mm); height: calc(50% - 1.75mm); }
+  .photo-grid.grid-4 figure { width: calc(50% - var(--fc-photo-gap) / 2); height: calc(50% - var(--fc-photo-gap) / 2); }
 
   /* A standout image on its own page. */
   .photo-page-block {
@@ -513,6 +637,7 @@ export function renderBookHtml(input: LayoutInput): string {
     width: auto;
     height: auto;
     object-fit: contain;
+    border-radius: var(--fc-photo-radius);
     box-shadow: 0 3mm 8mm rgba(20, 20, 20, 0.15);
   }
   .photo-page-block .caption {
@@ -522,7 +647,7 @@ export function renderBookHtml(input: LayoutInput): string {
 
   .colophon {
     text-align: center; padding-top: 70%;
-    color: #8a93a3; font-size: 9pt;
+    color: var(--fc-color-muted); font-size: 9pt;
     page-break-after: avoid;
   }
 

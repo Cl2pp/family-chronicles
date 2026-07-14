@@ -9,8 +9,11 @@ import {
   createBook,
   requestAiDesign,
   requestPreview,
+  resetBookLayout,
   setBookStories,
   updateBook,
+  updateBookLayout,
+  type LayoutOp,
 } from '@/lib/books';
 import { getI18n } from '@/lib/i18n/server';
 import type { BookFormat } from '@/lib/gelato';
@@ -72,6 +75,26 @@ export async function requestAiDesignAction(input: {
 }): Promise<{ error?: string }> {
   const user = await requireUser();
   const result = await requestAiDesign({ ...input, userId: user.id });
+  revalidatePath(`/books/${input.bookId}`);
+  return result.ok ? {} : { error: result.error };
+}
+
+export async function updateBookLayoutAction(input: {
+  bookId: string;
+  ops: LayoutOp[];
+}): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await updateBookLayout({ ...input, userId: user.id });
+  revalidatePath(`/books/${input.bookId}`);
+  return result.ok ? {} : { error: result.error };
+}
+
+export async function resetBookLayoutAction(input: {
+  bookId: string;
+  overwriteEdits?: boolean;
+}): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await resetBookLayout({ ...input, userId: user.id });
   revalidatePath(`/books/${input.bookId}`);
   return result.ok ? {} : { error: result.error };
 }

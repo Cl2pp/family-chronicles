@@ -3,14 +3,18 @@ import {
   createBook,
   estimatePageCount,
   getBookForUser,
+  getBookLayoutSummary,
   listBooksForUser,
   quoteBook,
   requestAiDesign,
   requestPreview,
+  resetBookLayout,
   setBookStories,
   updateBook,
+  updateBookLayout,
   type BookDetail,
 } from '@/lib/books';
+import { COVER_STYLES, FIGURE_SIZES, LAYOUT_THEMES } from '@/lib/book-layout-plan';
 import { FORMAT_LABELS } from '@/lib/gelato';
 import { defineTool, type ToolContext } from './types';
 import { ensureContributor } from './util';
@@ -36,7 +40,19 @@ async function resolveBook(
   return { book };
 }
 
-function bookSummary(book: BookDetail) {
+/**
+ * `get_book`'s JSON, optionally including the current layout plan's per-chapter image
+ * blocks (assetId, caption, current placement, blockIndex) so the model can address a
+ * specific photo with `update_book_layout` right after this one read — mirrors what the
+ * builder's Layout card shows a human. Layout is fetched separately (it needs its own
+ * DB round trip) and merged in by storyId; omitted (not an error) if it fails to load.
+ */
+async function bookSummary(book: BookDetail, userId: string) {
+  const layout = await getBookLayoutSummary(book.id, userId);
+  const imagesByStory = new Map(
+    layout.ok ? layout.value.chapters.map((c) => [c.storyId, c.images]) : [],
+  );
+
   return {
     id: book.id,
     title: book.title,
@@ -47,6 +63,10 @@ function bookSummary(book: BookDetail) {
     status: book.status,
     pageCount: book.pageCount ?? `~${estimatePageCount(book)} (estimated)`,
     chronicle: book.chronicleName,
+    layoutSource: book.layoutSource,
+    theme: layout.ok ? layout.value.theme : undefined,
+    coverStyle: layout.ok ? layout.value.coverStyle : undefined,
+    coverHeroAssetId: layout.ok ? layout.value.coverHeroAssetId : undefined,
     chapters: book.chapters.map((c, i) => ({
       position: i + 1,
       storyId: c.storyId,
@@ -54,6 +74,11 @@ function bookSummary(book: BookDetail) {
       year: c.eventDate ? c.eventDate.getUTCFullYear() : null,
       photos: c.photoCount,
       includePhotos: c.includePhotos,
+      // Every image block the layout currently places for this chapter — use these
+      // assetIds with update_book_layout's set_figure_size/promote_photo_page/
+      // demote_photo_page/move_block ops. A photo with includePhotos off, or one the
+      // AI design pass chose not to place, simply won't appear here.
+      layoutImages: imagesByStory.get(c.storyId) ?? [],
     })),
   };
 }
@@ -86,16 +111,18 @@ export const listBooksTool = defineTool({
 export const getBookTool = defineTool({
   name: 'get_book',
   description:
-    'Read one book in full: settings plus the ordered chapter list (each with storyId, title, ' +
-    'year, photo count). Always call this before changing a book so edits start from its ' +
-    'current state.',
+    'Read one book in full: settings (incl. theme, cover style, cover hero photo) plus the ' +
+    'ordered chapter list (each with storyId, title, year, photo count, and every photo the ' +
+    'current layout actually places — assetId, caption, and placement). Always call this before ' +
+    'changing a book, and specifically before calling update_book_layout, since that\'s how you ' +
+    'find the assetIds to address.',
   schema: z.object({
     book: z.string().min(1).describe('The book title (or id) to read.'),
   }),
   async execute(args, ctx) {
     const found = await resolveBook(ctx, args.book);
     if ('error' in found) return { ok: false, error: found.error };
-    return { ok: true, message: JSON.stringify(bookSummary(found.book)) };
+    return { ok: true, message: JSON.stringify(await bookSummary(found.book, ctx.userId)) };
   },
 });
 
@@ -252,6 +279,110 @@ export const designBookLayoutTool = defineTool({
       ok: true,
       message: 'AI design pass queued.',
       receipt: { label: `Designing "${found.book.title}" with AI`, href: `/books/${found.book.id}` },
+    };
+  },
+});
+
+/** Mirrors `LayoutOp` (lib/books.ts) — one zod-discriminated union so the model gets a
+ *  single tool with a clear per-op parameter shape instead of one tool per op. */
+const layoutOpSchema = z.discriminatedUnion('op', [
+  z.object({
+    op: z.literal('set_theme'),
+    theme: z.enum(LAYOUT_THEMES).describe('The book\'s visual theme.'),
+  }),
+  z.object({
+    op: z.literal('set_cover_style'),
+    style: z.enum(COVER_STYLES).describe('"framed" (photo in a frame, title below) or "full-bleed" (photo fills the cover).'),
+  }),
+  z.object({
+    op: z.literal('set_cover_hero'),
+    assetId: z.string().min(1).describe('assetId of the photo to use as the cover (from get_book).'),
+  }),
+  z.object({
+    op: z.literal('set_figure_size'),
+    assetId: z.string().min(1).describe('assetId of the photo to resize (from get_book).'),
+    size: z
+      .enum(FIGURE_SIZES)
+      .describe('"full" (own row, full width), "float-left"/"float-right" (beside the text).'),
+  }),
+  z.object({
+    op: z.literal('promote_photo_page'),
+    assetId: z.string().min(1).describe('assetId of the photo to give its own page (from get_book).'),
+  }),
+  z.object({
+    op: z.literal('demote_photo_page'),
+    assetId: z.string().min(1).describe('assetId of a photo that currently has its own page (from get_book).'),
+  }),
+  z.object({
+    op: z.literal('move_block'),
+    storyId: z.string().min(1).describe('The chapter (storyId, from get_book) the photo block is in.'),
+    blockIndex: z
+      .int()
+      .nonnegative()
+      .describe('blockIndex of the photo block to move, from that chapter\'s layoutImages in get_book.'),
+    direction: z.enum(['up', 'down']).describe('Move it earlier ("up") or later ("down") among that chapter\'s photos.'),
+  }),
+]);
+
+export const updateBookLayoutTool = defineTool({
+  name: 'update_book_layout',
+  description:
+    'Make targeted edits to a book\'s photo layout: change the theme, the cover style or cover ' +
+    'photo, resize/reposition one photo (full width vs. floating beside text), give a photo its ' +
+    'own page (or remove that), or reorder a chapter\'s photos. Call get_book first — every op ' +
+    'except set_theme/set_cover_style needs an assetId (or storyId + blockIndex for move_block) ' +
+    'that comes from get_book\'s chapters[].layoutImages. You can pass several ops in one call. ' +
+    'Applies instantly to the live preview; unlike design_book_layout this never queues a job or ' +
+    'needs confirmation (except set_theme, none of these ops touch anything an AI redesign would ' +
+    'ask to overwrite).',
+  schema: z.object({
+    book: z.string().min(1).describe('The book title (or id) to edit.'),
+    ops: z.array(layoutOpSchema).min(1).describe('One or more layout operations to apply, in order.'),
+  }),
+  async execute(args, ctx) {
+    const found = await resolveBook(ctx, args.book);
+    if ('error' in found) return { ok: false, error: found.error };
+    const result = await updateBookLayout({
+      bookId: found.book.id,
+      userId: ctx.userId,
+      ops: args.ops,
+    });
+    if (!result.ok) return { ok: false, error: result.error };
+    return {
+      ok: true,
+      message: 'Layout updated.',
+      receipt: { label: `Edited the layout of "${found.book.title}"`, href: `/books/${found.book.id}` },
+    };
+  },
+});
+
+export const resetBookLayoutTool = defineTool({
+  name: 'reset_book_layout',
+  description:
+    'Rebuild a book\'s photo layout from scratch using the automatic layout (no AI, instant, ' +
+    'free) — undoes manual edits and returns to the mechanical default placement. Theme and cover ' +
+    'style/photo are kept. If the layout has manual edits, this fails asking for confirmation — ' +
+    'set overwriteEdits to true only if the user has confirmed they want to discard those edits.',
+  schema: z.object({
+    book: z.string().min(1).describe('The book title (or id) to reset.'),
+    overwriteEdits: z
+      .boolean()
+      .nullish()
+      .describe('Pass true only after the user confirms replacing existing manual layout edits.'),
+  }),
+  async execute(args, ctx) {
+    const found = await resolveBook(ctx, args.book);
+    if ('error' in found) return { ok: false, error: found.error };
+    const result = await resetBookLayout({
+      bookId: found.book.id,
+      userId: ctx.userId,
+      overwriteEdits: args.overwriteEdits ?? undefined,
+    });
+    if (!result.ok) return { ok: false, error: result.error };
+    return {
+      ok: true,
+      message: 'Layout reset to the automatic default.',
+      receipt: { label: `Reset the layout of "${found.book.title}"`, href: `/books/${found.book.id}` },
     };
   },
 });

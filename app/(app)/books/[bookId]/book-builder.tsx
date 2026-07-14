@@ -13,6 +13,7 @@ import {
   Card,
   Group,
   Image,
+  Modal,
   Select,
   SimpleGrid,
   Stack,
@@ -25,25 +26,42 @@ import {
 import {
   IconArrowDown,
   IconArrowLeft,
+  IconArrowsMaximize,
+  IconArrowsMinimize,
   IconArrowUp,
+  IconBookmark,
   IconExternalLink,
   IconFileTypePdf,
   IconInfoCircle,
   IconMessageCircle,
   IconPhoto,
   IconPlus,
+  IconRefresh,
   IconShoppingCart,
   IconSparkles,
   IconX,
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
-import { requestAiDesignAction, setBookStoriesAction, updateBookAction } from '../actions';
+import type { FigureSize, LayoutTheme, CoverStyle } from '@/lib/book-layout-plan';
+import type { LayoutOp, LayoutImageBlockSummary } from '@/lib/books';
+import {
+  requestAiDesignAction,
+  resetBookLayoutAction,
+  setBookStoriesAction,
+  updateBookAction,
+  updateBookLayoutAction,
+} from '../actions';
 
 export interface CoverOption {
   assetId: string;
   url: string;
   caption: string | null;
+}
+
+export interface LayoutChapterData {
+  storyId: string;
+  images: (LayoutImageBlockSummary & { url: string })[];
 }
 
 interface Chapter {
@@ -68,6 +86,10 @@ interface BuilderBook {
   previewVersion: number;
   /** True while an AI design pass is queued/running (books.design_requested_at). */
   designing: boolean;
+  /** Who last wrote the layout plan — 'edited' gates AI/reset behind a consent modal. */
+  layoutSource: 'auto' | 'ai' | 'edited';
+  theme: LayoutTheme;
+  coverStyle: CoverStyle;
   chronicleName: string;
   chapters: Chapter[];
 }
@@ -78,14 +100,24 @@ interface ChronicleStory {
   year: number | null;
 }
 
+/** full -> float-right -> float-left -> full. Row/grid photos (no current size) start
+ *  the cycle at 'full', same as a fresh figure block would. */
+function nextFigureSize(current: FigureSize | undefined): FigureSize {
+  if (current === 'full') return 'float-right';
+  if (current === 'float-right') return 'float-left';
+  return 'full';
+}
+
 export function BookBuilder({
   book,
   chronicleStories,
   coverOptions,
+  layoutChapters,
 }: {
   book: BuilderBook;
   chronicleStories: ChronicleStory[];
   coverOptions: CoverOption[];
+  layoutChapters: LayoutChapterData[];
 }) {
   const { t } = useI18n();
   const tb = t.books.builder;
@@ -93,6 +125,7 @@ export function BookBuilder({
   const router = useRouter();
 
   const locked = book.status === 'ordered';
+  const isEdited = book.layoutSource === 'edited';
   const included = new Set(book.chapters.map((c) => c.storyId));
   const notIncluded = chronicleStories.filter((s) => !included.has(s.id));
 
@@ -100,6 +133,11 @@ export function BookBuilder({
   const [title, setTitle] = useState(book.title);
   const [subtitle, setSubtitle] = useState(book.subtitle ?? '');
   const [dedication, setDedication] = useState(book.dedication ?? '');
+
+  // Gated behind a consent modal when the current plan has manual edits — 'design' and
+  // 'reset' both mean "replace the layout plan", which would silently discard those
+  // edits without confirmation.
+  const [consentAction, setConsentAction] = useState<'design' | 'reset' | null>(null);
 
   // No status polling for the render lifecycle — the preview pane is live HTML (see
   // below), always current. The one thing still worth polling for is the AI design
@@ -128,16 +166,60 @@ export function BookBuilder({
     });
   }
 
-  function designBook() {
+  /** Runs `action`; if it fails with the "manual edits" consent error, opens the confirm
+   *  modal instead of just showing the error — the retry (with overwriteEdits) happens
+   *  from `confirmOverwrite` below. */
+  function runConsentGated(kind: 'design' | 'reset', action: () => Promise<{ error?: string }>) {
     startTransition(async () => {
-      const result = await requestAiDesignAction({ bookId: book.id });
-      if (result.error) notifications.show({ message: result.error, color: 'red' });
-      else router.refresh();
+      const result = await action();
+      if (!result.error) {
+        router.refresh();
+        return;
+      }
+      if (isEdited && result.error.toLowerCase().includes('manual edit')) {
+        setConsentAction(kind);
+        return;
+      }
+      notifications.show({ message: result.error, color: 'red' });
     });
+  }
+
+  function designBook() {
+    runConsentGated('design', () => requestAiDesignAction({ bookId: book.id }));
+  }
+
+  function resetLayout() {
+    runConsentGated('reset', () => resetBookLayoutAction({ bookId: book.id }));
+  }
+
+  function confirmOverwrite() {
+    const kind = consentAction;
+    setConsentAction(null);
+    if (kind === 'design') {
+      run(async () => {
+        const r = await requestAiDesignAction({ bookId: book.id, overwriteEdits: true });
+        if (!r.error) router.refresh();
+        return r;
+      });
+    } else if (kind === 'reset') {
+      run(async () => {
+        const r = await resetBookLayoutAction({ bookId: book.id, overwriteEdits: true });
+        if (!r.error) router.refresh();
+        return r;
+      });
+    }
   }
 
   function saveSettings(patch: Parameters<typeof updateBookAction>[0]) {
     run(() => updateBookAction(patch));
+  }
+
+  function applyLayoutOp(op: LayoutOp) {
+    run(async () => {
+      const r = await updateBookLayoutAction({ bookId: book.id, ops: [op] });
+      if (!r.error) router.refresh();
+      return r;
+    });
   }
 
   function moveChapter(index: number, delta: -1 | 1) {
@@ -156,6 +238,21 @@ export function BookBuilder({
   function addChapter(storyId: string) {
     const ids = [...book.chapters.map((c) => c.storyId), storyId];
     run(() => setBookStoriesAction({ bookId: book.id, storyIds: ids }));
+  }
+
+  // Group each chapter's flat image list by blockIndex — a photo-row/photo-grid
+  // contributes several entries sharing one blockIndex (see getBookLayoutSummary in
+  // lib/books.ts); move_block operates on the whole block, size/photo-page ops on one
+  // photo within it.
+  function blocksForChapter(storyId: string) {
+    const images = layoutChapters.find((c) => c.storyId === storyId)?.images ?? [];
+    const byIndex = new Map<number, LayoutChapterData['images']>();
+    for (const img of images) {
+      const arr = byIndex.get(img.blockIndex) ?? [];
+      arr.push(img);
+      byIndex.set(img.blockIndex, arr);
+    }
+    return [...byIndex.entries()].sort((a, b) => a[0] - b[0]);
   }
 
   return (
@@ -200,7 +297,7 @@ export function BookBuilder({
       )}
 
       <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-        {/* ── Left: chapters + settings ─────────────────────── */}
+        {/* ── Left: chapters + settings + layout ─────────────── */}
         <Stack gap="md">
           <Card withBorder radius="md" p="md">
             <Title order={4} mb={4}>
@@ -343,6 +440,34 @@ export function BookBuilder({
                 }
                 allowDeselect={false}
               />
+              <Select
+                label={tb.theme}
+                value={book.theme}
+                disabled={locked}
+                data={[
+                  { value: 'classic', label: tb.themeOptions.classic },
+                  { value: 'modern', label: tb.themeOptions.modern },
+                ]}
+                onChange={(v) =>
+                  v && v !== book.theme && applyLayoutOp({ op: 'set_theme', theme: v as LayoutTheme })
+                }
+                allowDeselect={false}
+              />
+              <Select
+                label={tb.coverStyle}
+                value={book.coverStyle}
+                disabled={locked}
+                data={[
+                  { value: 'framed', label: tb.coverStyleOptions.framed },
+                  { value: 'full-bleed', label: tb.coverStyleOptions['full-bleed'] },
+                ]}
+                onChange={(v) =>
+                  v &&
+                  v !== book.coverStyle &&
+                  applyLayoutOp({ op: 'set_cover_style', style: v as CoverStyle })
+                }
+                allowDeselect={false}
+              />
 
               <Box>
                 <Text fz={14} fw={500} mb={2}>
@@ -405,6 +530,159 @@ export function BookBuilder({
               </Box>
             </Stack>
           </Card>
+
+          <Card withBorder radius="md" p="md">
+            <Group justify="space-between" mb={4} wrap="wrap">
+              <Title order={4}>{tb.layout}</Title>
+              {!locked && (
+                <Tooltip label={tb.resetLayoutHint}>
+                  <Button
+                    variant="subtle"
+                    size="compact-sm"
+                    leftSection={<IconRefresh size={14} />}
+                    disabled={pending}
+                    onClick={resetLayout}
+                  >
+                    {tb.resetLayout}
+                  </Button>
+                </Tooltip>
+              )}
+            </Group>
+            <Text fz={13} c="dimmed" mb={isEdited ? 4 : 'sm'}>
+              {tb.layoutHint}
+            </Text>
+            {isEdited && (
+              <Text fz={12} c="brand" mb="sm">
+                {tb.layoutEditedNote}
+              </Text>
+            )}
+            <Stack gap="md">
+              {book.chapters.map((chapter) => {
+                const blocks = blocksForChapter(chapter.storyId);
+                if (blocks.length === 0) return null;
+                return (
+                  <Box key={chapter.storyId}>
+                    <Text fz={13} fw={500} mb={4} truncate>
+                      {chapter.title}
+                    </Text>
+                    <Stack gap={4}>
+                      {blocks.map(([blockIndex, images], i) => (
+                        <Card key={blockIndex} withBorder radius="sm" p={6}>
+                          <Group justify="space-between" wrap="nowrap" align="flex-start" gap={8}>
+                            <Group gap={6} wrap="nowrap" align="flex-start">
+                              {images.map((img) => {
+                                const label =
+                                  img.type === 'figure'
+                                    ? tb.figureSizeOptions[img.size ?? 'full']
+                                    : img.type === 'photo-page'
+                                      ? tb.photoPageLabel
+                                      : img.type === 'photo-row'
+                                        ? tb.photoRowLabel
+                                        : tb.photoGridLabel;
+                                return (
+                                  <Stack key={img.assetId} gap={2} align="center" style={{ width: 52 }}>
+                                    {img.url ? (
+                                      <Image src={img.url} alt={img.caption ?? ''} w={44} h={44} fit="cover" radius={4} />
+                                    ) : (
+                                      <Box w={44} h={44} bg="slate.1" style={{ borderRadius: 4 }} />
+                                    )}
+                                    <Text fz={9} c="dimmed" ta="center" lineClamp={1}>
+                                      {label}
+                                    </Text>
+                                    <Group gap={2} wrap="nowrap">
+                                      {img.type !== 'photo-page' && (
+                                        <Tooltip label={tb.cycleSize}>
+                                          <ActionIcon
+                                            size="xs"
+                                            variant="subtle"
+                                            disabled={locked || pending}
+                                            onClick={() =>
+                                              applyLayoutOp({
+                                                op: 'set_figure_size',
+                                                assetId: img.assetId,
+                                                size: nextFigureSize(img.size),
+                                              })
+                                            }
+                                          >
+                                            <IconArrowsMaximize size={11} />
+                                          </ActionIcon>
+                                        </Tooltip>
+                                      )}
+                                      <Tooltip
+                                        label={img.type === 'photo-page' ? tb.demoteFromPhotoPage : tb.promoteToPhotoPage}
+                                      >
+                                        <ActionIcon
+                                          size="xs"
+                                          variant="subtle"
+                                          disabled={locked || pending}
+                                          onClick={() =>
+                                            applyLayoutOp(
+                                              img.type === 'photo-page'
+                                                ? { op: 'demote_photo_page', assetId: img.assetId }
+                                                : { op: 'promote_photo_page', assetId: img.assetId },
+                                            )
+                                          }
+                                        >
+                                          {img.type === 'photo-page' ? (
+                                            <IconArrowsMinimize size={11} />
+                                          ) : (
+                                            <IconBookmark size={11} />
+                                          )}
+                                        </ActionIcon>
+                                      </Tooltip>
+                                    </Group>
+                                  </Stack>
+                                );
+                              })}
+                            </Group>
+                            <Group gap={2} wrap="nowrap">
+                              <ActionIcon
+                                size="sm"
+                                variant="subtle"
+                                aria-label={tb.moveBlockUp}
+                                disabled={locked || pending || i === 0}
+                                onClick={() =>
+                                  applyLayoutOp({
+                                    op: 'move_block',
+                                    storyId: chapter.storyId,
+                                    blockIndex,
+                                    direction: 'up',
+                                  })
+                                }
+                              >
+                                <IconArrowUp size={13} />
+                              </ActionIcon>
+                              <ActionIcon
+                                size="sm"
+                                variant="subtle"
+                                aria-label={tb.moveBlockDown}
+                                disabled={locked || pending || i === blocks.length - 1}
+                                onClick={() =>
+                                  applyLayoutOp({
+                                    op: 'move_block',
+                                    storyId: chapter.storyId,
+                                    blockIndex,
+                                    direction: 'down',
+                                  })
+                                }
+                              >
+                                <IconArrowDown size={13} />
+                              </ActionIcon>
+                            </Group>
+                          </Group>
+                        </Card>
+                      ))}
+                    </Stack>
+                  </Box>
+                );
+              })}
+              {layoutChapters.every((c) => c.images.length === 0) && (
+                <Text fz={13} c="dimmed">
+                  {tb.layoutEmpty}
+                </Text>
+              )}
+            </Stack>
+          </Card>
         </Stack>
 
         {/* ── Right: preview ────────────────────────────────── */}
@@ -462,6 +740,23 @@ export function BookBuilder({
           </Text>
         </Card>
       </SimpleGrid>
+
+      <Modal
+        opened={consentAction != null}
+        onClose={() => setConsentAction(null)}
+        title={tb.overwriteEditsTitle}
+        centered
+      >
+        <Text size="sm">{tb.overwriteEditsBody}</Text>
+        <Group justify="flex-end" mt="lg">
+          <Button variant="default" onClick={() => setConsentAction(null)} disabled={pending}>
+            {tb.overwriteEditsCancel}
+          </Button>
+          <Button color="red" onClick={confirmOverwrite} loading={pending}>
+            {tb.overwriteEditsConfirm}
+          </Button>
+        </Group>
+      </Modal>
     </Stack>
   );
 }
