@@ -2,7 +2,6 @@ import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   assets,
-  bookOrders,
   books,
   bookStories,
   chronicles,
@@ -15,8 +14,6 @@ import { getMembership } from '@/lib/chronicles';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { enqueueDesignBook, enqueueRenderBook } from '@/lib/queue';
 import { quoteBookPrice, type BookFormat, type BookQuote } from '@/lib/gelato';
-import { sendEmail } from '@/lib/email';
-import { env } from '@/lib/env';
 
 /**
  * Book domain — the ONE place book state changes. The Books UI (server actions)
@@ -465,62 +462,9 @@ export function estimatePageCount(book: Pick<BookDetail, 'chapters'>): number {
   return front + perStory;
 }
 
-/**
- * Place the v1 order: snapshot the quote, lock the book, notify the admin.
- * No payment, no Gelato submission — the admin follows up personally.
+/*
+ * Ordering deliberately has no in-app write path right now: the order screen shows
+ * the quote and asks the user to email BOOK_ORDER_CONTACT_EMAIL with the on-screen
+ * details. The `book_orders` table and the `ordered` status stay in the schema for
+ * the future payment flow (Stripe + automatic Gelato submission).
  */
-export async function placeOrder(input: {
-  bookId: string;
-  userId: string;
-}): Promise<Result<{ orderId: string }>> {
-  const gate = await editableBook(input.bookId, input.userId);
-  if (!gate.ok) return gate;
-  const book = gate.book;
-  if (book.status !== 'preview_ready') {
-    return err('Render and review a preview before ordering.');
-  }
-
-  const pageCount = book.pageCount ?? estimatePageCount(book);
-  const quote = await quoteBookPrice({ format: book.format, pageCount });
-
-  const orderId = await db.transaction(async (tx) => {
-    const [order] = await tx
-      .insert(bookOrders)
-      .values({ bookId: input.bookId, orderedBy: input.userId, quote })
-      .returning();
-    await tx
-      .update(books)
-      .set({ status: 'ordered', updatedAt: new Date() })
-      .where(eq(books.id, input.bookId));
-    return order.id;
-  });
-
-  // Best-effort notification — the order row is the source of truth.
-  const [orderer] = await db.select().from(user).where(eq(user.id, input.userId)).limit(1);
-  const to = env.BOOK_ORDER_NOTIFY_EMAIL;
-  const priceLine = quote.priced
-    ? `${quote.total?.toFixed(2)} EUR (product ${quote.productCost?.toFixed(2)} + shipping ${quote.shippingCost?.toFixed(2)} + margin ${quote.margin.toFixed(2)})`
-    : 'price on request (Gelato quote unavailable)';
-  const text = [
-    `A book was ordered in Family Chronicle.`,
-    ``,
-    `Order id:   ${orderId}`,
-    `Book:       "${book.title}" (${book.format}, ${pageCount} pages, ${book.chapters.length} stories)`,
-    `Chronicle:  ${book.chronicleName}`,
-    `Ordered by: ${orderer?.name ?? 'unknown'} <${orderer?.email ?? 'unknown'}>`,
-    `Quoted:     ${priceLine}`,
-    ``,
-    `Print PDF (S3 key): ${book.printS3Key ?? '—'}`,
-    `Preview:    ${env.BETTER_AUTH_URL}/books/${book.id}`,
-    ``,
-    `Reach out to the user for payment and shipping details.`,
-  ].join('\n');
-  try {
-    if (to) await sendEmail({ to, subject: `📖 Book order: "${book.title}"`, text });
-    else console.log(`[books] BOOK_ORDER_NOTIFY_EMAIL not set — order notification:\n${text}`);
-  } catch (e) {
-    console.error('[books] order notification failed:', e);
-  }
-
-  return { ok: true, value: { orderId } };
-}

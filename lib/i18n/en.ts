@@ -397,15 +397,15 @@ export const en = {
       inclShippingDe: 'Price includes shipping within Germany.',
       priceOnRequest: 'Price on request',
       priceOnRequestHint:
-        'We could not fetch a live price right now. Order anyway — you will receive the exact price by email before anything is due.',
-      noPaymentNote:
-        'Nothing is charged now. We will contact you by email about payment and delivery.',
-      orderAt: (price: string) => `Order at ${price}`,
-      orderNow: 'Order now',
-      confirmedTitle: 'Order received!',
-      confirmedBody: (email: string) =>
-        `Thank you! We will get back to you at ${email} about payment and delivery.`,
-      backToBooks: 'Back to books',
+        'We could not fetch a live price right now. You can still request the book — you will receive the exact price by email before anything is due.',
+      summaryReference: 'Reference',
+      howToOrderTitle: 'How to order',
+      howToOrderBody: (email: string) =>
+        `Nothing is ordered or charged in the app. If you would like this book printed, send an email to ${email} with the details above — we will get back to you personally about payment and delivery.`,
+      emailCta: 'Request this book by email',
+      emailFallback: (email: string) => `Or write to ${email} directly.`,
+      mailSubject: (title: string) => `Book request: "${title}"`,
+      mailIntro: (title: string) => `Hello, I would like to have the family book "${title}" printed.`,
       preparingTitle: 'Preparing your book for print…',
       preparingBody:
         'Ordering needs an exact page count and a print-quality PDF as the binding proof — we only create this now, at full photo resolution, so it always reflects your latest edits.',
