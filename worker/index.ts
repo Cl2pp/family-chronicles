@@ -6,10 +6,12 @@ import {
   getBoss,
   QUEUES,
   SWEEP_ORPHANS_CRON,
+  type RenderBookJob,
   type StyleJob,
   type ThumbnailJob,
   type TranscodeJob,
 } from '@/lib/queue';
+import { markRenderFailed, renderBook } from '@/lib/book-render';
 import { styleStory } from '@/lib/ai/openrouter';
 import { styleContextForStory } from '@/lib/stories';
 import { sweepOrphanedObjects } from '@/lib/orphans';
@@ -64,6 +66,18 @@ async function handleTranscode(data: TranscodeJob) {
   }
 }
 
+/** Typeset a book into preview + print PDFs. */
+async function handleRenderBook(data: RenderBookJob) {
+  const { bookId } = data;
+  try {
+    await renderBook(bookId);
+    console.log(`[worker] rendered book ${bookId}`);
+  } catch (err) {
+    console.error(`[worker] book render failed for ${bookId}:`, err);
+    await markRenderFailed(bookId, err);
+  }
+}
+
 /** Downscale a stored photo so lists and grids don't ship camera originals. */
 async function handleThumbnail(data: ThumbnailJob) {
   try {
@@ -97,6 +111,15 @@ async function main() {
     for (const job of jobs) await handleTranscode(job.data);
   });
 
+  // Chromium + full-size photos: strictly one render at a time.
+  await boss.work<RenderBookJob>(
+    QUEUES.renderBook,
+    { batchSize: 1 },
+    async (jobs) => {
+      for (const job of jobs) await handleRenderBook(job.data);
+    },
+  );
+
   await boss.work<ThumbnailJob>(QUEUES.thumbnail, async (jobs) => {
     for (const job of jobs) await handleThumbnail(job.data);
   });
@@ -107,7 +130,7 @@ async function main() {
   await boss.schedule(QUEUES.sweepOrphans, SWEEP_ORPHANS_CRON);
 
   console.log(
-    '[worker] ready — listening for style + transcode + thumbnail jobs; orphan sweep scheduled',
+    '[worker] ready — listening for style + transcode + thumbnail + render-book jobs; orphan sweep scheduled',
   );
 }
 

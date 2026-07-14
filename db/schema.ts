@@ -399,3 +399,88 @@ export const messageAttachments = pgTable(
   },
   (t) => [index('message_attachments_message_idx').on(t.messageId)],
 );
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Books — a chronicle's stories typeset into a printable book
+ * ────────────────────────────────────────────────────────────────────────── */
+
+export const bookStatus = pgEnum('book_status', [
+  'draft', // being assembled; no preview matches the current content
+  'rendering', // a render job is queued or running
+  'preview_ready', // preview + print PDFs in S3 match the current content
+  'render_failed',
+  'ordered', // order placed; the book is locked read-only
+]);
+
+/** Trim sizes offered in the UI; each maps to a Gelato product UID (lib/gelato.ts). */
+export const bookFormat = pgEnum('book_format', ['hardcover-21x28', 'hardcover-20x20']);
+
+export const books = pgTable(
+  'books',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    chronicleId: uuid('chronicle_id')
+      .notNull()
+      .references(() => chronicles.id, { onDelete: 'cascade' }),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'restrict' }),
+    title: text('title').notNull(),
+    subtitle: text('subtitle'),
+    dedication: text('dedication'),
+    /** Cover photo — one of the included stories' photo assets. */
+    coverAssetId: uuid('cover_asset_id').references(() => assets.id, { onDelete: 'set null' }),
+    format: bookFormat('format').notNull().default('hardcover-21x28'),
+    status: bookStatus('status').notNull().default('draft'),
+    errorMessage: text('error_message'),
+    /** Set by the renderer: final padded page count of the print PDF. */
+    pageCount: integer('page_count'),
+    previewS3Key: text('preview_s3_key'),
+    printS3Key: text('print_s3_key'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [index('books_chronicle_idx').on(t.chronicleId)],
+);
+
+/** The ordered story selection of a book. */
+export const bookStories = pgTable(
+  'book_stories',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    bookId: uuid('book_id')
+      .notNull()
+      .references(() => books.id, { onDelete: 'cascade' }),
+    storyId: uuid('story_id')
+      .notNull()
+      .references(() => stories.id, { onDelete: 'cascade' }),
+    position: integer('position').notNull(),
+    includePhotos: boolean('include_photos').notNull().default(true),
+  },
+  (t) => [
+    uniqueIndex('book_stories_uq').on(t.bookId, t.storyId),
+    index('book_stories_book_idx').on(t.bookId),
+  ],
+);
+
+/**
+ * One row per "Order at price" confirmation. v1 stops here: the admin is emailed
+ * and handles payment/shipping personally. Stripe + Gelato submission come later.
+ */
+export const bookOrders = pgTable(
+  'book_orders',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    bookId: uuid('book_id')
+      .notNull()
+      .references(() => books.id, { onDelete: 'restrict' }),
+    orderedBy: text('ordered_by')
+      .notNull()
+      .references(() => user.id, { onDelete: 'restrict' }),
+    /** Quote snapshot at order time — see BookQuote in lib/gelato.ts. */
+    quote: jsonb('quote').notNull(),
+    status: text('status').notNull().default('requested'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (t) => [index('book_orders_book_idx').on(t.bookId)],
+);

@@ -25,6 +25,15 @@ import {
   updateStoryTool,
 } from './stories';
 import { inviteMemberTool } from './members';
+import {
+  createBookTool,
+  getBookTool,
+  listBooksTool,
+  quoteBookPriceTool,
+  renderBookPreviewTool,
+  setBookStoriesTool,
+  updateBookTool,
+} from './books';
 import type { Tool } from './types';
 
 export * from './types';
@@ -49,6 +58,14 @@ export const tools: Tool[] = [
   shareStoryTool,
   tagStoryPeopleTool,
   untagStoryPeopleTool,
+  // books (printable memoir)
+  listBooksTool,
+  getBookTool,
+  createBookTool,
+  updateBookTool,
+  setBookStoriesTool,
+  renderBookPreviewTool,
+  quoteBookPriceTool,
   // review-then-save
   draftStoryTool,
   updateStoryTool,

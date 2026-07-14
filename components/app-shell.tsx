@@ -13,6 +13,7 @@ import {
 import {
   IconBinaryTree2,
   IconBook2,
+  IconBooks,
   IconLogout,
   IconMessageCircle,
   IconSettings,
@@ -32,9 +33,11 @@ const NAV = [
   { href: '/chat', label: (t: Dictionary) => t.nav.chat, icon: IconMessageCircle },
   { href: '/stories', label: (t: Dictionary) => t.nav.stories, icon: IconBook2 },
   { href: '/chronicle', label: (t: Dictionary) => t.nav.chronicle, icon: IconBinaryTree2 },
+  { href: '/books', label: (t: Dictionary) => t.nav.books, icon: IconBooks },
   { href: '/settings', label: (t: Dictionary) => t.nav.settings, icon: IconSettings },
 ] as const;
 
+// Deliberately 4 tabs — /books is reached from the Stories header and Settings on mobile.
 const MOBILE_NAV = [
   { href: '/chat', label: (t: Dictionary) => t.nav.chat, icon: IconMessageCircle },
   { href: '/stories', label: (t: Dictionary) => t.nav.stories, icon: IconBook2 },

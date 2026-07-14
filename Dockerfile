@@ -8,6 +8,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # ── deps ─────────────────────────────────────────────────────────────────────
 FROM base AS deps
 COPY package.json package-lock.json ./
+# The book renderer uses the system Chromium installed in the runtime stage —
+# don't let puppeteer download its own ~170 MB copy into node_modules.
+ENV PUPPETEER_SKIP_DOWNLOAD=1
 RUN npm ci
 
 # ── build ────────────────────────────────────────────────────────────────────
@@ -29,7 +32,9 @@ FROM base AS runtime
 ENV NODE_ENV=production
 # curl is needed for Coolify's container healthcheck (alpine ships without it).
 # ffmpeg re-encodes WebM/Opus voice notes to AAC in the worker (Safari can't play Opus).
-RUN apk add --no-cache curl ffmpeg
+# chromium + fonts render books to PDF in the worker (lib/book-render.ts).
+RUN apk add --no-cache curl ffmpeg chromium font-dejavu font-noto font-noto-emoji
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 COPY --from=build /app ./
 RUN chmod +x ./docker-entrypoint.sh
 EXPOSE 3000
