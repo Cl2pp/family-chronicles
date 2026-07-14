@@ -39,6 +39,7 @@ import {
   IconUnlink,
 } from '@tabler/icons-react';
 import type { Gender, PersonRelation, TreeEdge, TreePerson } from '@/lib/people';
+import { layoutFamilyTree } from '@/lib/tree-layout';
 import { birthSurname, personFullName } from '@/lib/person-name';
 import { useI18n } from '@/lib/i18n/client';
 import type { Dictionary } from '@/lib/i18n';
@@ -165,156 +166,12 @@ export function FamilyTree({
     return m;
   }, [people]);
 
-  // Build adjacency + generation layout.
-  const { rows, validEdges, margins } = useMemo(() => {
-    const ids = new Set(people.map((p) => p.id));
-    const parentsOf = new Map<string, string[]>();
-    const spousesOf = new Map<string, string[]>();
-    const valid: TreeEdge[] = [];
-
-    const push = (m: Map<string, string[]>, k: string, v: string) => {
-      const arr = m.get(k);
-      if (arr) arr.push(v);
-      else m.set(k, [v]);
-    };
-
-    for (const e of edges) {
-      if (!ids.has(e.from) || !ids.has(e.to)) continue;
-      valid.push(e);
-      if (e.type === 'parent') {
-        push(parentsOf, e.to, e.from);
-      } else {
-        push(spousesOf, e.from, e.to);
-        push(spousesOf, e.to, e.from);
-      }
-    }
-
-    // Generation via monotonic relaxation (gens only ever increase).
-    const gen = new Map<string, number>();
-    for (const id of ids) gen.set(id, 0);
-    const cap = people.length * 4 + 4;
-    for (let iter = 0; iter < cap; iter++) {
-      let changed = false;
-      for (const e of valid) {
-        if (e.type === 'parent') {
-          const want = (gen.get(e.from) ?? 0) + 1;
-          if (want > (gen.get(e.to) ?? 0)) {
-            gen.set(e.to, want);
-            changed = true;
-          }
-        } else {
-          const g = Math.max(gen.get(e.from) ?? 0, gen.get(e.to) ?? 0);
-          if (g > (gen.get(e.from) ?? 0)) {
-            gen.set(e.from, g);
-            changed = true;
-          }
-          if (g > (gen.get(e.to) ?? 0)) {
-            gen.set(e.to, g);
-            changed = true;
-          }
-        }
-      }
-      if (!changed) break;
-    }
-
-    const sortedGens = [...new Set([...gen.values()])].sort((a, b) => a - b);
-    const genOrder = new Map<number, string[]>();
-    const compsByGen = new Map<number, string[][]>();
-    const nameOf = (id: string) => peopleById.get(id)?.displayName ?? '';
-
-    for (const g of sortedGens) {
-      const members = people
-        .filter((p) => gen.get(p.id) === g)
-        .map((p) => p.id)
-        .sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
-      const memberSet = new Set(members);
-      const prev = genOrder.get(g - 1) ?? [];
-
-      const keyOf = (id: string): number => {
-        const parents = (parentsOf.get(id) ?? []).filter((pid) => gen.get(pid) === g - 1);
-        const idxs = parents.map((pid) => prev.indexOf(pid)).filter((i) => i >= 0);
-        if (idxs.length === 0) return 1e9;
-        return idxs.reduce((s, v) => s + v, 0) / idxs.length;
-      };
-
-      // Group spouse-linked members into adjacent components.
-      const visited = new Set<string>();
-      const comps: string[][] = [];
-      for (const id of members) {
-        if (visited.has(id)) continue;
-        const comp: string[] = [];
-        const stack = [id];
-        while (stack.length) {
-          const c = stack.pop()!;
-          if (visited.has(c)) continue;
-          visited.add(c);
-          comp.push(c);
-          for (const s of spousesOf.get(c) ?? []) {
-            if (memberSet.has(s) && !visited.has(s)) stack.push(s);
-          }
-        }
-        comp.sort((a, b) => keyOf(a) - keyOf(b) || nameOf(a).localeCompare(nameOf(b)));
-        comps.push(comp);
-      }
-      // Order groups by the barycenter (average) of their members' parent positions.
-      // Using the minimum instead would let a couple that straddles two chronicles
-      // claim the leftmost slot and push a sibling in between another family's
-      // children, making the connector lines cross.
-      const compKey = (comp: string[]) => {
-        const keys = comp.map(keyOf).filter((k) => k < 1e9);
-        return keys.length ? keys.reduce((s, v) => s + v, 0) / keys.length : 1e9;
-      };
-      comps.sort(
-        (a, b) => compKey(a) - compKey(b) || nameOf(a[0]).localeCompare(nameOf(b[0])),
-      );
-      compsByGen.set(g, comps);
-      genOrder.set(g, comps.flat());
-    }
-
-    // Horizontal placement: rows are NOT centered independently — that would put a
-    // lone child in the middle of the page instead of below their parents. Each
-    // spouse-group is placed under the average position of its members' parents,
-    // greedily left-to-right so row order and minimum spacing are preserved. The
-    // resulting offsets are applied as marginLeft on the cards.
-    const H_GAP = 24;
-    const colW = CARD_WIDTH + H_GAP;
-    const centerXById = new Map<string, number>();
-    const marginById = new Map<string, number>();
-    for (const g of sortedGens) {
-      let cursor = 0; // minimum left edge for the next group
-      let flow = 0; // left edge the next card would get with zero margins
-      for (const comp of compsByGen.get(g) ?? []) {
-        const desires: number[] = [];
-        comp.forEach((id, k) => {
-          const ps = (parentsOf.get(id) ?? [])
-            .map((pid) => centerXById.get(pid))
-            .filter((v): v is number => v !== undefined);
-          if (ps.length) {
-            const want = ps.reduce((s, v) => s + v, 0) / ps.length;
-            desires.push(want - (k * colW + CARD_WIDTH / 2));
-          }
-        });
-        const desired = desires.length
-          ? desires.reduce((s, v) => s + v, 0) / desires.length
-          : cursor;
-        const start = Math.max(cursor, desired);
-        comp.forEach((id, k) => {
-          const left = start + k * colW;
-          centerXById.set(id, left + CARD_WIDTH / 2);
-          marginById.set(id, left - flow);
-          flow = left + CARD_WIDTH;
-        });
-        cursor = start + comp.length * colW;
-      }
-    }
-
-    const builtRows = sortedGens.map((g) => ({
-      gen: g,
-      ids: genOrder.get(g) ?? [],
-    }));
-
-    return { rows: builtRows, validEdges: valid, margins: marginById };
-  }, [people, edges, peopleById]);
+  // Layered layout with couple blocks, crossing minimization and balanced
+  // x placement — see lib/tree-layout.ts for the algorithm.
+  const { rows, validEdges, margins } = useMemo(
+    () => layoutFamilyTree(people, edges, { cardWidth: CARD_WIDTH, hGap: 24 }),
+    [people, edges],
+  );
 
   const measure = useCallback(() => {
     const world = worldRef.current;
