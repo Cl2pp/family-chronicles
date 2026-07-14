@@ -12,7 +12,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "test": "vitest run"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
@@ -58,6 +59,7 @@
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1",
     "tsx": "^4.22.4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }
