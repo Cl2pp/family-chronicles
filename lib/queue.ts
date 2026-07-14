@@ -7,6 +7,7 @@ export const QUEUES = {
   sweepOrphans: 'sweep-orphans',
   transcode: 'transcode',
   renderBook: 'render-book',
+  thumbnail: 'thumbnail',
 } as const;
 
 /** Nightly, off-peak — the sweep lists every object under the upload prefixes. */
@@ -24,6 +25,11 @@ export interface TranscodeJob {
 /** Typeset a book into preview + print PDFs (Chromium — memory-heavy, runs serially). */
 export interface RenderBookJob {
   bookId: string;
+}
+
+/** Downscale a stored photo into a thumbnail for grids and banners. */
+export interface ThumbnailJob {
+  s3Key: string;
 }
 
 const globalForBoss = globalThis as unknown as { __boss?: Promise<PgBoss> };
@@ -62,4 +68,9 @@ export async function enqueueTranscode(data: TranscodeJob): Promise<void> {
 export async function enqueueRenderBook(data: RenderBookJob): Promise<void> {
   const boss = await getBoss();
   await boss.send(QUEUES.renderBook, data);
+}
+
+export async function enqueueThumbnail(data: ThumbnailJob): Promise<void> {
+  const boss = await getBoss();
+  await boss.send(QUEUES.thumbnail, data);
 }

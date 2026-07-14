@@ -36,6 +36,9 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
 - Voice notes recorded as WebM/Opus are re-encoded to AAC (`.m4a`) by the worker's
   `transcode` job — Safari/iOS can't play Opus. Prefer-AAC recording lives in
   `components/audio-recorder.tsx`.
+- Photos get a downscaled WebP (`assets.thumb_s3_key`, worker's `thumbnail` job via
+  sharp, `lib/thumbnails.ts`). Banners and grids load the thumbnail; only the
+  lightbox fetches the full-size original.
 - **Books**: stories can be typeset into a printable hardcover (`books`, `book_stories`,
   `book_orders`). ALL book mutations live in `lib/books.ts`; the UI (`app/(app)/books`) and
   the chat agent (`lib/ai/tools/books.ts`) are thin wrappers over it. The worker's

@@ -1,6 +1,5 @@
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { magicLink } from 'better-auth/plugins';
 import { db } from '@/db';
 import * as schema from '@/db/schema';
 import { env } from '@/lib/env';
@@ -20,15 +19,13 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
-  plugins: [
-    magicLink({
-      sendMagicLink: async ({ email, url }) => {
-        // TODO: wire a real email provider (Resend/SMTP). For now, log the link
-        // so it works in local/dev without an email service.
-        console.log(`[magic-link] for ${email}: ${url}`);
-      },
-    }),
-  ],
+  session: {
+    // The session (and its cookie) slides — any visit at least a day after the
+    // last refresh re-issues both — so only a month of absence logs you out.
+    // (The better-auth default is 7 days.)
+    expiresIn: 60 * 60 * 24 * 30,
+    updateAge: 60 * 60 * 24,
+  },
 });
 
 export type Session = typeof auth.$Infer.Session;

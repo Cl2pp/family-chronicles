@@ -18,7 +18,10 @@ import {
   draftStoryTool,
   getStoryTool,
   listStoriesTool,
+  saveStoryTool,
   shareStoryTool,
+  tagStoryPeopleTool,
+  untagStoryPeopleTool,
   updateStoryTool,
 } from './stories';
 import { inviteMemberTool } from './members';
@@ -53,6 +56,8 @@ export const tools: Tool[] = [
   updateChronicleSettingsTool,
   inviteMemberTool,
   shareStoryTool,
+  tagStoryPeopleTool,
+  untagStoryPeopleTool,
   // books (printable memoir)
   listBooksTool,
   getBookTool,
@@ -64,6 +69,8 @@ export const tools: Tool[] = [
   // review-then-save
   draftStoryTool,
   updateStoryTool,
+  // direct save — only on the user's explicit request
+  saveStoryTool,
 ];
 
 export const toolsByName = new Map(tools.map((t) => [t.name, t]));

@@ -1,7 +1,14 @@
+import { redirect } from 'next/navigation';
 import { Container, Title, Text, Button, Group, Stack, Paper } from '@mantine/core';
 import { getI18n } from '@/lib/i18n/server';
+import { getSession } from '@/lib/session';
 
 export default async function Home() {
+  // The PWA's start_url is "/" — a signed-in user cold-starting the pinned app
+  // must land in the app, not on the marketing page with a sign-in button.
+  const session = await getSession();
+  if (session?.user) redirect('/chat');
+
   const { t } = await getI18n();
   return (
     <Container size="sm" py={120}>

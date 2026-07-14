@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   assets,
@@ -7,6 +7,7 @@ import {
   memberships,
   messageAttachments,
   messages,
+  people,
   stories,
   storyChronicles,
   storyPeople,
@@ -14,7 +15,8 @@ import {
 } from '@/db/schema';
 import { familyTagsByStory } from '@/lib/family-tags';
 import { eventDateToParts, partsToEventDate } from '@/lib/dates';
-import { deleteObject } from '@/lib/s3';
+import { deleteObject, presignGet } from '@/lib/s3';
+import { enqueueThumbnail } from '@/lib/queue';
 
 export type DatePrecision = 'day' | 'month' | 'year' | 'circa';
 export type InputType = 'text' | 'voice' | 'chat';
@@ -101,6 +103,37 @@ export async function shareStoryToChronicle(storyId: string, chronicleId: string
     .onConflictDoNothing();
 }
 
+/** People tagged in a story (they drive the story's derived family tags). */
+export async function listStoryPeople(storyId: string) {
+  return db
+    .select({
+      id: people.id,
+      displayName: people.displayName,
+      familyName: people.familyName,
+    })
+    .from(storyPeople)
+    .innerJoin(people, eq(storyPeople.personId, people.id))
+    .where(eq(storyPeople.storyId, storyId))
+    .orderBy(asc(people.displayName));
+}
+
+/** Tag people in an existing story. Already-tagged people are skipped. */
+export async function addPeopleToStory(storyId: string, personIds: string[]) {
+  if (personIds.length === 0) return;
+  await db
+    .insert(storyPeople)
+    .values(personIds.map((personId) => ({ storyId, personId })))
+    .onConflictDoNothing();
+}
+
+/** Remove people tags from a story (the people themselves are untouched). */
+export async function removePeopleFromStory(storyId: string, personIds: string[]) {
+  if (personIds.length === 0) return;
+  await db
+    .delete(storyPeople)
+    .where(and(eq(storyPeople.storyId, storyId), inArray(storyPeople.personId, personIds)));
+}
+
 export interface AssetInput {
   kind: 'audio' | 'photo';
   s3Key: string;
@@ -145,6 +178,14 @@ export async function addStoryPhotoContribution(
       .values(assetRows(storyId, items, contribution.id))
       .onConflictDoNothing();
   });
+  await enqueuePhotoThumbnails(items);
+}
+
+/** Queue thumbnail generation for freshly linked photo assets. */
+async function enqueuePhotoThumbnails(items: { kind: string; s3Key: string }[]) {
+  for (const item of items) {
+    if (item.kind === 'photo') await enqueueThumbnail({ s3Key: item.s3Key });
+  }
 }
 
 /**
@@ -165,7 +206,7 @@ export async function claimChatAssetsForStory(
   storyId: string,
   contributorId: string,
 ) {
-  await db.transaction(async (tx) => {
+  const claimed = await db.transaction(async (tx) => {
     const rows = await tx
       .select({
         id: messageAttachments.id,
@@ -181,7 +222,7 @@ export async function claimChatAssetsForStory(
       .innerJoin(messages, eq(messageAttachments.messageId, messages.id))
       .where(and(eq(messages.conversationId, conversationId), isNull(messageAttachments.storyId)))
       .orderBy(asc(messageAttachments.createdAt));
-    if (rows.length === 0) return;
+    if (rows.length === 0) return [];
 
     const [latest] = await tx
       .select({ id: contributions.id })
@@ -208,7 +249,9 @@ export async function claimChatAssetsForStory(
         ),
       );
     await tx.insert(assets).values(assetRows(storyId, rows, contributionId)).onConflictDoNothing();
+    return rows;
   });
+  await enqueuePhotoThumbnails(claimed);
 }
 
 export async function listAssets(storyId: string) {
@@ -253,9 +296,14 @@ export interface StoryListItem {
   /** Derived family tags: the union of the tags of everyone in the story. */
   familyTags: string[];
   photoCount: number;
+  /** Presigned URLs of the story's first photos (upload order), for list banners. */
+  bannerPhotoUrls: string[];
 }
 
-type StoryRow = Omit<StoryListItem, 'chronicleIds' | 'familyTags' | 'photoCount'>;
+type StoryRow = Omit<StoryListItem, 'chronicleIds' | 'familyTags' | 'photoCount' | 'bannerPhotoUrls'>;
+
+/** How many photos a story-list banner shows at most. */
+const BANNER_PHOTO_LIMIT = 3;
 
 async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
   const ids = rows.map((r) => r.id);
@@ -273,11 +321,35 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
   }
 
   const photos = await db
-    .select({ storyId: assets.storyId, count: sql<number>`count(*)::int` })
+    .select({
+      storyId: assets.storyId,
+      s3Key: assets.s3Key,
+      thumbS3Key: assets.thumbS3Key,
+      mimeType: assets.mimeType,
+    })
     .from(assets)
     .where(and(inArray(assets.storyId, ids), eq(assets.kind, 'photo')))
-    .groupBy(assets.storyId);
-  const photoByStory = new Map(photos.map((p) => [p.storyId, p.count]));
+    .orderBy(asc(assets.createdAt));
+  const photosByStory = new Map<string, (typeof photos)[number][]>();
+  for (const p of photos) {
+    const arr = photosByStory.get(p.storyId) ?? [];
+    arr.push(p);
+    photosByStory.set(p.storyId, arr);
+  }
+  const bannerByStory = new Map<string, string[]>();
+  await Promise.all(
+    [...photosByStory.entries()].map(async ([storyId, list]) => {
+      const urls = await Promise.all(
+        list
+          .slice(0, BANNER_PHOTO_LIMIT)
+          // Banners are small — serve the worker-generated thumbnail when it exists.
+          .map((p) =>
+            p.thumbS3Key ? presignGet(p.thumbS3Key, 'image/webp') : presignGet(p.s3Key, p.mimeType),
+          ),
+      );
+      bannerByStory.set(storyId, urls);
+    }),
+  );
 
   const tagsByStory = await familyTagsByStory(ids);
 
@@ -285,7 +357,8 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
     ...r,
     chronicleIds: chronByStory.get(r.id) ?? [],
     familyTags: tagsByStory.get(r.id) ?? [],
-    photoCount: photoByStory.get(r.id) ?? 0,
+    photoCount: photosByStory.get(r.id)?.length ?? 0,
+    bannerPhotoUrls: bannerByStory.get(r.id) ?? [],
   }));
 }
 
@@ -492,14 +565,18 @@ export async function deleteStoryForUser(
   await db.delete(stories).where(eq(stories.id, storyId));
 
   const keys = [...new Set(storyAssets.map((a) => a.s3Key))];
-  if (keys.length) {
-    const referenced = await db
-      .select({ s3Key: messageAttachments.s3Key })
-      .from(messageAttachments)
-      .where(inArray(messageAttachments.s3Key, keys));
+  // Thumbnails are derived — nothing else references them, so they always go.
+  const thumbKeys = [...new Set(storyAssets.map((a) => a.thumbS3Key).filter(Boolean))] as string[];
+  if (keys.length || thumbKeys.length) {
+    const referenced = keys.length
+      ? await db
+          .select({ s3Key: messageAttachments.s3Key })
+          .from(messageAttachments)
+          .where(inArray(messageAttachments.s3Key, keys))
+      : [];
     const keep = new Set(referenced.map((r) => r.s3Key));
     const results = await Promise.allSettled(
-      keys.filter((k) => !keep.has(k)).map((k) => deleteObject(k)),
+      [...keys.filter((k) => !keep.has(k)), ...thumbKeys].map((k) => deleteObject(k)),
     );
     for (const r of results) {
       if (r.status === 'rejected') {

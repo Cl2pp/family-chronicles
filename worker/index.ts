@@ -8,6 +8,7 @@ import {
   SWEEP_ORPHANS_CRON,
   type RenderBookJob,
   type StyleJob,
+  type ThumbnailJob,
   type TranscodeJob,
 } from '@/lib/queue';
 import { markRenderFailed, renderBook } from '@/lib/book-render';
@@ -15,6 +16,7 @@ import { styleStory } from '@/lib/ai/openrouter';
 import { styleContextForStory } from '@/lib/stories';
 import { sweepOrphanedObjects } from '@/lib/orphans';
 import { transcodeAudioObject } from '@/lib/transcode';
+import { generateThumbnail } from '@/lib/thumbnails';
 
 async function markFailed(storyId: string, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
@@ -76,6 +78,17 @@ async function handleRenderBook(data: RenderBookJob) {
   }
 }
 
+/** Downscale a stored photo so lists and grids don't ship camera originals. */
+async function handleThumbnail(data: ThumbnailJob) {
+  try {
+    const result = await generateThumbnail(data.s3Key);
+    console.log(`[worker] thumbnail ${data.s3Key}: ${result}`);
+  } catch (err) {
+    // Views fall back to the full-size original — slower, but nothing is lost.
+    console.error(`[worker] thumbnail failed for ${data.s3Key}:`, err);
+  }
+}
+
 /** Reclaim storage from uploads whose owning row was never written. */
 async function handleSweepOrphans() {
   try {
@@ -107,13 +120,17 @@ async function main() {
     },
   );
 
+  await boss.work<ThumbnailJob>(QUEUES.thumbnail, async (jobs) => {
+    for (const job of jobs) await handleThumbnail(job.data);
+  });
+
   await boss.work(QUEUES.sweepOrphans, async () => {
     await handleSweepOrphans();
   });
   await boss.schedule(QUEUES.sweepOrphans, SWEEP_ORPHANS_CRON);
 
   console.log(
-    '[worker] ready — listening for style + transcode + render-book jobs; orphan sweep scheduled',
+    '[worker] ready — listening for style + transcode + thumbnail + render-book jobs; orphan sweep scheduled',
   );
 }
 

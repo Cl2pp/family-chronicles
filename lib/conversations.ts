@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import { conversations, messageAttachments, messages } from '@/db/schema';
 import { CONVERSATION_IDLE_MS } from '@/lib/chat-idle';
@@ -49,6 +49,57 @@ export async function resumableConversation(userId: string) {
     .orderBy(desc(conversations.updatedAt))
     .limit(1);
   return rows[0] ?? null;
+}
+
+/**
+ * A generation claim older than this is considered dead (the request that took it
+ * crashed without releasing). Longer than any healthy agent run, so a live run is
+ * never shadowed by a second one — but shorter than the client's reconcile-polling
+ * window (chat-view's MAX_SYNC_ATTEMPTS × SYNC_RETRY_MS), so an orphaned claim is
+ * retaken and the reply regenerated while the client is still asking.
+ */
+const REPLY_CLAIM_STALE_MS = 3 * 60 * 1000;
+
+/**
+ * Try to take the conversation's reply-generation claim. Atomic: of two concurrent
+ * callers (the original send still running vs. a recovery sync) only one wins.
+ * Returns false when a live (non-stale) claim is already held.
+ */
+export async function tryClaimPendingReply(conversationId: string): Promise<boolean> {
+  const stale = new Date(Date.now() - REPLY_CLAIM_STALE_MS);
+  const rows = await db
+    .update(conversations)
+    .set({ replyPendingSince: new Date() })
+    .where(
+      and(
+        eq(conversations.id, conversationId),
+        or(
+          sql`${conversations.replyPendingSince} IS NULL`,
+          lt(conversations.replyPendingSince, stale),
+        ),
+      ),
+    )
+    .returning({ id: conversations.id });
+  return rows.length > 0;
+}
+
+/**
+ * Take the claim unconditionally — for the send paths, which just stored a brand-new
+ * user turn: any existing claim belongs to an older turn and may be superseded.
+ */
+export async function claimPendingReply(conversationId: string) {
+  await db
+    .update(conversations)
+    .set({ replyPendingSince: new Date() })
+    .where(eq(conversations.id, conversationId));
+}
+
+/** Release the reply-generation claim (always runs, success or failure). */
+export async function releasePendingReply(conversationId: string) {
+  await db
+    .update(conversations)
+    .set({ replyPendingSince: null })
+    .where(eq(conversations.id, conversationId));
 }
 
 /** Mark a conversation closed — it stays stored as history but is never resumed. */

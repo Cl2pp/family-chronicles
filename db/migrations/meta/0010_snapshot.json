@@ -1,6 +1,6 @@
 {
-  "id": "d48e23fb-adbd-4c04-9d84-c19257348b40",
-  "prevId": "560b08c1-206e-4f86-a241-0d4071683954",
+  "id": "1604f64a-7278-4ce5-9a56-fe7dd29c1b3b",
+  "prevId": "d48e23fb-adbd-4c04-9d84-c19257348b40",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -575,6 +575,12 @@
         },
         "closed_at": {
           "name": "closed_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reply_pending_since": {
+          "name": "reply_pending_since",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false

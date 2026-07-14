@@ -1,5 +1,6 @@
 import { getMembership } from '@/lib/chronicles';
 import { listChroniclePeople } from '@/lib/people';
+import { findPersonByName } from '@/lib/person-match';
 import { canContribute, canManage, type AccessRole } from '@/lib/permissions';
 import type { ToolContext } from './types';
 
@@ -36,21 +37,20 @@ export async function ensureOwner(
 type ChroniclePerson = Awaited<ReturnType<typeof listChroniclePeople>>[number];
 
 /**
- * Case-insensitive lookup of a person by display name within a chronicle.
- * Returns the single match, or an error string when missing/ambiguous.
+ * Case-insensitive lookup of a person by name within a chronicle — exact display name
+ * first, then unique forgiving matches ("Ava" → "Ava Naoko", "Clemens Ortlepp" →
+ * Clemens with familyName Ortlepp). Returns the single match, or an error string.
  */
 export async function resolvePerson(
   chronicleId: string,
   name: string,
 ): Promise<{ person: ChroniclePerson } | { error: string }> {
-  const wanted = name.trim().toLowerCase();
   const people = await listChroniclePeople(chronicleId);
-  const matches = people.filter((p) => p.displayName.toLowerCase() === wanted);
-  if (matches.length === 0) {
-    return { error: `No one named "${name}" is in this chronicle's tree yet.` };
+  const result = findPersonByName(people, name);
+  if ('person' in result) return { person: result.person };
+  if (result.error === 'ambiguous') {
+    const names = result.candidates.map((c) => c.displayName).join(', ');
+    return { error: `"${name}" could mean several people (${names}) — ask which one is meant.` };
   }
-  if (matches.length > 1) {
-    return { error: `More than one person is named "${name}" — ask which one is meant.` };
-  }
-  return { person: matches[0] };
+  return { error: `No one named "${name}" is in this chronicle's tree yet.` };
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "conversations" ADD COLUMN "reply_pending_since" timestamp;

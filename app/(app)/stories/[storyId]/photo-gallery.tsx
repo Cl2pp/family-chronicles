@@ -21,26 +21,40 @@ import { updatePhotoCaption } from './actions';
 
 export interface GalleryPhoto {
   id: string;
+  /** Full-size original — loaded only when the lightbox opens. */
   url: string;
+  /** Small version for the grid (falls back to `url` while no thumbnail exists). */
+  thumbUrl: string;
   caption: string | null;
   width: number | null;
   height: number | null;
 }
 
-/** Grid of a story's photos; clicking one opens a lightbox with its caption. */
+/**
+ * Grid of a story's photos; clicking one opens a lightbox with its caption.
+ * With `initialVisible`, only the first few photos show and the rest hide
+ * behind a "see more" tile until expanded.
+ */
 export function PhotoGallery({
   storyId,
   photos,
   canEdit,
   storyTitle,
+  initialVisible,
 }: {
   storyId: string;
   photos: GalleryPhoto[];
   canEdit: boolean;
   storyTitle: string;
+  initialVisible?: number;
 }) {
   const { t } = useI18n();
   const [openIndex, setOpenIndex] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  const limit = expanded ? photos.length : (initialVisible ?? photos.length);
+  const shown = photos.slice(0, limit);
+  const hiddenCount = photos.length - shown.length;
 
   const active = openIndex === null ? null : photos[openIndex];
 
@@ -50,14 +64,20 @@ export function PhotoGallery({
 
   return (
     <>
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md">
-        {photos.map((p, i) => (
+      <SimpleGrid cols={{ base: 2, md: 3 }} spacing={{ base: 'xs', sm: 'md' }}>
+        {shown.map((p, i) => (
           <Stack key={p.id} gap={4}>
             <UnstyledButton
               onClick={() => setOpenIndex(i)}
               aria-label={p.caption ?? t.story.viewPhoto}
             >
-              <Image src={p.url} alt={p.caption ?? storyTitle} radius="md" fit="cover" h={200} />
+              <Image
+                src={p.thumbUrl}
+                alt={p.caption ?? storyTitle}
+                radius="md"
+                fit="cover"
+                h={{ base: 140, sm: 200 }}
+              />
             </UnstyledButton>
             {p.caption && (
               <Text size="sm" c="dimmed" lineClamp={2}>
@@ -66,6 +86,40 @@ export function PhotoGallery({
             )}
           </Stack>
         ))}
+        {hiddenCount > 0 && (
+          <UnstyledButton
+            onClick={() => setExpanded(true)}
+            aria-label={t.story.seeMorePhotos(hiddenCount)}
+          >
+            <Box pos="relative">
+              <Image
+                src={photos[limit].thumbUrl}
+                alt=""
+                radius="md"
+                fit="cover"
+                h={{ base: 140, sm: 200 }}
+              />
+              <Stack
+                gap={0}
+                align="center"
+                justify="center"
+                pos="absolute"
+                style={{
+                  inset: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.55)',
+                  borderRadius: 'var(--mantine-radius-md)',
+                }}
+              >
+                <Text c="white" fw={700} fz={24}>
+                  +{hiddenCount}
+                </Text>
+                <Text c="white" size="sm">
+                  {t.story.seeMore}
+                </Text>
+              </Stack>
+            </Box>
+          </UnstyledButton>
+        )}
       </SimpleGrid>
 
       <Modal
