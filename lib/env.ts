@@ -19,7 +19,7 @@ const schema = z.object({
 
   // AI — story styling via OpenRouter (OpenAI-compatible)
   OPENROUTER_API_KEY: z.string().min(1),
-  STYLING_MODEL: z.string().default('anthropic/claude-opus-4-8'),
+  STYLING_MODEL: z.string().default('anthropic/claude-sonnet-5'),
   OPENROUTER_BASE_URL: z.string().url().default('https://openrouter.ai/api/v1'),
   // Send in-chat photos to the agent as images. Set 'false' if STYLING_MODEL is a
   // text-only model — it would otherwise reject the request.
