@@ -5,6 +5,7 @@ import {
   getBookForUser,
   listBooksForUser,
   quoteBook,
+  requestAiDesign,
   requestPreview,
   setBookStories,
   updateBook,
@@ -216,6 +217,41 @@ export const renderBookPreviewTool = defineTool({
       ok: true,
       message: 'Print proof render queued.',
       receipt: { label: `Rendering print proof of "${found.book.title}"`, href: `/books/${found.book.id}/order` },
+    };
+  },
+});
+
+export const designBookLayoutTool = defineTool({
+  name: 'design_book_layout',
+  description:
+    'Queue an AI redesign of the book\'s photo layout: a vision model looks at the book\'s ' +
+    'actual chapters and photos and proposes which photo is the cover, which photos sit side ' +
+    'by side or in a grid, which gets a full page, and how photos are placed among the text — ' +
+    'a real design pass, not just the mechanical default layout every book starts with. Takes ' +
+    'about a minute; you cannot wait for it. The user sees the result in the book\'s live ' +
+    'preview once it finishes. If the book\'s layout has manual edits, this fails asking for ' +
+    'confirmation — set overwriteEdits to true only if the user has confirmed they want to ' +
+    'replace those edits.',
+  schema: z.object({
+    book: z.string().min(1).describe('The book title (or id) to design.'),
+    overwriteEdits: z
+      .boolean()
+      .nullish()
+      .describe('Pass true only after the user confirms replacing existing manual layout edits.'),
+  }),
+  async execute(args, ctx) {
+    const found = await resolveBook(ctx, args.book);
+    if ('error' in found) return { ok: false, error: found.error };
+    const result = await requestAiDesign({
+      bookId: found.book.id,
+      userId: ctx.userId,
+      overwriteEdits: args.overwriteEdits ?? undefined,
+    });
+    if (!result.ok) return { ok: false, error: result.error };
+    return {
+      ok: true,
+      message: 'AI design pass queued.',
+      receipt: { label: `Designing "${found.book.title}" with AI`, href: `/books/${found.book.id}` },
     };
   },
 });

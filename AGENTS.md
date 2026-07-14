@@ -58,7 +58,11 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
   page count and a full-resolution binding PDF. Pricing = Gelato quote (`lib/gelato.ts`);
   v1 ordering stops at an admin email (`lib/email.ts`) — no payment, no Gelato order
   submission. Full plan: `docs/BOOK_FEATURE_PLAN.md` (layout v2 plan:
-  `docs/book-layout-plan` branch, `docs/BOOK_LAYOUT_PLAN.md`).
+  `docs/book-layout-plan` branch, `docs/BOOK_LAYOUT_PLAN.md`). A "Design my book" button
+  queues the `design-book` job (`lib/book-ai-layout.ts`'s `proposeLayoutPlan`, worker-side):
+  a vision-capable model looks at the book's chapters and actual photos and proposes a new
+  `layout_plan` (`layout_source: 'ai'`), falling back to the auto-layouter silently on any
+  failure — `books.design_requested_at` tracks the in-flight state for the builder's poll.
 
 ## Commands
 - `npm run dev` — web dev server

@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   ActionIcon,
   Alert,
@@ -32,11 +33,12 @@ import {
   IconPhoto,
   IconPlus,
   IconShoppingCart,
+  IconSparkles,
   IconX,
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
-import { setBookStoriesAction, updateBookAction } from '../actions';
+import { requestAiDesignAction, setBookStoriesAction, updateBookAction } from '../actions';
 
 export interface CoverOption {
   assetId: string;
@@ -64,6 +66,8 @@ interface BuilderBook {
   hasPreview: boolean;
   /** Cache-buster for the preview iframe — bumps whenever the book row changes. */
   previewVersion: number;
+  /** True while an AI design pass is queued/running (books.design_requested_at). */
+  designing: boolean;
   chronicleName: string;
   chapters: Chapter[];
 }
@@ -86,6 +90,7 @@ export function BookBuilder({
   const { t } = useI18n();
   const tb = t.books.builder;
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   const locked = book.status === 'ordered';
   const included = new Set(book.chapters.map((c) => c.storyId));
@@ -96,14 +101,38 @@ export function BookBuilder({
   const [subtitle, setSubtitle] = useState(book.subtitle ?? '');
   const [dedication, setDedication] = useState(book.dedication ?? '');
 
-  // No status polling here — the preview pane is live HTML (see below), always
-  // current. A `rendering`/`render_failed` status only ever describes the print
-  // proof PDF now, which the order flow polls for itself.
+  // No status polling for the render lifecycle — the preview pane is live HTML (see
+  // below), always current. The one thing still worth polling for is the AI design
+  // pass: it rewrites the layout plan server-side (worker process) with no other
+  // signal the client can see, so we poll while `designing` is true and refresh once
+  // it clears — the preview iframe then re-keys on the new `previewVersion`.
+  useEffect(() => {
+    if (!book.designing) return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/books/${book.id}/status`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { designing: boolean };
+        if (!data.designing) router.refresh();
+      } catch {
+        /* transient network error — next tick retries */
+      }
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [book.designing, book.id, router]);
 
   function run(action: () => Promise<{ error?: string }>) {
     startTransition(async () => {
       const result = await action();
       if (result.error) notifications.show({ message: result.error, color: 'red' });
+    });
+  }
+
+  function designBook() {
+    startTransition(async () => {
+      const result = await requestAiDesignAction({ bookId: book.id });
+      if (result.error) notifications.show({ message: result.error, color: 'red' });
+      else router.refresh();
     });
   }
 
@@ -399,6 +428,20 @@ export function BookBuilder({
               )}
             </Group>
           </Group>
+
+          <Tooltip label={tb.designBookHint} disabled={locked}>
+            <Button
+              variant="light"
+              size="sm"
+              mb="sm"
+              leftSection={<IconSparkles size={16} />}
+              loading={book.designing}
+              disabled={locked || pending}
+              onClick={designBook}
+            >
+              {book.designing ? tb.designingBook : tb.designBook}
+            </Button>
+          </Tooltip>
 
           <Box
             component="iframe"

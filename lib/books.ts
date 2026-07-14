@@ -13,7 +13,7 @@ import {
 } from '@/db/schema';
 import { getMembership } from '@/lib/chronicles';
 import { canContribute, type AccessRole } from '@/lib/permissions';
-import { enqueueRenderBook } from '@/lib/queue';
+import { enqueueDesignBook, enqueueRenderBook } from '@/lib/queue';
 import { quoteBookPrice, type BookFormat, type BookQuote } from '@/lib/gelato';
 import { sendEmail } from '@/lib/email';
 import { env } from '@/lib/env';
@@ -123,6 +123,12 @@ export interface BookDetail {
   pageCount: number | null;
   previewS3Key: string | null;
   printS3Key: string | null;
+  /** Who last wrote the layout plan: the heuristic auto-layouter, an AI design pass, or a
+   *  manual edit (manual edits are phase 4; the type already allows for them). */
+  layoutSource: 'auto' | 'ai' | 'edited';
+  /** Set while an AI design job is queued/running; null once it completes (success or
+   *  fallback). Drives the builder's "Design my book" working state. */
+  designRequestedAt: Date | null;
   updatedAt: Date;
   chapters: BookChapter[];
 }
@@ -183,6 +189,8 @@ export async function getBookForUser(bookId: string, userId: string): Promise<Bo
     pageCount: row.book.pageCount,
     previewS3Key: row.book.previewS3Key,
     printS3Key: row.book.printS3Key,
+    layoutSource: row.book.layoutSource as 'auto' | 'ai' | 'edited',
+    designRequestedAt: row.book.designRequestedAt,
     updatedAt: row.book.updatedAt,
     chapters: chapterRows.map((c, i) => ({
       ...c,
@@ -394,6 +402,41 @@ export async function requestPreview(input: {
     .set({ status: 'rendering', errorMessage: null, updatedAt: new Date() })
     .where(eq(books.id, input.bookId));
   await enqueueRenderBook({ bookId: input.bookId });
+  return { ok: true };
+}
+
+/**
+ * Queue the AI design pass (docs/BOOK_LAYOUT_PLAN.md §5, producer #2): a vision model
+ * looks at the book's actual photos and proposes a new layout plan, replacing the
+ * current one (AI's plan on success, a freshly-built auto plan on failure — see the
+ * `design-book` worker handler, `lib/book-ai-layout.ts`). Does NOT touch `status` or
+ * the print PDFs: the builder's own preview is live HTML and picks up the new plan on
+ * its next request; the stored print proof is separately invalidated by the layout
+ * change becoming visible (its `layoutStale`/content-changed handling already covers
+ * this — a design pass doesn't remove or add stories, only rearranges existing ones).
+ *
+ * Consent guard: if the plan currently in place was a manual edit (`layoutSource ===
+ * 'edited'` — a phase-4 feature, not yet reachable from the UI, but the guard ships
+ * now so it's never accidentally clobbered later), the caller must pass
+ * `overwriteEdits: true` to proceed.
+ */
+export async function requestAiDesign(input: {
+  bookId: string;
+  userId: string;
+  overwriteEdits?: boolean;
+}): Promise<Result> {
+  const gate = await editableBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+  if (gate.book.chapters.length === 0) return err('Add at least one story before designing.');
+  if (gate.book.designRequestedAt) return err('An AI design pass is already running for this book.');
+  if (gate.book.layoutSource === 'edited' && !input.overwriteEdits) {
+    return err(
+      'This book\'s layout has manual edits. Designing it again with AI would replace them — try again to confirm.',
+    );
+  }
+
+  await db.update(books).set({ designRequestedAt: new Date() }).where(eq(books.id, input.bookId));
+  await enqueueDesignBook({ bookId: input.bookId });
   return { ok: true };
 }
 

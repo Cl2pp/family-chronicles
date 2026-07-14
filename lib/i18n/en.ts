@@ -377,6 +377,10 @@ export const en = {
         'This preview always reflects your current draft and uses reduced-quality photos. Ordering creates a full-resolution, print-ready PDF.',
       editWithAI: 'Edit with AI',
       editWithAIHint: 'Ask in Chat, e.g. “Move the wedding story to the front of my book.”',
+      designBook: 'Design my book',
+      designingBook: 'Designing…',
+      designBookHint:
+        'Let AI look at your photos and propose a fresh layout — which photo is the cover, what goes side by side, what gets its own page. Takes about a minute.',
       orderCta: 'Order this book',
       orderedNote: 'This book has been ordered and can no longer be changed.',
     },

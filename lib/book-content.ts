@@ -220,6 +220,19 @@ export async function loadOrBuildPlan(bookId: string, loaded: LoadedBook): Promi
     console.warn(`[book-content] stored layout plan for ${bookId} failed validation, rebuilding:`, validated.error);
   }
 
+  return buildAndPersistAutoPlan(bookId, loaded);
+}
+
+/**
+ * Always rebuilds the plan with the deterministic auto-layouter and persists it as
+ * `layout_source: 'auto'`, regardless of any existing plan/staleness — the explicit
+ * "regenerate" path (as opposed to `loadOrBuildPlan`'s "reuse unless stale"). Used by
+ * `loadOrBuildPlan` itself, and by the `design-book` worker handler as the fallback
+ * when the AI design pass fails.
+ */
+export async function buildAndPersistAutoPlan(bookId: string, loaded: LoadedBook): Promise<LayoutPlan> {
+  const { row } = loaded;
+
   const autoLayoutChapters: AutoLayoutChapter[] = loaded.chapters.map((c) => ({
     storyId: c.storyId,
     paragraphWordCounts: paragraphs(c.body).map(wordCount),
