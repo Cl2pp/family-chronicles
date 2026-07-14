@@ -8,6 +8,7 @@ export const QUEUES = {
   transcode: 'transcode',
   renderBook: 'render-book',
   thumbnail: 'thumbnail',
+  designBook: 'design-book',
 } as const;
 
 /** Nightly, off-peak — the sweep lists every object under the upload prefixes. */
@@ -30,6 +31,11 @@ export interface RenderBookJob {
 /** Downscale a stored photo into a thumbnail for grids and banners. */
 export interface ThumbnailJob {
   s3Key: string;
+}
+
+/** Run the AI design pass on a book, falling back to the auto-layouter on failure. */
+export interface DesignBookJob {
+  bookId: string;
 }
 
 const globalForBoss = globalThis as unknown as { __boss?: Promise<PgBoss> };
@@ -73,4 +79,9 @@ export async function enqueueRenderBook(data: RenderBookJob): Promise<void> {
 export async function enqueueThumbnail(data: ThumbnailJob): Promise<void> {
   const boss = await getBoss();
   await boss.send(QUEUES.thumbnail, data);
+}
+
+export async function enqueueDesignBook(data: DesignBookJob): Promise<void> {
+  const boss = await getBoss();
+  await boss.send(QUEUES.designBook, data);
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "books" ADD COLUMN "design_requested_at" timestamp;

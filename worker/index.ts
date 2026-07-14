@@ -1,17 +1,20 @@
 import 'dotenv/config';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { stories } from '@/db/schema';
+import { books, stories } from '@/db/schema';
 import {
   getBoss,
   QUEUES,
   SWEEP_ORPHANS_CRON,
+  type DesignBookJob,
   type RenderBookJob,
   type StyleJob,
   type ThumbnailJob,
   type TranscodeJob,
 } from '@/lib/queue';
 import { markRenderFailed, renderBook } from '@/lib/book-render';
+import { proposeLayoutPlan } from '@/lib/book-ai-layout';
+import { backfillDimensionsFromOriginals, buildAndPersistAutoPlan, loadBook } from '@/lib/book-content';
 import { styleStory } from '@/lib/ai/openrouter';
 import { styleContextForStory } from '@/lib/stories';
 import { sweepOrphanedObjects } from '@/lib/orphans';
@@ -78,6 +81,53 @@ async function handleRenderBook(data: RenderBookJob) {
   }
 }
 
+/**
+ * Run the AI design pass and persist whatever plan results: the AI's plan on success,
+ * or a freshly-built auto-layout plan when the pass fails (invalid output, request
+ * error, etc. — `proposeLayoutPlan` never throws, it returns null). Either way the
+ * job always ends with `design_requested_at` cleared so the builder's poll stops, and
+ * a fresh plan in place — the "Design my book" button never leaves the book worse off
+ * than before it was clicked, only either improved or unchanged.
+ */
+async function handleDesignBook(data: DesignBookJob) {
+  const { bookId } = data;
+  try {
+    const plan = await proposeLayoutPlan(bookId);
+    if (plan) {
+      await db
+        .update(books)
+        .set({
+          layoutPlan: plan,
+          layoutSource: 'ai',
+          layoutStale: false,
+          designRequestedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(books.id, bookId));
+      console.log(`[worker] AI-designed book ${bookId}`);
+      return;
+    }
+
+    console.log(`[worker] AI design pass for ${bookId} produced no usable plan — falling back to auto layout`);
+    const loaded = await loadBook(bookId);
+    await backfillDimensionsFromOriginals(loaded.allPhotosById);
+    await buildAndPersistAutoPlan(bookId, loaded);
+    await db.update(books).set({ designRequestedAt: null }).where(eq(books.id, bookId));
+  } catch (err) {
+    console.error(`[worker] design-book failed for ${bookId}:`, err);
+    // Best effort: still clear the flag so the builder's poll doesn't spin forever, and
+    // still try to leave a fresh auto plan in place rather than a stale/broken one.
+    try {
+      const loaded = await loadBook(bookId);
+      await backfillDimensionsFromOriginals(loaded.allPhotosById);
+      await buildAndPersistAutoPlan(bookId, loaded);
+    } catch (fallbackErr) {
+      console.error(`[worker] auto-layout fallback also failed for ${bookId}:`, fallbackErr);
+    }
+    await db.update(books).set({ designRequestedAt: null }).where(eq(books.id, bookId));
+  }
+}
+
 /** Downscale a stored photo so lists and grids don't ship camera originals. */
 async function handleThumbnail(data: ThumbnailJob) {
   try {
@@ -124,13 +174,22 @@ async function main() {
     for (const job of jobs) await handleThumbnail(job.data);
   });
 
+  // One model call plus photo downloads: serial, like render-book.
+  await boss.work<DesignBookJob>(
+    QUEUES.designBook,
+    { batchSize: 1 },
+    async (jobs) => {
+      for (const job of jobs) await handleDesignBook(job.data);
+    },
+  );
+
   await boss.work(QUEUES.sweepOrphans, async () => {
     await handleSweepOrphans();
   });
   await boss.schedule(QUEUES.sweepOrphans, SWEEP_ORPHANS_CRON);
 
   console.log(
-    '[worker] ready — listening for style + transcode + thumbnail + render-book jobs; orphan sweep scheduled',
+    '[worker] ready — listening for style + transcode + thumbnail + render-book + design-book jobs; orphan sweep scheduled',
   );
 }
 

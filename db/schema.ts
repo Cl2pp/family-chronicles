@@ -443,6 +443,10 @@ export const books = pgTable(
     layoutSource: text('layout_source').notNull().default('auto'),
     /** Content changed since layoutPlan was made (paragraph counts/photos may no longer match). */
     layoutStale: boolean('layout_stale').notNull().default(false),
+    /** Set when an AI design job is enqueued, cleared by the worker on completion (success
+     *  or fallback) — lets the builder show a working state without hijacking `status`,
+     *  which still tracks the print-proof PDF render lifecycle. */
+    designRequestedAt: timestamp('design_requested_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
