@@ -33,7 +33,7 @@ import { CONVERSATION_IDLE_MS } from '@/lib/chat-idle';
 import { PHOTO_ACCEPT, readDimensions } from '@/lib/uploads';
 import { useI18n } from '@/lib/i18n/client';
 import { MessageRow } from './message-row';
-import { endConversation, presignUpload, sendMessage, sendVoiceMessage } from './actions';
+import { endConversation, presignUpload, sendMessage, sendVoiceMessage, syncChat } from './actions';
 import type { ChatAttachment, Msg } from './types';
 
 // Icons paired by index with t.chat.setupSuggestions / t.chat.familySuggestions.
@@ -42,6 +42,24 @@ const familySuggestionIcons = [IconMoodKid, IconHeart, IconUsersPlus];
 
 /** Photos attachable to one message. */
 const MAX_PHOTOS = 20;
+
+/**
+ * After returning to a tab with a send still in flight, how long to give that request
+ * to settle on its own before reconciling with the server. Mobile browsers kill
+ * in-flight fetches when a tab is backgrounded — the request may never settle at all.
+ */
+const RESYNC_GRACE_MS = 8_000;
+
+/** Poll spacing while the server reports a reply is still being generated. */
+const SYNC_RETRY_MS = 5_000;
+
+/**
+ * Give up reconciling after this many polls/retries (~3.75 minutes). Must outlast the
+ * server's claim staleness (REPLY_CLAIM_STALE_MS, 3 min): if a crashed request left an
+ * orphaned claim, the polling has to still be running when the claim goes stale so the
+ * reply gets regenerated instead of erroring out just before recovery became possible.
+ */
+const MAX_SYNC_ATTEMPTS = 45;
 
 interface PendingPhoto {
   s3Key: string;
@@ -107,7 +125,120 @@ export function ChatView({
   const lastActivityRef = useRef(lastActivityAt ?? Date.now());
   const router = useRouter();
 
+  // Reconcile machinery. A send is one long request; when the mobile browser
+  // backgrounds the tab it kills that request, so the reply (and any draft card it
+  // carried) is stored server-side but never arrives — or was never generated at all.
+  // `syncChat` fetches the canonical conversation (regenerating the missing reply if
+  // needed); the turn counter makes sure only the first path to settle a turn — the
+  // original request or a reconcile — gets to touch the visible state.
+  const turnRef = useRef(0);
+  const conversationRef = useRef(initialConversationId);
+  const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncingRef = useRef(false);
+  const syncAttemptsRef = useRef(0);
+  /** Set while a send is in flight, so a reconcile can tell "reply lost" (the message
+   * is stored) from "send lost" (it never arrived — surface an error, don't swallow it). */
+  const sendBaselineRef = useRef<{ turn: number; userCount: number; errorText: string | null } | null>(null);
+
   const sending = busyLabel !== null;
+
+  /** Claim the visible state for a new settling path; stale handlers and timers no-op. */
+  function advanceTurn() {
+    turnRef.current += 1;
+    sendBaselineRef.current = null;
+    syncAttemptsRef.current = 0;
+    if (syncTimerRef.current) {
+      clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
+  }
+
+  function adoptConversation(id: string) {
+    conversationRef.current = id;
+    setConversationId(id);
+  }
+
+  /** Start a send: cancel stale reconciles and record the pre-send baseline. */
+  function beginSendTurn(): number {
+    advanceTurn();
+    const turn = turnRef.current;
+    sendBaselineRef.current = {
+      turn,
+      userCount: messages.filter((m) => m.role === 'user').length,
+      errorText: null,
+    };
+    lastActivityRef.current = Date.now();
+    return turn;
+  }
+
+  function settleWithError(text: string | null) {
+    advanceTurn();
+    setBusyLabel(null);
+    setMessages((m) => [...m, { role: 'assistant', content: text ?? t.chat.somethingWentWrong }]);
+  }
+
+  function applyServerMessages(id: string, msgs: Msg[]) {
+    advanceTurn();
+    adoptConversation(id);
+    lastActivityRef.current = Date.now();
+    setMessages(msgs);
+    setBusyLabel(null);
+  }
+
+  function scheduleSync(delayMs: number) {
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    const turn = turnRef.current;
+    syncTimerRef.current = setTimeout(() => {
+      syncTimerRef.current = null;
+      if (turn === turnRef.current) void syncNow();
+    }, delayMs);
+  }
+
+  /** One reconcile attempt against the stored conversation. */
+  async function syncNow() {
+    if (syncingRef.current) return;
+    const turn = turnRef.current;
+    const baseline = sendBaselineRef.current;
+    syncingRef.current = true;
+    try {
+      const res = await syncChat(conversationRef.current);
+      if (turn !== turnRef.current) return;
+      if (res.status === 'pending') {
+        // Another live request is mid-generation — poll until its reply is stored.
+        if (syncAttemptsRef.current++ >= MAX_SYNC_ATTEMPTS) settleWithError(baseline?.errorText ?? null);
+        else scheduleSync(SYNC_RETRY_MS);
+        return;
+      }
+      if (res.status === 'failed') {
+        settleWithError(baseline?.errorText ?? null);
+        return;
+      }
+      if (res.status === 'gone') {
+        if (baseline) {
+          settleWithError(baseline.errorText);
+        } else {
+          advanceTurn();
+          setBusyLabel(null);
+        }
+        return;
+      }
+      // ok — but if a send was in flight and its message never reached the server,
+      // applying the stored list would silently swallow it; report the failure instead.
+      const serverUserCount = res.messages.filter((m) => m.role === 'user').length;
+      if (baseline && serverUserCount <= baseline.userCount) {
+        settleWithError(baseline.errorText);
+        return;
+      }
+      applyServerMessages(res.conversationId, res.messages);
+    } catch {
+      // The network right after a tab resume is often still flaky — retry.
+      if (turn !== turnRef.current) return;
+      if (syncAttemptsRef.current++ >= MAX_SYNC_ATTEMPTS) settleWithError(baseline?.errorText ?? null);
+      else scheduleSync(SYNC_RETRY_MS);
+    } finally {
+      syncingRef.current = false;
+    }
+  }
 
   // Height of the visible area while the keyboard overlays it, null when it doesn't.
   const [keyboardViewportH, setKeyboardViewportH] = useState<number | null>(null);
@@ -156,6 +287,39 @@ export function ChatView({
     };
   }, []);
 
+  // A killed send can leave the stored conversation ending on a user message that
+  // never got its reply (the page renders exactly that after a reload on mobile).
+  // Reconcile once on mount so the reply is regenerated instead of the chat going mute.
+  useEffect(() => {
+    const lastTurn = [...initialMessages].reverse().find((m) => m.role !== 'system');
+    if (lastTurn?.role === 'user' && conversationRef.current) {
+      setBusyLabel(t.chat.thinking);
+      void syncNow();
+    }
+    return () => {
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A send in flight when the tab was backgrounded may sit on a connection the mobile
+  // browser already killed — it would neither resolve nor reject. On return, give it a
+  // grace period to settle on its own, then reconcile with the server.
+  useEffect(() => {
+    if (!sending) return;
+    function resyncSoon() {
+      if (document.visibilityState === 'hidden') return;
+      scheduleSync(RESYNC_GRACE_MS);
+    }
+    document.addEventListener('visibilitychange', resyncSoon);
+    window.addEventListener('focus', resyncSoon);
+    return () => {
+      document.removeEventListener('visibilitychange', resyncSoon);
+      window.removeEventListener('focus', resyncSoon);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sending]);
+
   // Entry points like the "Add story" button open the chat with a ready-made
   // opener; send it once, then drop the query param so a reload won't repeat it.
   useEffect(() => {
@@ -166,17 +330,13 @@ export function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPrompt]);
 
-  function pushError() {
-    setMessages((m) => [...m, { role: 'assistant', content: t.chat.somethingWentWrong }]);
-  }
-
   async function send(text: string) {
     const trimmed = text.trim();
     if ((!trimmed && photos.length === 0) || sending) return;
 
     const attachments: ChatAttachment[] = photos.map((p) => ({ kind: 'photo', url: p.previewUrl }));
     const pendingPhotos = photos;
-    lastActivityRef.current = Date.now();
+    const turn = beginSendTurn();
     setInput('');
     setPhotos([]);
     setMessages((m) => [...m, { role: 'user', content: trimmed, attachments }]);
@@ -194,15 +354,19 @@ export function ChatView({
           height: p.height,
         })),
       });
-      setConversationId(res.conversationId);
+      if (turn !== turnRef.current) return; // a reconcile already settled this turn
+      advanceTurn();
+      adoptConversation(res.conversationId);
       setMessages((m) => [
         ...m,
         { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
       ]);
-    } catch {
-      pushError();
-    } finally {
       setBusyLabel(null);
+    } catch {
+      // The request may have died mid-flight (a backgrounded mobile tab) while the
+      // server finished — or can redo — the turn. Reconcile before declaring failure.
+      if (turn !== turnRef.current) return;
+      void syncNow();
     }
   }
 
@@ -240,7 +404,7 @@ export function ChatView({
     if (!recorded || sending) return;
     const audio = recorded;
     const previewUrl = URL.createObjectURL(audio.blob);
-    lastActivityRef.current = Date.now();
+    const turn = beginSendTurn();
     setRecording(false);
     setRecorded(null);
     setBusyLabel(t.chat.transcribing);
@@ -258,7 +422,9 @@ export function ChatView({
         bytes: audio.blob.size,
         durationSec: audio.durationSec,
       });
-      setConversationId(res.conversationId);
+      if (turn !== turnRef.current) return; // a reconcile already settled this turn
+      advanceTurn();
+      adoptConversation(res.conversationId);
       setMessages((m) => {
         const next = [...m];
         const i = next.lastIndexOf(pending);
@@ -268,16 +434,16 @@ export function ChatView({
           { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
         ];
       });
-    } catch (err) {
-      setMessages((m) => [
-        ...m,
-        {
-          role: 'assistant',
-          content: err instanceof Error ? err.message : t.chat.somethingWentWrong,
-        },
-      ]);
-    } finally {
       setBusyLabel(null);
+    } catch (err) {
+      // Real failures (e.g. "couldn't transcribe") carry a message worth showing —
+      // but a killed request does not mean failure: the server may have stored the
+      // message and finished the reply. Reconcile decides which case this is.
+      if (turn !== turnRef.current) return;
+      if (sendBaselineRef.current?.turn === turn) {
+        sendBaselineRef.current.errorText = err instanceof Error ? err.message : null;
+      }
+      void syncNow();
     }
   }
 
@@ -287,12 +453,15 @@ export function ChatView({
 
   /** Clear the view back to a fresh, empty chat. */
   function resetChat() {
+    advanceTurn(); // in-flight sends and scheduled reconciles must not resurrect the old thread
+    conversationRef.current = null;
     setConversationId(null);
     setMessages([]);
     setInput('');
     setPhotos([]);
     setRecording(false);
     setRecorded(null);
+    setBusyLabel(null);
     lastActivityRef.current = Date.now();
   }
 
