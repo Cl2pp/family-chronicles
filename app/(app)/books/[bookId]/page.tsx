@@ -20,7 +20,9 @@ export default async function BookBuilderPage({
 
   const chronicleStories = await readyStoriesForChronicle(book.chronicleId);
 
-  // Cover candidates: photos of the included stories, small presigned thumbnails.
+  // Cover candidates: photos of the included stories. The picker renders 72px
+  // tiles, so serve the WebP thumbnail and only fall back to the original for
+  // photos whose thumbnail hasn't been generated (yet).
   const includedIds = book.chapters.map((c) => c.storyId);
   const photoRows = includedIds.length
     ? await db
@@ -28,6 +30,7 @@ export default async function BookBuilderPage({
           id: assets.id,
           storyId: assets.storyId,
           s3Key: assets.s3Key,
+          thumbS3Key: assets.thumbS3Key,
           mimeType: assets.mimeType,
           caption: assets.caption,
         })
@@ -38,7 +41,9 @@ export default async function BookBuilderPage({
   const coverOptions: CoverOption[] = await Promise.all(
     photoRows.map(async (p) => ({
       assetId: p.id,
-      url: await presignGet(p.s3Key, p.mimeType),
+      url: p.thumbS3Key
+        ? await presignGet(p.thumbS3Key, 'image/webp')
+        : await presignGet(p.s3Key, p.mimeType),
       caption: p.caption,
     })),
   );
