@@ -263,11 +263,17 @@ async function editableBook(
   return { ok: true, book };
 }
 
-/** Content changed → any existing preview no longer matches; drop back to draft. */
+/**
+ * Content changed → any existing preview no longer matches; drop back to draft.
+ * Also flags the layout plan stale — it may reference stories/photos that were
+ * just removed, or paragraph counts may have shifted — so the next render
+ * rebuilds it (see lib/book-render.ts).
+ */
 function invalidatePreview() {
   return {
     status: 'draft' as const,
     errorMessage: null,
+    layoutStale: true,
     updatedAt: new Date(),
   };
 }
