@@ -63,6 +63,7 @@ export default async function BookBuilderPage({
           pageCount: book.pageCount,
           hasPreview: Boolean(book.previewS3Key),
           previewVersion: book.updatedAt.getTime(),
+          designing: book.designRequestedAt != null,
           chronicleName: book.chronicleName,
           chapters: book.chapters.map((c) => ({
             storyId: c.storyId,

@@ -102,6 +102,11 @@ export interface PlanContent {
     /** Asset ids of photos available to this chapter (respects includePhotos). */
     assetIds: string[];
   }>;
+  /** Every photo asset id in the book, regardless of a chapter's includePhotos flag —
+   *  `cover.heroAssetId` may reference one of these even when its own chapter excludes
+   *  photos from the flowed text (see lib/book-content.ts `LoadedBook.allPhotosById`).
+   *  Optional for backward compatibility; when omitted the cover hero is not checked. */
+  allAssetIds?: string[];
 }
 
 /**
@@ -117,6 +122,12 @@ export function checkPlanConsistency(plan: LayoutPlan, content: PlanContent): st
   const planStoryIds = new Set(plan.chapters.map((c) => c.storyId));
   for (const c of content.chapters) {
     if (!planStoryIds.has(c.storyId)) problems.push(`Plan is missing chapter for story ${c.storyId}`);
+  }
+
+  if (content.allAssetIds && plan.cover.heroAssetId) {
+    if (!content.allAssetIds.includes(plan.cover.heroAssetId)) {
+      problems.push(`Cover references unknown asset ${plan.cover.heroAssetId}`);
+    }
   }
 
   for (const chapter of plan.chapters) {

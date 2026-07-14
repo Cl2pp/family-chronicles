@@ -27,6 +27,7 @@ import {
 import { inviteMemberTool } from './members';
 import {
   createBookTool,
+  designBookLayoutTool,
   getBookTool,
   listBooksTool,
   quoteBookPriceTool,
@@ -65,6 +66,7 @@ export const tools: Tool[] = [
   updateBookTool,
   setBookStoriesTool,
   renderBookPreviewTool,
+  designBookLayoutTool,
   quoteBookPriceTool,
   // review-then-save
   draftStoryTool,

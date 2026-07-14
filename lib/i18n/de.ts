@@ -390,6 +390,10 @@ export const de: Dictionary = {
         'Diese Vorschau zeigt immer deinen aktuellen Entwurf und nutzt reduzierte Fotoqualität. Beim Bestellen entsteht ein druckfertiges PDF in voller Auflösung.',
       editWithAI: 'Mit KI bearbeiten',
       editWithAIHint: 'Frag im Chat, z. B. „Schieb die Hochzeitsgeschichte an den Anfang meines Buchs.“',
+      designBook: 'Mein Buch gestalten',
+      designingBook: 'Wird gestaltet…',
+      designBookHint:
+        'Lass die KI auf deine Fotos schauen und ein neues Layout vorschlagen — welches Foto das Titelbild wird, was nebeneinander steht, was eine eigene Seite bekommt. Dauert etwa eine Minute.',
       orderCta: 'Dieses Buch bestellen',
       orderedNote: 'Dieses Buch wurde bestellt und kann nicht mehr geändert werden.',
     },

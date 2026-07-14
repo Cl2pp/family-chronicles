@@ -58,9 +58,13 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
   page count and a full-resolution binding PDF. Pricing = Gelato quote (`lib/gelato.ts`);
   there is NO in-app ordering — the order screen shows the quote and a prefilled mailto
   to `BOOK_ORDER_CONTACT_EMAIL`; payment/Gelato submission are parked (the `book_orders`
-  table and `ordered` status wait for that flow; `lib/email.ts` is dormant). Full plan:
-  `docs/BOOK_FEATURE_PLAN.md` (layout v2 plan: `docs/book-layout-plan` branch,
-  `docs/BOOK_LAYOUT_PLAN.md`).
+  table and `ordered` status wait for that flow; `lib/email.ts` is dormant). A "Design my
+  book" button queues the `design-book` job (`lib/book-ai-layout.ts`'s `proposeLayoutPlan`,
+  worker-side): a vision-capable model looks at the book's chapters and actual photos and
+  proposes a new `layout_plan` (`layout_source: 'ai'`), falling back to the auto-layouter
+  silently on any failure — `books.design_requested_at` tracks the in-flight state for the
+  builder's poll. Full plan: `docs/BOOK_FEATURE_PLAN.md` (layout v2 plan:
+  `docs/book-layout-plan` branch, `docs/BOOK_LAYOUT_PLAN.md`).
 
 ## Commands
 - `npm run dev` — web dev server
