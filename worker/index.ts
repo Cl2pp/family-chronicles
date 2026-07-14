@@ -2,7 +2,15 @@ import 'dotenv/config';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { stories } from '@/db/schema';
-import { getBoss, QUEUES, SWEEP_ORPHANS_CRON, type StyleJob, type TranscodeJob } from '@/lib/queue';
+import {
+  getBoss,
+  QUEUES,
+  SWEEP_ORPHANS_CRON,
+  type RenderBookJob,
+  type StyleJob,
+  type TranscodeJob,
+} from '@/lib/queue';
+import { markRenderFailed, renderBook } from '@/lib/book-render';
 import { styleStory } from '@/lib/ai/openrouter';
 import { styleContextForStory } from '@/lib/stories';
 import { sweepOrphanedObjects } from '@/lib/orphans';
@@ -56,6 +64,18 @@ async function handleTranscode(data: TranscodeJob) {
   }
 }
 
+/** Typeset a book into preview + print PDFs. */
+async function handleRenderBook(data: RenderBookJob) {
+  const { bookId } = data;
+  try {
+    await renderBook(bookId);
+    console.log(`[worker] rendered book ${bookId}`);
+  } catch (err) {
+    console.error(`[worker] book render failed for ${bookId}:`, err);
+    await markRenderFailed(bookId, err);
+  }
+}
+
 /** Reclaim storage from uploads whose owning row was never written. */
 async function handleSweepOrphans() {
   try {
@@ -78,12 +98,23 @@ async function main() {
     for (const job of jobs) await handleTranscode(job.data);
   });
 
+  // Chromium + full-size photos: strictly one render at a time.
+  await boss.work<RenderBookJob>(
+    QUEUES.renderBook,
+    { batchSize: 1 },
+    async (jobs) => {
+      for (const job of jobs) await handleRenderBook(job.data);
+    },
+  );
+
   await boss.work(QUEUES.sweepOrphans, async () => {
     await handleSweepOrphans();
   });
   await boss.schedule(QUEUES.sweepOrphans, SWEEP_ORPHANS_CRON);
 
-  console.log('[worker] ready — listening for style + transcode jobs; orphan sweep scheduled');
+  console.log(
+    '[worker] ready — listening for style + transcode + render-book jobs; orphan sweep scheduled',
+  );
 }
 
 main().catch((err) => {

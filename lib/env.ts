@@ -34,6 +34,30 @@ const schema = z.object({
   // Root URL only — groq-sdk appends /openai/v1 to its request paths itself.
   GROQ_BASE_URL: z.string().url().default('https://api.groq.com'),
 
+  // Books — print-on-demand via Gelato + admin order notification.
+  // All optional: without a key the order screen shows "price on request",
+  // without SMTP the notification is logged instead of sent.
+  GELATO_API_KEY: z.string().min(1).optional(),
+  GELATO_PRODUCT_UID_21X28: z
+    .string()
+    .default(
+      'photobooks-hardcover_pf_210x280-mm-8x11-inch_pt_170-gsm-65lb-coated-silk_cl_4-4_ccl_4-4_bt_glued-left_ct_matt-lamination_prt_1-0_cpt_130-gsm-65-lb-cover-coated-silk_ver',
+    ),
+  GELATO_PRODUCT_UID_20X20: z
+    .string()
+    .default(
+      'photobooks-hardcover_pf_200x200-mm-8x8-inch_pt_170-gsm-65lb-coated-silk_cl_4-4_ccl_4-4_bt_glued-left_ct_matt-lamination_prt_1-0_cpt_130-gsm-65-lb-cover-coated-silk_ver',
+    ),
+  /** Flat margin (EUR) added on top of Gelato's product + shipping cost. */
+  BOOK_MARGIN_EUR: z.coerce.number().default(15),
+  /** Where "a user ordered a book" notifications go. */
+  BOOK_ORDER_NOTIFY_EMAIL: z.string().email().optional(),
+  /** smtp(s)://user:pass@host:port — used by lib/email.ts. */
+  SMTP_URL: z.string().optional(),
+  SMTP_FROM: z.string().default('Family Chronicle <no-reply@family.clepp.de>'),
+  /** System Chromium for the book renderer (set in Docker; empty = puppeteer's own). */
+  PUPPETEER_EXECUTABLE_PATH: z.string().optional(),
+
   // Object storage (S3-compatible)
   S3_ENDPOINT: z.string().url(),
   S3_REGION: z.string().default('auto'),

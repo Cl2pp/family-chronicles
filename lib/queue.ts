@@ -6,6 +6,7 @@ export const QUEUES = {
   style: 'style',
   sweepOrphans: 'sweep-orphans',
   transcode: 'transcode',
+  renderBook: 'render-book',
 } as const;
 
 /** Nightly, off-peak — the sweep lists every object under the upload prefixes. */
@@ -18,6 +19,11 @@ export interface StyleJob {
 /** Re-encode a stored voice note into a format every browser can play. */
 export interface TranscodeJob {
   s3Key: string;
+}
+
+/** Typeset a book into preview + print PDFs (Chromium — memory-heavy, runs serially). */
+export interface RenderBookJob {
+  bookId: string;
 }
 
 const globalForBoss = globalThis as unknown as { __boss?: Promise<PgBoss> };
@@ -51,4 +57,9 @@ export async function enqueueStyle(data: StyleJob): Promise<void> {
 export async function enqueueTranscode(data: TranscodeJob): Promise<void> {
   const boss = await getBoss();
   await boss.send(QUEUES.transcode, data);
+}
+
+export async function enqueueRenderBook(data: RenderBookJob): Promise<void> {
+  const boss = await getBoss();
+  await boss.send(QUEUES.renderBook, data);
 }

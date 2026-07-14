@@ -16,7 +16,7 @@ import {
   Title,
   UnstyledButton,
 } from '@mantine/core';
-import { IconMicrophone, IconPhoto, IconPlus, IconUsers } from '@tabler/icons-react';
+import { IconBook, IconMicrophone, IconPhoto, IconPlus, IconUsers } from '@tabler/icons-react';
 import { formatEventDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
 import { useI18n } from '@/lib/i18n/client';
@@ -269,6 +269,15 @@ export function StoriesView({ stories }: { stories: StoryListItem[] }) {
       <Group justify="space-between" align="center">
         <Title order={1}>{t.stories.title}</Title>
         <Group gap="sm">
+          <Button
+            component={Link}
+            href="/books"
+            size="xs"
+            variant="light"
+            leftSection={<IconBook size={14} />}
+          >
+            {t.books.createFromStories}
+          </Button>
           <Button
             component={Link}
             href="/chat?intent=add-story"

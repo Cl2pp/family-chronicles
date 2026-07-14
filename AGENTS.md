@@ -36,6 +36,13 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
 - Voice notes recorded as WebM/Opus are re-encoded to AAC (`.m4a`) by the worker's
   `transcode` job — Safari/iOS can't play Opus. Prefer-AAC recording lives in
   `components/audio-recorder.tsx`.
+- **Books**: stories can be typeset into a printable hardcover (`books`, `book_stories`,
+  `book_orders`). ALL book mutations live in `lib/books.ts`; the UI (`app/(app)/books`) and
+  the chat agent (`lib/ai/tools/books.ts`) are thin wrappers over it. The worker's
+  `render-book` job (`lib/book-render.ts` + `lib/book-layout.ts`) prints HTML to preview +
+  print PDFs via Chromium. Pricing = Gelato quote (`lib/gelato.ts`); v1 ordering stops at an
+  admin email (`lib/email.ts`) — no payment, no Gelato order submission. Full plan:
+  `docs/BOOK_FEATURE_PLAN.md`.
 
 ## Commands
 - `npm run dev` — web dev server
