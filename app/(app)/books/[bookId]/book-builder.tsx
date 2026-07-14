@@ -1,8 +1,7 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useState, useTransition } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   ActionIcon,
   Alert,
@@ -13,7 +12,6 @@ import {
   Card,
   Group,
   Image,
-  Loader,
   Select,
   SimpleGrid,
   Stack,
@@ -28,17 +26,17 @@ import {
   IconArrowLeft,
   IconArrowUp,
   IconExternalLink,
+  IconFileTypePdf,
   IconInfoCircle,
   IconMessageCircle,
   IconPhoto,
   IconPlus,
-  IconRefresh,
   IconShoppingCart,
   IconX,
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
-import { renderPreviewAction, setBookStoriesAction, updateBookAction } from '../actions';
+import { setBookStoriesAction, updateBookAction } from '../actions';
 
 export interface CoverOption {
   assetId: string;
@@ -87,7 +85,6 @@ export function BookBuilder({
 }) {
   const { t } = useI18n();
   const tb = t.books.builder;
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const locked = book.status === 'ordered';
@@ -99,21 +96,9 @@ export function BookBuilder({
   const [subtitle, setSubtitle] = useState(book.subtitle ?? '');
   const [dedication, setDedication] = useState(book.dedication ?? '');
 
-  // While rendering, poll for completion and refresh once the status flips.
-  useEffect(() => {
-    if (book.status !== 'rendering') return;
-    const timer = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/books/${book.id}/status`);
-        if (!res.ok) return;
-        const data = (await res.json()) as { status: string };
-        if (data.status !== 'rendering') router.refresh();
-      } catch {
-        /* transient network error — next tick retries */
-      }
-    }, 4000);
-    return () => clearInterval(timer);
-  }, [book.status, book.id, router]);
+  // No status polling here — the preview pane is live HTML (see below), always
+  // current. A `rendering`/`render_failed` status only ever describes the print
+  // proof PDF now, which the order flow polls for itself.
 
   function run(action: () => Promise<{ error?: string }>) {
     startTransition(async () => {
@@ -395,88 +380,43 @@ export function BookBuilder({
 
         {/* ── Right: preview ────────────────────────────────── */}
         <Card withBorder radius="md" p="md" style={{ minHeight: 480 }}>
-          <Group justify="space-between" mb="sm">
+          <Group justify="space-between" mb="sm" wrap="wrap">
             <Title order={4}>{tb.preview}</Title>
-            <Group gap="xs">
-              {(book.hasPreview || book.status === 'preview_ready') && (
-                <Anchor
-                  href={`/api/books/${book.id}/preview`}
-                  target="_blank"
-                  fz={13}
-                >
+            <Group gap="sm">
+              <Anchor href={`/api/books/${book.id}/preview-html`} target="_blank" fz={13}>
+                <Group gap={4}>
+                  <IconExternalLink size={14} />
+                  {tb.openInNewTab}
+                </Group>
+              </Anchor>
+              {book.hasPreview && (
+                <Anchor href={`/api/books/${book.id}/preview`} target="_blank" fz={13}>
                   <Group gap={4}>
-                    <IconExternalLink size={14} />
-                    {tb.openInNewTab}
+                    <IconFileTypePdf size={14} />
+                    {tb.pdfProof}
                   </Group>
                 </Anchor>
-              )}
-              {!locked && (
-                <Button
-                  size="compact-sm"
-                  variant="light"
-                  leftSection={<IconRefresh size={14} />}
-                  loading={pending || book.status === 'rendering'}
-                  onClick={() => run(() => renderPreviewAction(book.id))}
-                >
-                  {book.hasPreview ? tb.updatePreview : tb.renderPreview}
-                </Button>
               )}
             </Group>
           </Group>
 
-          {book.status === 'rendering' && (
-            <Stack align="center" py="xl" gap="sm">
-              <Loader size="sm" />
-              <Text c="dimmed" fz={14} ta="center">
-                {tb.rendering}
-              </Text>
-            </Stack>
-          )}
-
-          {book.status === 'render_failed' && (
-            <Alert color="red" mb="sm">
-              {tb.renderFailedHint}
-              {book.errorMessage && (
-                <Text fz={11} c="dimmed" mt={4}>
-                  {book.errorMessage}
-                </Text>
-              )}
-            </Alert>
-          )}
-
-          {book.status === 'draft' && book.hasPreview && (
-            <Alert color="yellow" mb="sm" icon={<IconInfoCircle size={16} />}>
-              {tb.previewStale}
-            </Alert>
-          )}
-
-          {book.hasPreview && book.status !== 'rendering' ? (
-            <>
-              <Box
-                component="iframe"
-                key={book.previewVersion}
-                src={`/api/books/${book.id}/preview?v=${book.previewVersion}#toolbar=0`}
-                style={{
-                  width: '100%',
-                  height: 560,
-                  border: '1px solid var(--mantine-color-slate-2)',
-                  borderRadius: 8,
-                  background: '#fff',
-                }}
-                title={tb.preview}
-              />
-              <Text fz={11} c="dimmed" mt={6}>
-                {tb.lowResNote}
-                {book.pageCount ? ` · ${t.books.pageCount(book.pageCount)}` : ''}
-              </Text>
-            </>
-          ) : (
-            book.status !== 'rendering' && (
-              <Text c="dimmed" fz={14} py="lg" ta="center">
-                {tb.noPreviewYet}
-              </Text>
-            )
-          )}
+          <Box
+            component="iframe"
+            key={book.previewVersion}
+            src={`/api/books/${book.id}/preview-html?v=${book.previewVersion}`}
+            style={{
+              width: '100%',
+              height: 560,
+              border: '1px solid var(--mantine-color-slate-2)',
+              borderRadius: 8,
+              background: '#fff',
+            }}
+            title={tb.preview}
+          />
+          <Text fz={11} c="dimmed" mt={6}>
+            {tb.livePreviewNote}
+            {book.pageCount ? ` · ${t.books.pageCount(book.pageCount)}` : ''}
+          </Text>
         </Card>
       </SimpleGrid>
     </Stack>

@@ -43,13 +43,22 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
   `book_orders`). ALL book mutations live in `lib/books.ts`; the UI (`app/(app)/books`) and
   the chat agent (`lib/ai/tools/books.ts`) are thin wrappers over it. Layout is data, not
   code: a per-book JSON `layout_plan` (schema + validation in `lib/book-layout-plan.ts`,
-  deterministic heuristic producer in `lib/book-autolayout.ts`) says what goes where; the
-  worker's `render-book` job (`lib/book-render.ts`, rebuilding the plan when missing or
-  `layout_stale`) renders it via `lib/book-layout.ts` to preview + print PDFs through
-  Chromium. Pricing = Gelato quote (`lib/gelato.ts`); v1 ordering stops at an admin email
-  (`lib/email.ts`) — no payment, no Gelato order submission. Full plan:
-  `docs/BOOK_FEATURE_PLAN.md` (layout v2 plan: `docs/book-layout-plan` branch,
-  `docs/BOOK_LAYOUT_PLAN.md`).
+  deterministic heuristic producer in `lib/book-autolayout.ts`) says what goes where.
+  Content loading + plan resolution (`loadBook`, `loadOrBuildPlan`) live in
+  `lib/book-content.ts`, shared by both processes. The **builder's own preview is live
+  HTML**: `app/api/books/[bookId]/preview-html` renders the current plan in the web
+  process (presigned thumbnail URLs, no Chromium, `Cache-Control: no-store`) via
+  `lib/book-layout.ts`'s `screen` variant, which injects a self-hosted **Paged.js**
+  polyfill (`app/api/pagedjs-polyfill`, see `lib/pagedjs.ts`) to paginate it client-side —
+  edits show up instantly, no render wait. The worker's `render-book` job
+  (`lib/book-render.ts`, rebuilding the plan when missing or `layout_stale`) still
+  renders the `preview`/`print` PDF variants through Chromium, but that's now the
+  **order-time print proof**: the order page (`app/(app)/books/[bookId]/order`) triggers
+  and polls for it when a book isn't `preview_ready` yet, since ordering needs the exact
+  page count and a full-resolution binding PDF. Pricing = Gelato quote (`lib/gelato.ts`);
+  v1 ordering stops at an admin email (`lib/email.ts`) — no payment, no Gelato order
+  submission. Full plan: `docs/BOOK_FEATURE_PLAN.md` (layout v2 plan:
+  `docs/book-layout-plan` branch, `docs/BOOK_LAYOUT_PLAN.md`).
 
 ## Commands
 - `npm run dev` — web dev server

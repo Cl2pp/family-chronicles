@@ -1,4 +1,4 @@
-import { notFound, redirect } from 'next/navigation';
+import { notFound } from 'next/navigation';
 import { Box } from '@mantine/core';
 import { requireUser } from '@/lib/session';
 import { estimatePageCount, getBookForUser } from '@/lib/books';
@@ -10,14 +10,14 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
   const user = await requireUser();
   const book = await getBookForUser(bookId, user.id);
   if (!book) notFound();
-  // Ordering needs a reviewed preview; already-ordered books show the confirmation.
-  if (book.status !== 'preview_ready' && book.status !== 'ordered') {
-    redirect(`/books/${bookId}`);
-  }
 
+  // Ordering needs a print-quality PDF as the binding proof (exact page count →
+  // quote). draft/rendering/render_failed all render the "preparing" state instead
+  // of a redirect — the builder's live HTML preview is no longer a stand-in for it,
+  // so this is the one place left that triggers and waits for the print render.
   const pageCount = book.pageCount ?? estimatePageCount(book);
   const quote =
-    book.status === 'ordered' ? null : await quoteBookPrice({ format: book.format, pageCount });
+    book.status === 'preview_ready' ? await quoteBookPrice({ format: book.format, pageCount }) : null;
 
   return (
     <Box p="lg" maw={640} mx="auto">
@@ -28,7 +28,8 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
           formatLabel: FORMAT_LABELS[book.format],
           pageCount,
           storyCount: book.chapters.length,
-          ordered: book.status === 'ordered',
+          status: book.status,
+          errorMessage: book.errorMessage,
         }}
         quote={quote}
         userEmail={user.email}

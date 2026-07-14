@@ -4,7 +4,10 @@ import { getBookForUser } from '@/lib/books';
 import { getObjectBuffer } from '@/lib/s3';
 
 /**
- * Access-checked delivery of the (private) preview PDF.
+ * Access-checked delivery of the (private) low-res preview PDF rendered by the
+ * worker's `render-book` job. The builder's live pane is HTML now
+ * (app/api/books/[bookId]/preview-html) — this route backs the "PDF proof"
+ * link shown once a render exists, and the order flow's binding proof.
  *
  * Streamed through the route rather than redirected to a presigned URL: a
  * presigned URL is different on every request, so the browser could never
