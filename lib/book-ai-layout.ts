@@ -252,6 +252,34 @@ function extractJson(raw: string): unknown | null {
 }
 
 /**
+ * Post-processing carry-over (docs/BOOK_LAYOUT_PLAN.md §6 phase 4): overrides the model's
+ * theme/cover.style with whatever plan was already stored, and its cover.heroAssetId with
+ * the book's pinned cover (`books.cover_asset_id`) when one is set — the model doesn't get
+ * a vote on either, it only reasons about photo placement and (absent a pin) its own cover
+ * pick. Mirrors `buildAndPersistAutoPlan`'s carry-over in lib/book-content.ts so both
+ * producers behave identically. Exported for testing — the model call itself
+ * (proposeLayoutPlan) isn't something a test should invoke for real, but this pure
+ * post-processing step is.
+ */
+export function applyPlanCarryOver(plan: LayoutPlan, loaded: LoadedBook): LayoutPlan {
+  const existing = loaded.row.layoutPlan ? validateLayoutPlan(loaded.row.layoutPlan) : null;
+  const existingPlan = existing?.ok ? existing.plan : null;
+
+  const theme = existingPlan?.theme ?? plan.theme;
+  const style = existingPlan?.cover.style ?? plan.cover.style;
+  const pinnedHero = loaded.row.coverAssetId && loaded.allPhotosById.has(loaded.row.coverAssetId)
+    ? loaded.row.coverAssetId
+    : null;
+  const heroAssetId = pinnedHero ?? plan.cover.heroAssetId;
+
+  return {
+    ...plan,
+    theme,
+    cover: heroAssetId ? { style, heroAssetId } : { style },
+  };
+}
+
+/**
  * Runs the AI design pass for a book. Loads the book's current content, sends the model
  * the chapter text + photo metadata + (vision permitting) the actual photos, and returns
  * a validated `LayoutPlan` — or `null` on any failure, in which case the caller should
@@ -297,6 +325,13 @@ export async function proposeLayoutPlan(bookId: string): Promise<LayoutPlan | nu
       return null;
     }
 
+    // Carry theme/cover.style/explicit hero forward from whatever plan is currently
+    // stored, same as the auto-layouter (lib/book-content.ts) — the AI freely redesigns
+    // photo placement and (absent a pin) its own cover pick, but never silently resets a
+    // theme or cover style the user chose, and never overrides a pinned cover photo
+    // (`books.cover_asset_id`) even if it would have picked a different hero itself.
+    const plan = applyPlanCarryOver(validated.plan, loaded);
+
     const content: PlanContent = {
       chapters: chapters.map((c) => ({
         storyId: c.storyId,
@@ -305,13 +340,13 @@ export async function proposeLayoutPlan(bookId: string): Promise<LayoutPlan | nu
       })),
       allAssetIds: [...loaded.allPhotosById.keys()],
     };
-    const problems = checkPlanConsistency(validated.plan, content);
+    const problems = checkPlanConsistency(plan, content);
     if (problems.length > 0) {
       console.error(`[book-ai-layout] design pass for ${bookId} failed consistency check:`, problems);
       return null;
     }
 
-    return validated.plan;
+    return plan;
   } catch (err) {
     console.error(`[book-ai-layout] design pass for ${bookId} failed:`, err);
     return null;

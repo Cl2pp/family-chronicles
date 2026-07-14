@@ -8,7 +8,7 @@ import { z } from 'zod';
  * validates against this schema — it never hard-codes a layout again.
  */
 
-export const LAYOUT_THEMES = ['classic'] as const;
+export const LAYOUT_THEMES = ['classic', 'modern'] as const;
 export type LayoutTheme = (typeof LAYOUT_THEMES)[number];
 
 export const COVER_STYLES = ['framed', 'full-bleed'] as const;

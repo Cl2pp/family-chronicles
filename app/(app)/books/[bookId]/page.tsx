@@ -4,9 +4,9 @@ import { Box } from '@mantine/core';
 import { db } from '@/db';
 import { assets } from '@/db/schema';
 import { requireUser } from '@/lib/session';
-import { getBookForUser, readyStoriesForChronicle } from '@/lib/books';
+import { getBookForUser, getBookLayoutSummary, readyStoriesForChronicle } from '@/lib/books';
 import { presignGet } from '@/lib/s3';
-import { BookBuilder, type CoverOption } from './book-builder';
+import { BookBuilder, type CoverOption, type LayoutChapterData } from './book-builder';
 
 export default async function BookBuilderPage({
   params,
@@ -48,6 +48,42 @@ export default async function BookBuilderPage({
     })),
   );
 
+  // Layout card: the current plan's per-chapter image blocks, with small thumbnails —
+  // extends the coverOptions presign pattern above to every photo the plan actually
+  // places (not just the 60-cap candidate pool, and not limited to cover candidates).
+  const layoutResult = await getBookLayoutSummary(bookId, user.id);
+  const layoutSummary = layoutResult.ok ? layoutResult.value : null;
+  const thumbByAssetId = new Map(photoRows.map((p) => [p.id, p]));
+  const layoutAssetIds = layoutSummary
+    ? [...new Set(layoutSummary.chapters.flatMap((c) => c.images.map((i) => i.assetId)))]
+    : [];
+  const missingIds = layoutAssetIds.filter((id) => !thumbByAssetId.has(id));
+  const extraPhotoRows = missingIds.length
+    ? await db
+        .select({
+          id: assets.id,
+          s3Key: assets.s3Key,
+          thumbS3Key: assets.thumbS3Key,
+          mimeType: assets.mimeType,
+        })
+        .from(assets)
+        .where(inArray(assets.id, missingIds))
+    : [];
+  const layoutThumbUrls = new Map<string, string>();
+  await Promise.all(
+    [...photoRows, ...extraPhotoRows].map(async (p) => {
+      if (!layoutAssetIds.includes(p.id)) return;
+      const url = p.thumbS3Key
+        ? await presignGet(p.thumbS3Key, 'image/webp')
+        : await presignGet(p.s3Key, p.mimeType);
+      layoutThumbUrls.set(p.id, url);
+    }),
+  );
+  const layoutChapters: LayoutChapterData[] = (layoutSummary?.chapters ?? []).map((c) => ({
+    storyId: c.storyId,
+    images: c.images.map((i) => ({ ...i, url: layoutThumbUrls.get(i.assetId) ?? '' })),
+  }));
+
   return (
     <Box p="lg" maw={1200} mx="auto">
       <BookBuilder
@@ -64,6 +100,9 @@ export default async function BookBuilderPage({
           hasPreview: Boolean(book.previewS3Key),
           previewVersion: book.updatedAt.getTime(),
           designing: book.designRequestedAt != null,
+          layoutSource: book.layoutSource,
+          theme: layoutSummary?.theme ?? 'classic',
+          coverStyle: layoutSummary?.coverStyle ?? 'framed',
           chronicleName: book.chronicleName,
           chapters: book.chapters.map((c) => ({
             storyId: c.storyId,
@@ -72,6 +111,7 @@ export default async function BookBuilderPage({
             photoCount: c.photoCount,
           })),
         }}
+        layoutChapters={layoutChapters}
         chronicleStories={chronicleStories.map((s) => ({
           id: s.id,
           title: s.title,

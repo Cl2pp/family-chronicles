@@ -32,7 +32,9 @@ import {
   listBooksTool,
   quoteBookPriceTool,
   renderBookPreviewTool,
+  resetBookLayoutTool,
   setBookStoriesTool,
+  updateBookLayoutTool,
   updateBookTool,
 } from './books';
 import type { Tool } from './types';
@@ -67,6 +69,8 @@ export const tools: Tool[] = [
   setBookStoriesTool,
   renderBookPreviewTool,
   designBookLayoutTool,
+  updateBookLayoutTool,
+  resetBookLayoutTool,
   quoteBookPriceTool,
   // review-then-save
   draftStoryTool,

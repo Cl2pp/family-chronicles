@@ -241,8 +241,17 @@ export async function buildAndPersistAutoPlan(bookId: string, loaded: LoadedBook
       .map((p) => ({ assetId: p.id, width: p.width, height: p.height })),
   }));
 
+  // Carry theme/cover choices forward from whatever plan is currently stored (auto, AI,
+  // or manually edited) so a content-only regeneration never silently resets them — the
+  // structural content (blocks) is always rebuilt fresh, but the design choices survive.
+  const existing = row.layoutPlan ? validateLayoutPlan(row.layoutPlan) : null;
+  const existingPlan = existing?.ok ? existing.plan : null;
+
   const plan = buildLayoutPlan({
     coverAssetId: row.coverAssetId,
+    existingTheme: existingPlan?.theme,
+    existingCoverStyle: existingPlan?.cover.style,
+    existingHeroAssetId: existingPlan?.cover.heroAssetId,
     chapters: autoLayoutChapters,
   });
 

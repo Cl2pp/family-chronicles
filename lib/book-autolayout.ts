@@ -1,4 +1,4 @@
-import type { Block, ChapterPlan, LayoutPlan } from '@/lib/book-layout-plan';
+import type { Block, ChapterPlan, CoverStyle, LayoutPlan, LayoutTheme } from '@/lib/book-layout-plan';
 
 /**
  * The deterministic auto-layouter (docs/BOOK_LAYOUT_PLAN.md §5, producer #1): always
@@ -25,8 +25,17 @@ export interface AutoLayoutChapter {
 }
 
 export interface AutoLayoutInput {
-  /** The book's explicit cover choice, if any. */
+  /** The book's explicit cover choice, if any (`books.cover_asset_id`) — always wins as the
+   *  hero when set, overriding anything carried over from a previous plan. */
   coverAssetId: string | null;
+  /** Theme/cover choices from a previous plan (auto, AI, or manually edited), carried
+   *  forward so a content-only regeneration never silently resets a design choice —
+   *  docs/BOOK_LAYOUT_PLAN.md §6 phase 4. Omit for a book with no prior plan. */
+  existingTheme?: LayoutTheme;
+  existingCoverStyle?: CoverStyle;
+  /** Hero picked by a previous plan (e.g. the AI design pass) even when it was never
+   *  pinned via `coverAssetId` — still preferred over re-picking the first photo. */
+  existingHeroAssetId?: string;
   chapters: AutoLayoutChapter[];
 }
 
@@ -158,11 +167,14 @@ export function buildLayoutPlan(input: AutoLayoutInput): LayoutPlan {
     blocks: buildChapterBlocks(chapter, idx % 2 === 0 ? 'float-left' : 'float-right'),
   }));
 
-  const heroAssetId = input.coverAssetId ?? input.chapters[0]?.images[0]?.assetId;
+  const heroAssetId =
+    input.coverAssetId ?? input.existingHeroAssetId ?? input.chapters[0]?.images[0]?.assetId;
+  const theme = input.existingTheme ?? 'classic';
+  const coverStyle = input.existingCoverStyle ?? 'framed';
 
   return {
-    theme: 'classic',
-    cover: heroAssetId ? { style: 'framed', heroAssetId } : { style: 'framed' },
+    theme,
+    cover: heroAssetId ? { style: coverStyle, heroAssetId } : { style: coverStyle },
     chapters,
   };
 }

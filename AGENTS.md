@@ -63,6 +63,10 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
   a vision-capable model looks at the book's chapters and actual photos and proposes a new
   `layout_plan` (`layout_source: 'ai'`), falling back to the auto-layouter silently on any
   failure — `books.design_requested_at` tracks the in-flight state for the builder's poll.
+  Manual fine-tuning (theme, cover style/photo, a figure's size, its own page, its order)
+  goes through `updateBookLayout`'s targeted ops (`lib/books.ts`, mirrored by the agent's
+  `update_book_layout` tool and the builder's Layout card), rendered by one of two themes —
+  `classic` and `modern` — expressed as a CSS-variables map in `lib/book-layout.ts`.
 
 ## Commands
 - `npm run dev` — web dev server
