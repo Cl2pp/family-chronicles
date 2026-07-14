@@ -445,15 +445,15 @@ export const de: Dictionary = {
       inclShippingDe: 'Preis inklusive Versand innerhalb Deutschlands.',
       priceOnRequest: 'Preis auf Anfrage',
       priceOnRequestHint:
-        'Wir konnten gerade keinen Live-Preis abrufen. Bestell trotzdem — du bekommst den genauen Preis per E-Mail, bevor etwas fällig wird.',
-      noPaymentNote:
-        'Jetzt wird nichts bezahlt. Wir melden uns per E-Mail wegen Zahlung und Lieferung.',
-      orderAt: (price: string) => `Bestellen für ${price}`,
-      orderNow: 'Jetzt bestellen',
-      confirmedTitle: 'Bestellung eingegangen!',
-      confirmedBody: (email: string) =>
-        `Danke! Wir melden uns unter ${email} wegen Zahlung und Lieferung.`,
-      backToBooks: 'Zurück zu den Büchern',
+        'Wir konnten gerade keinen Live-Preis abrufen. Frag das Buch trotzdem an — du bekommst den genauen Preis per E-Mail, bevor etwas fällig wird.',
+      summaryReference: 'Referenz',
+      howToOrderTitle: 'So bestellst du',
+      howToOrderBody: (email: string) =>
+        `In der App wird nichts bestellt oder bezahlt. Wenn du dieses Buch drucken lassen möchtest, schick eine E-Mail mit den Angaben oben an ${email} — wir melden uns persönlich wegen Zahlung und Lieferung.`,
+      emailCta: 'Buch per E-Mail anfragen',
+      emailFallback: (email: string) => `Oder schreib direkt an ${email}.`,
+      mailSubject: (title: string) => `Buchanfrage: „${title}“`,
+      mailIntro: (title: string) => `Hallo, ich möchte das Familienbuch „${title}“ drucken lassen.`,
       preparingTitle: 'Dein Buch wird für den Druck vorbereitet…',
       preparingBody:
         'Zum Bestellen brauchen wir die genaue Seitenzahl und ein druckfertiges PDF als verbindliche Vorlage — das erstellen wir erst jetzt, in voller Fotoauflösung, damit es deinen letzten Stand zeigt.',

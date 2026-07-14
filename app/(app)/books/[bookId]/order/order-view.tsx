@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -13,15 +13,14 @@ import {
   Loader,
   Stack,
   Text,
-  ThemeIcon,
   Title,
 } from '@mantine/core';
-import { IconArrowLeft, IconCircleCheck, IconInfoCircle } from '@tabler/icons-react';
+import { IconArrowLeft, IconInfoCircle, IconMail } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
 import type { BookQuote } from '@/lib/gelato';
 import type { BookStatus } from '@/lib/books';
-import { placeOrderAction, renderPreviewAction } from '../../actions';
+import { renderPreviewAction } from '../../actions';
 
 interface OrderBook {
   id: string;
@@ -39,21 +38,20 @@ const eur = (n: number) =>
 export function OrderView({
   book,
   quote,
-  userEmail,
+  contactEmail,
 }: {
   book: OrderBook;
   quote: BookQuote | null;
-  userEmail: string;
+  contactEmail: string;
 }) {
   const { t } = useI18n();
   const to = t.books.order;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [confirmed, setConfirmed] = useState(book.status === 'ordered');
 
   // The print proof render (`render-book`, ~1-2 minutes) is the one thing left in
   // this app that still needs server-side polling: the builder's preview is live
-  // HTML now, but ordering is only unlocked once a real print PDF exists.
+  // HTML now, but the exact page count + price need a real print PDF.
   useEffect(() => {
     if (book.status !== 'rendering') return;
     const timer = setInterval(async () => {
@@ -69,27 +67,9 @@ export function OrderView({
     return () => clearInterval(timer);
   }, [book.status, book.id, router]);
 
-  if (confirmed) {
-    return (
-      <Card withBorder radius="md" p="xl">
-        <Stack align="center" gap="sm" py="md">
-          <ThemeIcon size={56} radius="xl" color="teal" variant="light">
-            <IconCircleCheck size={36} />
-          </ThemeIcon>
-          <Title order={2}>{to.confirmedTitle}</Title>
-          <Text c="dimmed" ta="center" maw={400}>
-            {to.confirmedBody(userEmail)}
-          </Text>
-          <Button component={Link} href="/books" variant="light" mt="sm">
-            {to.backToBooks}
-          </Button>
-        </Stack>
-      </Card>
-    );
-  }
-
-  const preparing = book.status !== 'preview_ready';
+  const preparing = book.status !== 'preview_ready' && book.status !== 'ordered';
   const priced = quote?.priced ?? false;
+  const priceLine = priced && quote?.total != null ? eur(quote.total) : to.priceOnRequest;
 
   function preparePrintProof() {
     startTransition(async () => {
@@ -97,6 +77,19 @@ export function OrderView({
       if (result.error) notifications.show({ message: result.error, color: 'red' });
     });
   }
+
+  // Everything the email needs, prefilled — the user just hits send.
+  const mailSubject = to.mailSubject(book.title);
+  const mailBody = [
+    to.mailIntro(book.title),
+    '',
+    `${to.summaryReference}: ${book.id}`,
+    `${to.summaryFormat}: ${book.formatLabel}`,
+    `${to.summaryPages}: ${book.pageCount}`,
+    `${to.summaryStories}: ${book.storyCount}`,
+    `${to.total}: ${priceLine}`,
+  ].join('\n');
+  const mailtoHref = `mailto:${contactEmail}?subject=${encodeURIComponent(mailSubject)}&body=${encodeURIComponent(mailBody)}`;
 
   return (
     <Stack gap="md">
@@ -124,6 +117,12 @@ export function OrderView({
           <Group justify="space-between">
             <Text c="dimmed">{to.summaryStories}</Text>
             <Text>{book.storyCount}</Text>
+          </Group>
+          <Group justify="space-between">
+            <Text c="dimmed">{to.summaryReference}</Text>
+            <Text ff="monospace" fz={12}>
+              {book.id}
+            </Text>
           </Group>
         </Stack>
 
@@ -198,25 +197,18 @@ export function OrderView({
       {!preparing && (
         <>
           <Alert color="blue" icon={<IconInfoCircle size={16} />}>
-            {to.noPaymentNote}
+            <Text fw={600} mb={2}>
+              {to.howToOrderTitle}
+            </Text>
+            <Text fz={13}>{to.howToOrderBody(contactEmail)}</Text>
           </Alert>
 
-          <Button
-            size="lg"
-            loading={pending}
-            onClick={() =>
-              startTransition(async () => {
-                const result = await placeOrderAction(book.id);
-                if (result.error) {
-                  notifications.show({ message: result.error, color: 'red' });
-                } else {
-                  setConfirmed(true);
-                }
-              })
-            }
-          >
-            {priced && quote?.total != null ? to.orderAt(eur(quote.total)) : to.orderNow}
+          <Button size="lg" component="a" href={mailtoHref} leftSection={<IconMail size={18} />}>
+            {to.emailCta}
           </Button>
+          <Text fz={12} c="dimmed" ta="center">
+            {to.emailFallback(contactEmail)}
+          </Text>
         </>
       )}
     </Stack>

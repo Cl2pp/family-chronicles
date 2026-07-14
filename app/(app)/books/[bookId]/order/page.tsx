@@ -3,6 +3,7 @@ import { Box } from '@mantine/core';
 import { requireUser } from '@/lib/session';
 import { estimatePageCount, getBookForUser } from '@/lib/books';
 import { quoteBookPrice, FORMAT_LABELS } from '@/lib/gelato';
+import { env } from '@/lib/env';
 import { OrderView } from './order-view';
 
 export default async function OrderPage({ params }: { params: Promise<{ bookId: string }> }) {
@@ -17,7 +18,9 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
   // so this is the one place left that triggers and waits for the print render.
   const pageCount = book.pageCount ?? estimatePageCount(book);
   const quote =
-    book.status === 'preview_ready' ? await quoteBookPrice({ format: book.format, pageCount }) : null;
+    book.status === 'preview_ready' || book.status === 'ordered'
+      ? await quoteBookPrice({ format: book.format, pageCount })
+      : null;
 
   return (
     <Box p="lg" maw={640} mx="auto">
@@ -32,7 +35,7 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
           errorMessage: book.errorMessage,
         }}
         quote={quote}
-        userEmail={user.email}
+        contactEmail={env.BOOK_ORDER_CONTACT_EMAIL}
       />
     </Box>
   );

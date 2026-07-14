@@ -56,17 +56,19 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
   **order-time print proof**: the order page (`app/(app)/books/[bookId]/order`) triggers
   and polls for it when a book isn't `preview_ready` yet, since ordering needs the exact
   page count and a full-resolution binding PDF. Pricing = Gelato quote (`lib/gelato.ts`);
-  v1 ordering stops at an admin email (`lib/email.ts`) — no payment, no Gelato order
-  submission. Full plan: `docs/BOOK_FEATURE_PLAN.md` (layout v2 plan:
-  `docs/book-layout-plan` branch, `docs/BOOK_LAYOUT_PLAN.md`). A "Design my book" button
-  queues the `design-book` job (`lib/book-ai-layout.ts`'s `proposeLayoutPlan`, worker-side):
-  a vision-capable model looks at the book's chapters and actual photos and proposes a new
-  `layout_plan` (`layout_source: 'ai'`), falling back to the auto-layouter silently on any
-  failure — `books.design_requested_at` tracks the in-flight state for the builder's poll.
-  Manual fine-tuning (theme, cover style/photo, a figure's size, its own page, its order)
-  goes through `updateBookLayout`'s targeted ops (`lib/books.ts`, mirrored by the agent's
-  `update_book_layout` tool and the builder's Layout card), rendered by one of two themes —
-  `classic` and `modern` — expressed as a CSS-variables map in `lib/book-layout.ts`.
+  there is NO in-app ordering — the order screen shows the quote and a prefilled mailto
+  to `BOOK_ORDER_CONTACT_EMAIL`; payment/Gelato submission are parked (the `book_orders`
+  table and `ordered` status wait for that flow; `lib/email.ts` is dormant). A "Design my
+  book" button queues the `design-book` job (`lib/book-ai-layout.ts`'s `proposeLayoutPlan`,
+  worker-side): a vision-capable model looks at the book's chapters and actual photos and
+  proposes a new `layout_plan` (`layout_source: 'ai'`), falling back to the auto-layouter
+  silently on any failure — `books.design_requested_at` tracks the in-flight state for the
+  builder's poll. Manual fine-tuning (theme, cover style/photo, a figure's size, its own
+  page, its order) goes through `updateBookLayout`'s targeted ops (`lib/books.ts`, mirrored
+  by the agent's `update_book_layout` tool and the builder's Layout card), rendered by one
+  of two themes — `classic` and `modern` — expressed as a CSS-variables map in
+  `lib/book-layout.ts`. Full plan: `docs/BOOK_FEATURE_PLAN.md` (layout v2 plan:
+  `docs/book-layout-plan` branch, `docs/BOOK_LAYOUT_PLAN.md`).
 
 ## Commands
 - `npm run dev` — web dev server
