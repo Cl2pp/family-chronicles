@@ -70,6 +70,10 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
   `lib/book-layout.ts`. Full plan: `docs/BOOK_FEATURE_PLAN.md` (layout v2 plan:
   `docs/book-layout-plan` branch, `docs/BOOK_LAYOUT_PLAN.md`).
 
+## Workflow
+- After pushing a change to a feature branch, always open a pull request for it
+  (don't wait to be asked).
+
 ## Commands
 - `npm run dev` — web dev server
 - `npm run worker:dev` — worker with watch
