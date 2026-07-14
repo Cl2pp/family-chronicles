@@ -1,11 +1,14 @@
 import { z } from 'zod';
 import { listChroniclesForUser } from '@/lib/chronicles';
+import { addMessage, resolveDraftCard } from '@/lib/conversations';
 import { listChroniclePeople } from '@/lib/people';
 import { matchPeopleByName } from '@/lib/person-match';
 import {
   addPeopleToStory,
+  applyStoryEdit,
   canUserEditStory,
   chroniclesForStory,
+  claimChatAssetsForStory,
   listChronicleStoryTexts,
   listStoriesForUser,
   listStoryPeople,
@@ -13,11 +16,24 @@ import {
   shareStoryToChronicle,
   type StoryListItem,
 } from '@/lib/stories';
+import { saveProposalAsStory } from '@/lib/story-save';
 import { findLikelyDuplicates } from '@/lib/story-similarity';
 import { eventDateToParts } from '@/lib/dates';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { defineTool, type ToolContext } from './types';
 import { ensureContributor, resolvePerson } from './util';
+
+/** The event date to store for a story edit: when the model omits the year, keep the
+ * story's current date untouched (shared by update_story and save_story). */
+function carriedEventDate(
+  story: StoryListItem,
+  args: { eventYear?: number | null; eventMonth?: number | null; eventDay?: number | null },
+) {
+  const current = eventDateToParts(story.eventDate, story.eventDatePrecision);
+  return args.eventYear != null
+    ? { year: args.eventYear, month: args.eventMonth ?? null, day: args.eventDay ?? null }
+    : current;
+}
 
 /** Find one of the user's stories by exact title (case-insensitive) or id. */
 async function resolveStory(
@@ -33,6 +49,39 @@ async function resolveStory(
 }
 
 /**
+ * Duplicate-memory guard shared by draft_story and save_story: compare against every
+ * story already in the chronicle; an actionable error message when a likely match
+ * exists, else null. `toolName` names the tool to re-call with confirmedNew: true.
+ */
+async function likelyDuplicateError(
+  chronicleId: string,
+  args: { title: string; summary?: string | null; body: string; eventYear?: number | null },
+  toolName: string,
+): Promise<string | null> {
+  const existing = await listChronicleStoryTexts(chronicleId);
+  const duplicates = findLikelyDuplicates(
+    { title: args.title, body: `${args.summary ?? ''} ${args.body}`, eventYear: args.eventYear ?? null },
+    existing.map((s) => ({
+      id: s.id,
+      title: s.title,
+      summary: s.summary,
+      body: s.bodyStyled ?? s.bodyOriginal,
+      eventYear: s.eventDate ? s.eventDate.getUTCFullYear() : null,
+    })),
+  );
+  if (!duplicates.length) return null;
+  const list = duplicates
+    .map((d) => `"${d.title}" (${d.eventYear ?? 'year unknown'}, id ${d.id}) — ${d.reason}`)
+    .join('; ');
+  return (
+    `This event may already be recorded in this chronicle: ${list}. ` +
+    'Ask the user: if they are adding details or corrections to that story, use get_story ' +
+    'then update_story instead. Only if they confirm it is a genuinely different story, ' +
+    `call ${toolName} again with confirmedNew: true.`
+  );
+}
+
+/**
  * draft_story — compose a memoir story from the conversation and show it to the user
  * for review. This does NOT save anything; the client renders an editable card and the
  * user accepts it (which calls the acceptStory server action). Contributor access required.
@@ -44,7 +93,8 @@ export const draftStoryTool = defineTool({
     'detail (who, roughly when, where). The body MUST be third-person memoir prose ("Maria ' +
     'remembered…"), preserve every fact (names, places, dates), invent NOTHING, and keep the ' +
     "family's original language. This shows an editable card — it does not save; only the user " +
-    'can save it from the card, so never offer to save it yourself. Keep your reply ' +
+    'can save it from the card, so never offer to save it yourself (only if the user explicitly ' +
+    'asks to save without the card, use save_story instead). Keep your reply ' +
     'short afterwards (e.g. "Here\'s a draft — take a look.").',
   schema: z.object({
     title: z.string().min(1).describe('A short, specific title.'),
@@ -89,30 +139,8 @@ export const draftStoryTool = defineTool({
     // Guard against recording the same memory twice: compare against every story
     // already in this chronicle before showing a new draft card.
     if (!args.confirmedNew) {
-      const existing = await listChronicleStoryTexts(gate.chronicleId);
-      const duplicates = findLikelyDuplicates(
-        { title: args.title, body: `${args.summary ?? ''} ${args.body}`, eventYear: args.eventYear ?? null },
-        existing.map((s) => ({
-          id: s.id,
-          title: s.title,
-          summary: s.summary,
-          body: s.bodyStyled ?? s.bodyOriginal,
-          eventYear: s.eventDate ? s.eventDate.getUTCFullYear() : null,
-        })),
-      );
-      if (duplicates.length) {
-        const list = duplicates
-          .map((d) => `"${d.title}" (${d.eventYear ?? 'year unknown'}, id ${d.id}) — ${d.reason}`)
-          .join('; ');
-        return {
-          ok: false,
-          error:
-            `This event may already be recorded in this chronicle: ${list}. ` +
-            'Ask the user: if they are adding details or corrections to that story, use get_story ' +
-            'then update_story instead. Only if they confirm it is a genuinely different story, ' +
-            'call draft_story again with confirmedNew: true.',
-        };
-      }
+      const duplicateError = await likelyDuplicateError(gate.chronicleId, args, 'draft_story');
+      if (duplicateError) return { ok: false, error: duplicateError };
     }
 
     // On save, named people are connected to the story (they drive its family tags) —
@@ -286,12 +314,7 @@ export const updateStoryTool = defineTool({
     }
 
     const chronicles = await chroniclesForStory(s.id);
-    // When the model omits the year, keep the story's current date untouched.
-    const current = eventDateToParts(s.eventDate, s.eventDatePrecision);
-    const date =
-      args.eventYear != null
-        ? { year: args.eventYear, month: args.eventMonth ?? null, day: args.eventDay ?? null }
-        : current;
+    const date = carriedEventDate(s, args);
     return {
       ok: true,
       message: 'Revision prepared and shown to the user for review. Await their edits and acceptance.',
@@ -310,6 +333,161 @@ export const updateStoryTool = defineTool({
         },
         chronicleId: chronicles[0]?.id ?? '',
         chronicleName: chronicles[0]?.name ?? 'your chronicle',
+      },
+    };
+  },
+});
+
+/**
+ * save_story — save a story (new, or an update to an existing one) directly to storage,
+ * skipping the review card. Only for when the user explicitly asked to save without the
+ * card. Marks any pending draft card as handled so it isn't re-offered.
+ */
+export const saveStoryTool = defineTool({
+  name: 'save_story',
+  description:
+    'Save a story directly to the chronicle, skipping the review card — ONLY when the user has ' +
+    'EXPLICITLY asked you to save without reviewing (e.g. "just save it", "save it directly", or ' +
+    'they say they cannot see or use the card). Never call it on your own initiative: the default ' +
+    'flow is draft_story / update_story, where the user saves from the card. Pass the COMPLETE ' +
+    'story content (same memoir rules) — if a draft card was already shown, reuse its exact ' +
+    'content plus any corrections the user asked for since. To update an existing story instead ' +
+    'of creating a new one, pass its title or id in "story". Any pending draft card is resolved.',
+  schema: z.object({
+    story: z
+      .string()
+      .nullish()
+      .describe('To update an existing story: its title (or id). Omit to create a new story.'),
+    title: z.string().min(1).describe('A short, specific title.'),
+    summary: z.string().describe('One short sentence on what the story is about.'),
+    body: z.string().min(1).describe('The complete third-person memoir prose.'),
+    sourceText: z
+      .string()
+      .nullish()
+      .describe(
+        "The user's own words the story is based on, quoted VERBATIM (their language, first " +
+          'person, unpolished) — for a new story, all of it; when updating, only the NEW ' +
+          'material from this conversation (omit if the update only rewords what is recorded).',
+      ),
+    eventYear: z.number().int().nullish().describe('The year the events happened, if known.'),
+    eventMonth: z
+      .number()
+      .int()
+      .min(1)
+      .max(12)
+      .nullish()
+      .describe('The month (1-12) the events happened — only if the user actually said it.'),
+    eventDay: z
+      .number()
+      .int()
+      .min(1)
+      .max(31)
+      .nullish()
+      .describe('The day of month (1-31) — only if the user gave the exact date.'),
+    people: z.array(z.string()).nullish().describe('Names of people featured in the story.'),
+    confirmedNew: z
+      .boolean()
+      .nullish()
+      .describe(
+        'Set true ONLY after the user has explicitly confirmed this is a separate story, even ' +
+          'though a similar one already exists.',
+      ),
+  }),
+  async execute(args, ctx) {
+    const gate = await ensureContributor(ctx);
+    if ('error' in gate) return { ok: false, error: gate.error };
+
+    if (args.story) {
+      const found = await resolveStory(ctx, args.story);
+      if ('error' in found) return { ok: false, error: found.error };
+      const s = found.story;
+
+      const date = carriedEventDate(s, args);
+      const result = await applyStoryEdit({
+        storyId: s.id,
+        userId: ctx.userId,
+        title: args.title,
+        summary: args.summary || null,
+        body: args.body,
+        eventYear: date.year,
+        eventMonth: date.month,
+        eventDay: date.day,
+        appendSource: args.sourceText ?? null,
+      });
+      if (!result.ok) return { ok: false, error: result.error };
+
+      if (ctx.conversationId) {
+        // The update claims the chat's new uploads (voice notes, photos) too, and any
+        // still-pending card is marked handled so a reload doesn't re-offer it.
+        await claimChatAssetsForStory(ctx.conversationId, s.id, ctx.userId);
+        await resolveDraftCard(ctx.conversationId);
+        await addMessage(
+          ctx.conversationId,
+          'system',
+          `[The story "${args.title}" (id ${s.id}) was updated directly at the user's explicit request via save_story.]`,
+        );
+      }
+      return {
+        ok: true,
+        message: `Updated "${args.title}" (story id ${s.id}).`,
+        receipt: { label: `Updated "${args.title}"`, detail: 'View story', href: `/stories/${s.id}` },
+      };
+    }
+
+    if (!args.confirmedNew) {
+      const duplicateError = await likelyDuplicateError(gate.chronicleId, args, 'save_story');
+      if (duplicateError) return { ok: false, error: duplicateError };
+    }
+
+    const saved = await saveProposalAsStory({
+      userId: ctx.userId,
+      chronicleId: gate.chronicleId,
+      proposal: {
+        kind: 'story',
+        title: args.title,
+        summary: args.summary ?? '',
+        body: args.body,
+        eventYear: args.eventYear ?? null,
+        eventMonth: args.eventMonth ?? null,
+        eventDay: args.eventDay ?? null,
+        people: args.people ?? [],
+        sourceText: args.sourceText ?? null,
+      },
+      conversationId: ctx.conversationId,
+    });
+
+    if (ctx.conversationId) {
+      // Even when the story turned out to be already saved, a still-showing draft card
+      // for it must be resolved — otherwise a reload re-offers a card for a stored story.
+      await resolveDraftCard(ctx.conversationId);
+      if (!saved.alreadySaved) {
+        await addMessage(
+          ctx.conversationId,
+          'system',
+          `[The story "${saved.title}" (id ${saved.storyId}) was saved directly at the user's ` +
+            'explicit request via save_story. It is already stored — do not draft or save it again.]',
+        );
+      }
+    }
+
+    const chronicleName = ctx.activeChronicleName ?? 'the chronicle';
+    let message = saved.alreadySaved
+      ? `An identical story "${saved.title}" was already saved (id ${saved.storyId}) — nothing new was created.`
+      : `Saved "${saved.title}" to ${chronicleName} (story id ${saved.storyId}).`;
+    if (saved.unmatchedPeople.length) {
+      message +=
+        ` NOTE: ${saved.unmatchedPeople.map((n) => `"${n}"`).join(', ')} ` +
+        (saved.unmatchedPeople.length === 1 ? 'is' : 'are') +
+        ' not in the family tree, so the story could not be connected to them. Offer to add them ' +
+        'with add_person and then tag_story_people.';
+    }
+    return {
+      ok: true,
+      message,
+      receipt: {
+        label: `Saved "${saved.title}" to ${chronicleName}`,
+        detail: 'View story',
+        href: `/stories/${saved.storyId}`,
       },
     };
   },

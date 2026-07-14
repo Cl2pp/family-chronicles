@@ -36,7 +36,8 @@ How to work:
 - Prefer acting over asking. Once you have enough to act, call the tool(s) and then briefly say what you did. You may call several tools in one turn (e.g. create_chronicle, then add_person for each relative) — the app applies each immediately.
 - If the user is brand-new with no chronicle, offer to create one, then add the people they mention and connect them.
 - For a STORY: only call draft_story once you have enough detail (who was there, roughly when, where). Otherwise ask ONE short, friendly follow-up instead. The story body must be third-person memoir prose ("Maria remembered…"), preserve every fact (names, places, dates), invent NOTHING, and keep the family's original language. Always pass the user's own messages VERBATIM as sourceText — they become the story's permanent source material. draft_story shows the user an editable card to review and save — after calling it, keep your reply short (e.g. "Here's a draft — take a look.").
-- The draft card is the ONLY way a story gets saved. You cannot save it and must NEVER ask "should I save it?" — the user saves or discards it on the card. Bracketed [system] notes in the conversation tell you when a card was saved or discarded; trust them. A card stays on screen across reloads until the user acts on it, so never call draft_story again for the same story unless the user asks for changes before saving (and if they do, note in your reply that the previous card should be discarded).
+- The draft card is the DEFAULT way a story gets saved: the user saves or discards it on the card, and you must NEVER ask "should I save it?". Bracketed [system] notes in the conversation tell you when a card was saved or discarded; trust them. A card stays on screen across reloads until the user acts on it, so never call draft_story again for the same story unless the user asks for changes before saving (and if they do, note in your reply that the previous card should be discarded).
+- EXCEPTION: when the user EXPLICITLY asks you to save directly — "just save it", "save it without the card", or they say the card never appeared or they cannot use it — call save_story with the complete story content (same memoir rules; reuse the shown draft's content plus any corrections they asked for since). It saves a new story, or updates an existing one when you pass its title/id. It also clears any pending card. Never use save_story without such an explicit request.
 - Never record the same event twice. If a memory sounds like one that may already be recorded, check list_stories first: when a matching story exists, offer to update it (get_story → update_story) instead of drafting a duplicate.
 - To CHANGE an existing story (rewrite it, fix a fact, weave in new details the user just told you): call get_story to read the current text, then update_story with the COMPLETE revised story — same memoir rules, and never drop facts that are still true. When the revision comes from new details the user just told you, pass those messages VERBATIM as newSourceText so they are appended to the story's source history. It shows a review card too; keep your reply short.
 - The user may attach PHOTOS. You can see them. Use what they show — who is in them, the place, the era, the occasion — to ask better questions and to ground the story. Never invent details you cannot actually see, and never describe a photo back to the user as if listing its contents; talk about the memory, not the image file. Photos the user sends are saved with the story automatically.
@@ -155,12 +156,30 @@ export async function runAgent(history: ChatTurn[], ctx: ToolContext): Promise<A
 
   for (let step = 0; step < MAX_STEPS; step++) {
     const lastStep = step === MAX_STEPS - 1;
-    const completion = await openrouter.chat.completions.create({
-      model: env.STYLING_MODEL,
-      messages,
-      tools: schemas,
-      tool_choice: lastStep ? 'none' : 'auto',
-    });
+    let completion;
+    try {
+      completion = await openrouter.chat.completions.create({
+        model: env.STYLING_MODEL,
+        messages,
+        tools: schemas,
+        tool_choice: lastStep ? 'none' : 'auto',
+      });
+    } catch (err) {
+      // A model call that fails AFTER tools already mutated state must not throw the
+      // turn away: nothing would be stored, and the recovery sync would re-run the
+      // whole agent from history and repeat those side effects (duplicate people,
+      // shares, …). Salvage the applied actions; only a clean, side-effect-free turn
+      // may rethrow and be safely regenerated.
+      if (receipts.length || storyDraft) {
+        console.error('Agent model call failed mid-turn; salvaging applied actions:', err);
+        return {
+          reply: 'Something went wrong while I was finishing my reply — but the actions shown here were already applied.',
+          receipts,
+          storyDraft,
+        };
+      }
+      throw err;
+    }
     const msg = completion.choices[0]?.message;
     const toolCalls = msg?.tool_calls ?? [];
 

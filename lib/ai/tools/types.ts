@@ -61,6 +61,8 @@ export interface Receipt {
 export interface ToolContext {
   userId: string;
   userName: string;
+  /** The conversation this turn belongs to — lets tools claim chat uploads etc. */
+  conversationId: string | null;
   activeChronicleId: string | null;
   activeChronicleName: string | null;
   setActiveChronicle(id: string, name: string): void;
