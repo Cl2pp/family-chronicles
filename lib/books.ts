@@ -373,7 +373,13 @@ export async function setBookStories(input: {
   return { ok: true };
 }
 
-/** Queue a preview render. */
+/**
+ * Queue the print-proof render: the worker's `render-book` job prints the layout
+ * plan to two PDFs (a low-res preview + the full-resolution print PDF) via
+ * Chromium. The builder's own preview pane no longer depends on this — it's live
+ * HTML (app/api/books/[bookId]/preview-html) — so this is now only needed before
+ * ordering (exact page count → quote) or when a PDF proof is explicitly wanted.
+ */
 export async function requestPreview(input: {
   bookId: string;
   userId: string;

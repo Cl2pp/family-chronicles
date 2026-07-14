@@ -370,20 +370,15 @@ export const en = {
       coverHint: 'One of the photos from the included stories.',
       autoCover: 'Automatic (first photo)',
       preview: 'Preview',
-      renderPreview: 'Create preview',
-      updatePreview: 'Update preview',
-      rendering: 'Your preview is being created — this takes a minute or two…',
-      renderFailedHint: 'Creating the preview failed. Try again, or ask for help in Chat.',
       tryAgain: 'Try again',
-      previewStale:
-        'The book changed since this preview was created — update it to see the latest state.',
-      noPreviewYet: 'No preview yet. Create one to leaf through your book.',
       openInNewTab: 'Open in new tab',
+      pdfProof: 'PDF proof',
+      livePreviewNote:
+        'This preview always reflects your current draft and uses reduced-quality photos. Ordering creates a full-resolution, print-ready PDF.',
       editWithAI: 'Edit with AI',
       editWithAIHint: 'Ask in Chat, e.g. “Move the wedding story to the front of my book.”',
       orderCta: 'Order this book',
       orderedNote: 'This book has been ordered and can no longer be changed.',
-      lowResNote: 'The preview uses reduced photo quality; the printed book uses the originals.',
     },
     order: {
       title: 'Order your book',
@@ -407,6 +402,13 @@ export const en = {
       confirmedBody: (email: string) =>
         `Thank you! We will get back to you at ${email} about payment and delivery.`,
       backToBooks: 'Back to books',
+      preparingTitle: 'Preparing your book for print…',
+      preparingBody:
+        'Ordering needs an exact page count and a print-quality PDF as the binding proof — we only create this now, at full photo resolution, so it always reflects your latest edits.',
+      prepareCta: 'Prepare print proof',
+      preparing: 'Creating the print proof — this can take a minute or two…',
+      prepareFailedHint: 'Creating the print proof failed.',
+      retry: 'Try again',
     },
   },
   invite: {

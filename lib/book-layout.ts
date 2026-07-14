@@ -1,21 +1,26 @@
 import type { Block, LayoutPlan } from '@/lib/book-layout-plan';
+import { PAGEDJS_POLYFILL_URL } from '@/lib/pagedjs';
 
 /**
- * Book typesetting: pure HTML/CSS generation, printed to PDF by Chromium in
- * lib/book-render.ts. CSS paged media does the layout work (@page size, page
- * breaks, running page numbers); keeping this file free of I/O makes layout
- * changes reviewable and unit-testable.
+ * Book typesetting: pure HTML/CSS generation. `preview`/`print` are printed to PDF by
+ * Chromium in lib/book-render.ts (worker); `screen` is served straight to the browser
+ * by app/api/books/[bookId]/preview-html/route.ts and paginated client-side by
+ * Paged.js — the live builder preview. CSS paged media does the layout work (@page
+ * size, page breaks, running page numbers) in all three; keeping this file free of
+ * I/O makes layout changes reviewable and unit-testable.
  *
  * The renderer no longer decides *what* goes on a page — it renders whatever the
- * `LayoutPlan` (lib/book-layout-plan.ts) says. `lib/book-render.ts` resolves the
- * plan's assetIds to embeddable image data and hands both to `renderBookHtml`.
+ * `LayoutPlan` (lib/book-layout-plan.ts) says. Callers resolve the plan's assetIds to
+ * embeddable image `src`s (data: URIs for PDF variants, presigned URLs for `screen`)
+ * and hand both to `renderBookHtml`.
  */
 
-export type LayoutVariant = 'preview' | 'print';
+export type LayoutVariant = 'preview' | 'print' | 'screen';
 
 export interface LayoutImage {
   assetId: string;
-  /** data: URI (images are embedded so Chromium needs no network). */
+  /** A data: URI for `preview`/`print` (embedded so Chromium needs no network); a
+   *  presigned S3 URL for `screen` (the browser fetches it directly). */
   src: string;
   caption: string | null;
   width: number;
@@ -168,9 +173,48 @@ export function renderBookHtml(input: LayoutInput): string {
   // Inner margins are measured from the TRIM edge; bleed is added on top.
   const m = { top: 18 + bleed, bottom: 20 + bleed, inner: 20 + bleed, outer: 16 + bleed };
 
+  // No watermark on `screen`: it's an auth-gated live-editing surface, not a
+  // distributable file — unlike the PDF, there's nothing to mark up before order.
   const watermark =
     input.variant === 'preview'
       ? `<div class="watermark">${esc(input.watermarkText ?? 'PREVIEW')}</div>`
+      : '';
+
+  // Paged.js: only for `screen`. It polyfills CSS Paged Media in the browser,
+  // chunking the document into real `.pagedjs_page` boxes using the same `@page`
+  // rules Chromium prints from. `after` stamps a data attribute a caller (or a test
+  // driving the iframe) can poll for instead of guessing when pagination settled.
+  const pagedScript =
+    input.variant === 'screen'
+      ? `
+  <script>
+    window.PagedConfig = {
+      auto: true,
+      after: () => { document.documentElement.setAttribute('data-pagedjs-ready', 'true'); },
+    };
+  </script>
+  <script src="${PAGEDJS_POLYFILL_URL}"></script>`
+      : '';
+
+  // Screen-only chrome: pages read as sheets of paper on a neutral background,
+  // never part of the print/preview PDF stylesheet (Chromium's page.pdf() renders
+  // print media anyway, but keeping this out of the shared block keeps the PDF
+  // variants byte-for-byte what they were before `screen` existed).
+  const screenChrome =
+    input.variant === 'screen'
+      ? `
+  html, body { background: #d7d9dd; }
+  body { padding: 10mm 0 24mm; }
+  .pagedjs_pages {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8mm;
+  }
+  .pagedjs_page {
+    background: #fff;
+    box-shadow: 0 3mm 10mm rgba(15, 15, 20, 0.28);
+  }`
       : '';
 
   const coverStyle = input.plan.cover.style;
@@ -494,7 +538,9 @@ export function renderBookHtml(input: LayoutInput): string {
     z-index: 10;
     pointer-events: none;
   }
+${screenChrome}
 </style>
+${pagedScript}
 </head>
 <body>
 ${watermark}

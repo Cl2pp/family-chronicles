@@ -383,20 +383,15 @@ export const de: Dictionary = {
       coverHint: 'Eines der Fotos aus den enthaltenen Geschichten.',
       autoCover: 'Automatisch (erstes Foto)',
       preview: 'Vorschau',
-      renderPreview: 'Vorschau erstellen',
-      updatePreview: 'Vorschau aktualisieren',
-      rendering: 'Deine Vorschau wird erstellt — das dauert ein bis zwei Minuten…',
-      renderFailedHint: 'Die Vorschau konnte nicht erstellt werden. Versuch es erneut oder frag im Chat um Hilfe.',
       tryAgain: 'Erneut versuchen',
-      previewStale:
-        'Das Buch wurde seit dieser Vorschau geändert — aktualisiere sie, um den neuesten Stand zu sehen.',
-      noPreviewYet: 'Noch keine Vorschau. Erstelle eine, um durch dein Buch zu blättern.',
       openInNewTab: 'In neuem Tab öffnen',
+      pdfProof: 'PDF-Vorlage',
+      livePreviewNote:
+        'Diese Vorschau zeigt immer deinen aktuellen Entwurf und nutzt reduzierte Fotoqualität. Beim Bestellen entsteht ein druckfertiges PDF in voller Auflösung.',
       editWithAI: 'Mit KI bearbeiten',
       editWithAIHint: 'Frag im Chat, z. B. „Schieb die Hochzeitsgeschichte an den Anfang meines Buchs.“',
       orderCta: 'Dieses Buch bestellen',
       orderedNote: 'Dieses Buch wurde bestellt und kann nicht mehr geändert werden.',
-      lowResNote: 'Die Vorschau nutzt reduzierte Fotoqualität; im gedruckten Buch stecken die Originale.',
     },
     order: {
       title: 'Dein Buch bestellen',
@@ -420,6 +415,13 @@ export const de: Dictionary = {
       confirmedBody: (email: string) =>
         `Danke! Wir melden uns unter ${email} wegen Zahlung und Lieferung.`,
       backToBooks: 'Zurück zu den Büchern',
+      preparingTitle: 'Dein Buch wird für den Druck vorbereitet…',
+      preparingBody:
+        'Zum Bestellen brauchen wir die genaue Seitenzahl und ein druckfertiges PDF als verbindliche Vorlage — das erstellen wir erst jetzt, in voller Fotoauflösung, damit es deinen letzten Stand zeigt.',
+      prepareCta: 'Druckvorlage erstellen',
+      preparing: 'Die Druckvorlage wird erstellt — das dauert ein bis zwei Minuten…',
+      prepareFailedHint: 'Die Druckvorlage konnte nicht erstellt werden.',
+      retry: 'Erneut versuchen',
     },
   },
   invite: {

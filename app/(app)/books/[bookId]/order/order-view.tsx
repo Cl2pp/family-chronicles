@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Alert,
   Anchor,
@@ -9,6 +10,7 @@ import {
   Card,
   Divider,
   Group,
+  Loader,
   Stack,
   Text,
   ThemeIcon,
@@ -18,7 +20,8 @@ import { IconArrowLeft, IconCircleCheck, IconInfoCircle } from '@tabler/icons-re
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
 import type { BookQuote } from '@/lib/gelato';
-import { placeOrderAction } from '../../actions';
+import type { BookStatus } from '@/lib/books';
+import { placeOrderAction, renderPreviewAction } from '../../actions';
 
 interface OrderBook {
   id: string;
@@ -26,7 +29,8 @@ interface OrderBook {
   formatLabel: string;
   pageCount: number;
   storyCount: number;
-  ordered: boolean;
+  status: BookStatus;
+  errorMessage: string | null;
 }
 
 const eur = (n: number) =>
@@ -43,8 +47,27 @@ export function OrderView({
 }) {
   const { t } = useI18n();
   const to = t.books.order;
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [confirmed, setConfirmed] = useState(book.ordered);
+  const [confirmed, setConfirmed] = useState(book.status === 'ordered');
+
+  // The print proof render (`render-book`, ~1-2 minutes) is the one thing left in
+  // this app that still needs server-side polling: the builder's preview is live
+  // HTML now, but ordering is only unlocked once a real print PDF exists.
+  useEffect(() => {
+    if (book.status !== 'rendering') return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/books/${book.id}/status`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { status: string };
+        if (data.status !== 'rendering') router.refresh();
+      } catch {
+        /* transient network error — next tick retries */
+      }
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [book.status, book.id, router]);
 
   if (confirmed) {
     return (
@@ -65,7 +88,15 @@ export function OrderView({
     );
   }
 
+  const preparing = book.status !== 'preview_ready';
   const priced = quote?.priced ?? false;
+
+  function preparePrintProof() {
+    startTransition(async () => {
+      const result = await renderPreviewAction(book.id);
+      if (result.error) notifications.show({ message: result.error, color: 'red' });
+    });
+  }
 
   return (
     <Stack gap="md">
@@ -98,7 +129,38 @@ export function OrderView({
 
         <Divider my="md" />
 
-        {priced && quote ? (
+        {preparing ? (
+          <Stack gap="sm">
+            {book.status === 'render_failed' ? (
+              <Alert color="red" icon={<IconInfoCircle size={16} />}>
+                <Text fw={600} mb={2}>
+                  {to.prepareFailedHint}
+                </Text>
+                {book.errorMessage && (
+                  <Text fz={11} c="dimmed">
+                    {book.errorMessage}
+                  </Text>
+                )}
+              </Alert>
+            ) : (
+              <Alert color="blue" icon={<IconInfoCircle size={16} />}>
+                <Text fw={600} mb={2}>
+                  {to.preparingTitle}
+                </Text>
+                <Text fz={13}>{book.status === 'rendering' ? to.preparing : to.preparingBody}</Text>
+              </Alert>
+            )}
+            {book.status === 'rendering' ? (
+              <Group justify="center" py={4}>
+                <Loader size="sm" />
+              </Group>
+            ) : (
+              <Button loading={pending} onClick={preparePrintProof}>
+                {book.status === 'render_failed' ? to.retry : to.prepareCta}
+              </Button>
+            )}
+          </Stack>
+        ) : priced && quote ? (
           <Stack gap={6}>
             <Group justify="space-between">
               <Text c="dimmed">{to.printing}</Text>
@@ -133,26 +195,30 @@ export function OrderView({
         )}
       </Card>
 
-      <Alert color="blue" icon={<IconInfoCircle size={16} />}>
-        {to.noPaymentNote}
-      </Alert>
+      {!preparing && (
+        <>
+          <Alert color="blue" icon={<IconInfoCircle size={16} />}>
+            {to.noPaymentNote}
+          </Alert>
 
-      <Button
-        size="lg"
-        loading={pending}
-        onClick={() =>
-          startTransition(async () => {
-            const result = await placeOrderAction(book.id);
-            if (result.error) {
-              notifications.show({ message: result.error, color: 'red' });
-            } else {
-              setConfirmed(true);
+          <Button
+            size="lg"
+            loading={pending}
+            onClick={() =>
+              startTransition(async () => {
+                const result = await placeOrderAction(book.id);
+                if (result.error) {
+                  notifications.show({ message: result.error, color: 'red' });
+                } else {
+                  setConfirmed(true);
+                }
+              })
             }
-          })
-        }
-      >
-        {priced && quote?.total != null ? to.orderAt(eur(quote.total)) : to.orderNow}
-      </Button>
+          >
+            {priced && quote?.total != null ? to.orderAt(eur(quote.total)) : to.orderNow}
+          </Button>
+        </>
+      )}
     </Stack>
   );
 }

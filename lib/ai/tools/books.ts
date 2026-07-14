@@ -198,9 +198,12 @@ export const setBookStoriesTool = defineTool({
 export const renderBookPreviewTool = defineTool({
   name: 'render_book_preview',
   description:
-    'Queue the book preview PDF (takes a minute or two). Call after content changes when the ' +
-    'user wants to see the result. Tell the user the preview will appear on the book page ' +
-    'shortly — you cannot wait for it or view it yourself.',
+    'Queue the book\'s print proof — a full-resolution, print-ready PDF (takes a minute or two). ' +
+    'The builder page itself already shows a live HTML preview that updates instantly on every ' +
+    'edit, so you do NOT need this tool just to let the user see their changes — only call it ' +
+    'when they want the official print-quality PDF, or are getting ready to order (ordering ' +
+    'requires this render to have completed). Tell the user the print proof will be ready on the ' +
+    'book\'s order page shortly — you cannot wait for it or view it yourself.',
   schema: z.object({
     book: z.string().min(1).describe('The book title (or id) to render.'),
   }),
@@ -211,8 +214,8 @@ export const renderBookPreviewTool = defineTool({
     if (!result.ok) return { ok: false, error: result.error };
     return {
       ok: true,
-      message: 'Preview render queued.',
-      receipt: { label: `Rendering preview of "${found.book.title}"`, href: `/books/${found.book.id}` },
+      message: 'Print proof render queued.',
+      receipt: { label: `Rendering print proof of "${found.book.title}"`, href: `/books/${found.book.id}/order` },
     };
   },
 });
