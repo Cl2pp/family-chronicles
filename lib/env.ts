@@ -50,9 +50,9 @@ const schema = z.object({
     ),
   /** Flat margin (EUR) added on top of Gelato's product + shipping cost. */
   BOOK_MARGIN_EUR: z.coerce.number().default(15),
-  /** Where "a user ordered a book" notifications go. */
-  BOOK_ORDER_NOTIFY_EMAIL: z.string().email().optional(),
-  /** smtp(s)://user:pass@host:port — used by lib/email.ts. */
+  /** Shown on the order screen — users email this address to request a printed book. */
+  BOOK_ORDER_CONTACT_EMAIL: z.string().email().default('clemens@mtx.studio'),
+  /** smtp(s)://user:pass@host:port — used by lib/email.ts (dormant until a flow sends mail). */
   SMTP_URL: z.string().optional(),
   SMTP_FROM: z.string().default('Family Chronicle <no-reply@family.clepp.de>'),
   /** System Chromium for the book renderer (set in Docker; empty = puppeteer's own). */

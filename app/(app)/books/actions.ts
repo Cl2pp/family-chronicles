@@ -7,7 +7,6 @@ import { requireUser } from '@/lib/session';
 import { resolveActiveChronicle } from '@/lib/chronicles';
 import {
   createBook,
-  placeOrder,
   requestPreview,
   setBookStories,
   updateBook,
@@ -63,13 +62,5 @@ export async function renderPreviewAction(bookId: string): Promise<{ error?: str
   const user = await requireUser();
   const result = await requestPreview({ bookId, userId: user.id });
   revalidatePath(`/books/${bookId}`);
-  return result.ok ? {} : { error: result.error };
-}
-
-export async function placeOrderAction(bookId: string): Promise<{ error?: string }> {
-  const user = await requireUser();
-  const result = await placeOrder({ bookId, userId: user.id });
-  revalidatePath(`/books/${bookId}`);
-  revalidatePath('/books');
   return result.ok ? {} : { error: result.error };
 }
