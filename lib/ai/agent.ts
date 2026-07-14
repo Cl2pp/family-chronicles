@@ -132,6 +132,63 @@ function toModelTurns(history: ChatTurn[]): ChatCompletionMessageParam[] {
   });
 }
 
+/**
+ * Anthropic prompt caching, passed through OpenRouter. `cache_control` on a content
+ * part marks a cache breakpoint: everything up to it (tool schemas → system → messages)
+ * is cached per user+chronicle for ~5 minutes, so each follow-up turn — and each
+ * think→act step inside one turn — re-reads the prefix at ~10% of the token price
+ * instead of re-paying for the whole conversation. The field is an Anthropic extension
+ * the OpenAI SDK types don't know, hence the local part type; non-Anthropic models
+ * simply ignore it.
+ */
+const CACHE_CONTROL = { type: 'ephemeral' } as const;
+
+type CacheablePart = { type: string; cache_control?: typeof CACHE_CONTROL } & Record<
+  string,
+  unknown
+>;
+
+/** Copy a message with a cache breakpoint on its last content part (string content is
+ * wrapped into a text part first). Messages without content are returned unmarked. */
+function withBreakpoint(msg: ChatCompletionMessageParam): ChatCompletionMessageParam {
+  let parts: CacheablePart[];
+  if (typeof msg.content === 'string') {
+    if (!msg.content) return msg;
+    parts = [{ type: 'text', text: msg.content }];
+  } else if (Array.isArray(msg.content) && msg.content.length) {
+    parts = (msg.content as unknown as CacheablePart[]).map((p) => ({ ...p }));
+  } else {
+    return msg;
+  }
+  parts[parts.length - 1] = { ...parts[parts.length - 1], cache_control: CACHE_CONTROL };
+  return { ...msg, content: parts } as unknown as ChatCompletionMessageParam;
+}
+
+/**
+ * Return a copy of the conversation with (at most) three cache breakpoints — Anthropic
+ * allows four per request:
+ *  1. the system prompt — stable per user+chronicle, caches the tool schemas with it;
+ *  2. the second-to-last user turn — a read point that survives from the previous turn;
+ *  3. the final message — extends the cache over the newest turn, and over each batch
+ *     of tool results as the in-turn loop grows the array.
+ * Rebuilt fresh before every model call so the underlying array never accumulates stale
+ * markers.
+ */
+function withCacheBreakpoints(messages: ChatCompletionMessageParam[]): ChatCompletionMessageParam[] {
+  const marked = [...messages];
+  const mark = (i: number) => {
+    marked[i] = withBreakpoint(marked[i]);
+  };
+
+  if (marked[0]?.role === 'system') mark(0);
+  const userIndexes = marked.flatMap((m, i) => (m.role === 'user' ? [i] : []));
+  const prevUser = userIndexes[userIndexes.length - 2];
+  if (prevUser !== undefined) mark(prevUser);
+  if (marked.length > 1) mark(marked.length - 1);
+
+  return marked;
+}
+
 /** A short note describing the current chronicle context for the system prompt. */
 function contextNote(ctx: ToolContext): string {
   if (ctx.activeChronicleId) {
@@ -161,7 +218,7 @@ export async function runAgent(history: ChatTurn[], ctx: ToolContext): Promise<A
     try {
       completion = await openrouter.chat.completions.create({
         model: env.STYLING_MODEL,
-        messages,
+        messages: withCacheBreakpoints(messages),
         tools: schemas,
         tool_choice: lastStep ? 'none' : 'auto',
       });
