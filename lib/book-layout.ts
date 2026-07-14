@@ -225,16 +225,29 @@ function renderBlocks(blocks: Block[], content: LayoutChapterContent): string {
         }
         const cls = block.size === 'float-left' ? 'figure-float-left' : 'figure-float-right';
         const figure = figureHtml(img, cls);
-        // A float paired with the paragraphs block right after it, as one atomic
-        // unit. Chromium's print pagination doesn't keep a float and its wrapping
-        // text together on its own: a float that doesn't fit the remaining page
-        // moves to the next page, but plain block siblings after it don't follow —
-        // they stay behind, stranding the image alone with no text beside it.
-        // Wrapping both in one break-inside: avoid container fixes that: either
-        // both fit on the current page, or both move to the next one together.
+        // A float paired with the FIRST paragraph of the block right after it, as
+        // one atomic unit. Chromium's print pagination doesn't keep a float and
+        // its wrapping text together on its own: a float that doesn't fit the
+        // remaining page moves to the next page, but plain block siblings after
+        // it don't follow — they stay behind, stranding the image alone with no
+        // text beside it. Wrapping both in one break-inside: avoid container
+        // fixes that: either both fit on the current page, or both move together.
+        //
+        // At most TWO paragraphs join the wrap: an avoid-unit must never grow
+        // taller than a page (float + a whole multi-paragraph block can), because
+        // an unbreakable element taller than the page hangs Paged.js pagination
+        // and gets clipped by Chromium print. Two paragraphs beside a height-
+        // capped float stay comfortably inside one page; the rest of the block
+        // flows after the wrap's clearfix as normal full-width text.
         const next = blocks[idx + 1];
         if (next && next.type === 'paragraphs') {
-          pieces.push(`<div class="float-wrap">${figure}${paragraphsHtml(next, content)}</div>`);
+          const wrapTo = Math.min(next.to, next.from + 1);
+          pieces.push(
+            `<div class="float-wrap">${figure}${paragraphsHtml({ ...next, to: wrapTo }, content)}</div>`,
+          );
+          if (next.to > wrapTo) {
+            pieces.push(paragraphsHtml({ ...next, from: wrapTo + 1 }, content));
+          }
           idx++; // consumed — don't render it again on the next loop iteration
         } else {
           pieces.push(`<div class="float-wrap">${figure}</div>`);
@@ -555,9 +568,18 @@ ${pageNumberCss(theme)}
   figure img { display: block; border-radius: var(--fc-photo-radius); }
   figcaption, .caption { font-size: 8.5pt; color: var(--fc-color-muted); margin-top: 1.5mm; font-style: italic; }
 
-  /* One landscape hero, full column width, uncropped. */
+  /* One hero image, uncropped. Landscapes fill the column width; portraits are
+     height-capped and centered instead — an unbreakable figure taller than the
+     page's content box hangs Paged.js pagination forever (and Chromium print
+     just clips it), so no figure may ever exceed one page. */
   figure.figure-full { width: 100%; }
-  figure.figure-full img { width: 100%; height: auto; }
+  figure.figure-full img {
+    max-width: 100%;
+    width: auto;
+    height: auto;
+    max-height: 170mm;
+    margin-inline: auto;
+  }
 
   /* Portrait floated beside wrapping text. See renderBlocks() in book-layout.ts:
      the float and the paragraph block right after it are wrapped together in one
@@ -633,7 +655,11 @@ ${pageNumberCss(theme)}
   }
   .photo-page-block img {
     max-width: 100%;
-    max-height: 85%;
+    /* Fixed cap, not a percentage: the flex parent has no definite height, so a
+       % max-height computes to none — leaving a tall portrait free to overflow
+       the page, which stalls Paged.js. ~200mm leaves room for the caption on
+       both trim sizes. */
+    max-height: 200mm;
     width: auto;
     height: auto;
     object-fit: contain;
