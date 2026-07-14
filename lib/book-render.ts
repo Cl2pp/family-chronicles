@@ -60,6 +60,14 @@ function paragraphs(body: string): string[] {
     .filter(Boolean);
 }
 
+interface PhotoRef {
+  id: string;
+  s3Key: string;
+  /** Downscaled WebP (lib/thumbnails.ts), when already generated. */
+  thumbS3Key: string | null;
+  caption: string | null;
+}
+
 interface LoadedBook {
   row: typeof books.$inferSelect;
   chronicleName: string;
@@ -67,9 +75,9 @@ interface LoadedBook {
     title: string;
     eventLabel: string | null;
     body: string;
-    photoAssets: Array<{ id: string; s3Key: string; caption: string | null }>;
+    photoAssets: PhotoRef[];
   }>;
-  coverS3Key: string | null;
+  cover: PhotoRef | null;
 }
 
 async function loadBook(bookId: string): Promise<LoadedBook> {
@@ -103,29 +111,35 @@ async function loadBook(bookId: string): Promise<LoadedBook> {
       id: assets.id,
       storyId: assets.storyId,
       s3Key: assets.s3Key,
+      thumbS3Key: assets.thumbS3Key,
       caption: assets.caption,
     })
     .from(assets)
     .where(and(inArray(assets.storyId, storyIds), eq(assets.kind, 'photo')))
     .orderBy(asc(assets.createdAt));
-  const photosByStory = new Map<string, Array<{ id: string; s3Key: string; caption: string | null }>>();
+  const photosByStory = new Map<string, PhotoRef[]>();
   for (const p of photoRows) {
     const arr = photosByStory.get(p.storyId) ?? [];
-    arr.push({ id: p.id, s3Key: p.s3Key, caption: p.caption });
+    arr.push({ id: p.id, s3Key: p.s3Key, thumbS3Key: p.thumbS3Key, caption: p.caption });
     photosByStory.set(p.storyId, arr);
   }
 
-  let coverS3Key: string | null = null;
+  let cover: PhotoRef | null = null;
   if (row.coverAssetId) {
-    const [cover] = await db
-      .select({ s3Key: assets.s3Key })
+    const [c] = await db
+      .select({
+        id: assets.id,
+        s3Key: assets.s3Key,
+        thumbS3Key: assets.thumbS3Key,
+        caption: assets.caption,
+      })
       .from(assets)
       .where(eq(assets.id, row.coverAssetId))
       .limit(1);
-    coverS3Key = cover?.s3Key ?? null;
+    cover = c ?? null;
   }
   // Fall back to the first photo in the book so covers are never blank grey.
-  if (!coverS3Key) coverS3Key = photoRows[0]?.s3Key ?? null;
+  if (!cover) cover = photoRows[0] ?? null;
 
   return {
     row,
@@ -136,7 +150,7 @@ async function loadBook(bookId: string): Promise<LoadedBook> {
       body: c.bodyStyled ?? c.bodyOriginal ?? '',
       photoAssets: c.includePhotos ? (photosByStory.get(c.storyId) ?? []) : [],
     })),
-    coverS3Key,
+    cover,
   };
 }
 
@@ -164,13 +178,34 @@ async function renderVariant(
   variant: LayoutVariant,
 ): Promise<Buffer> {
   // Embed photos at the variant's resolution; failures skip the photo, not the book.
+  //
+  // Source selection: the preview targets 640px — exactly the thumbnail size — so
+  // it reads the WebP thumbnail when one exists and skips downloading camera
+  // originals. Print wants the original, but falls back to the thumbnail when the
+  // original can't be decoded (e.g. HEIC, which sharp's prebuilt libvips can't
+  // read) — a 640-1600px photo in print beats a missing one.
   const photoCache = new Map<string, { src: string; landscape: boolean }>();
-  async function embed(s3Key: string) {
-    const hit = photoCache.get(s3Key);
+  async function embed(photo: Pick<PhotoRef, 's3Key' | 'thumbS3Key'>) {
+    const hit = photoCache.get(photo.s3Key);
     if (hit) return hit;
-    const data = await photoDataUri(await getObjectBuffer(s3Key), variant);
-    photoCache.set(s3Key, data);
-    return data;
+    const sources =
+      variant === 'preview'
+        ? [photo.thumbS3Key ?? photo.s3Key]
+        : [photo.s3Key, ...(photo.thumbS3Key ? [photo.thumbS3Key] : [])];
+    let lastError: unknown;
+    for (const key of sources) {
+      try {
+        const data = await photoDataUri(await getObjectBuffer(key), variant);
+        photoCache.set(photo.s3Key, data);
+        return data;
+      } catch (e) {
+        lastError = e;
+        if (key !== sources[sources.length - 1]) {
+          console.warn(`[book-render] ${key} failed, trying thumbnail:`, e);
+        }
+      }
+    }
+    throw lastError;
   }
 
   const chapters: LayoutChapter[] = [];
@@ -178,7 +213,7 @@ async function renderVariant(
     const photos: LayoutPhoto[] = [];
     for (const p of c.photoAssets) {
       try {
-        const { src, landscape } = await embed(p.s3Key);
+        const { src, landscape } = await embed(p);
         photos.push({ src, landscape, caption: p.caption });
       } catch (e) {
         console.error(`[book-render] skipping photo ${p.s3Key}:`, e);
@@ -193,9 +228,9 @@ async function renderVariant(
   }
 
   let coverSrc: string | null = null;
-  if (loaded.coverS3Key) {
+  if (loaded.cover) {
     try {
-      coverSrc = (await embed(loaded.coverS3Key)).src;
+      coverSrc = (await embed(loaded.cover)).src;
     } catch (e) {
       console.error(`[book-render] cover photo failed:`, e);
     }
