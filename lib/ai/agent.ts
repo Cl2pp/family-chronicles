@@ -4,7 +4,14 @@ import type {
 } from 'openai/resources/chat/completions';
 import { env } from '@/lib/env';
 import { openrouter } from './client';
-import { toOpenAISchemas, toolsByName, type Receipt, type StoryDraft, type ToolContext } from './tools';
+import {
+  toOpenAISchemas,
+  tools,
+  type Receipt,
+  type StoryDraft,
+  type Tool,
+  type ToolContext,
+} from './tools';
 
 /**
  * A prior turn of the conversation, as stored. `system` turns are app events the
@@ -204,12 +211,70 @@ function contextNote(ctx: ToolContext): string {
  * final words plus any receipts / a pending story draft for the UI.
  */
 export async function runAgent(history: ChatTurn[], ctx: ToolContext): Promise<AgentResult> {
+  return runToolLoop(BASE_SYSTEM + contextNote(ctx), tools, history, ctx);
+}
+
+/** The book builder's chat only gets book tools (plus the story reads set_book_stories
+ *  needs to find chapters by name) — it edits ONE book, it never drafts stories or
+ *  touches the tree. Notably absent: create_book and list_books, which would invite the
+ *  agent to wander off to other books. */
+const BOOK_TOOL_NAMES = new Set([
+  'get_book',
+  'update_book',
+  'set_book_stories',
+  'update_book_layout',
+  'reset_book_layout',
+  'design_book_layout',
+  'render_book_preview',
+  'quote_book_price',
+  'list_stories',
+  'get_story',
+]);
+const bookTools = tools.filter((t) => BOOK_TOOL_NAMES.has(t.name));
+
+/** System prompt for the builder-embedded book chat: same chronicler voice, but scoped
+ *  hard to the one book whose live preview sits next to the chat. */
+function bookSystem(book: { id: string; title: string }, ctx: ToolContext): string {
+  return `You are the book design assistant inside the book builder of "Family Chronicle" — a private app where families turn memories into a shared third-person memoir. The user is looking at ONE printable hardcover book, with a live preview of it right next to this chat. Your only job is to change THIS book the way they ask, by calling tools.
+
+The book is "${book.title}" (id ${book.id}), in the chronicle "${ctx.activeChronicleName ?? ''}". The user is ${ctx.userName}.
+
+How to work:
+- Every tool call targets this book: always pass "${book.id}" as the \`book\` argument. Never edit any other book.
+- Prefer acting over asking. Once you know what they want, call the tool(s), then briefly say what you did. Only ask when the request is genuinely ambiguous.
+- Call get_book first whenever you need current state — chapter order, storyIds, or a photo's assetId for layout edits (update_book_layout needs assetIds from get_book's layoutImages).
+- What you can change: title/subtitle/dedication/format (update_book); which stories are chapters and their order (set_book_stories — pass the COMPLETE new list; find new stories with list_stories); theme, cover style, cover photo, a photo's size, its own page, or its order (update_book_layout); a full AI redesign of the photo layout (design_book_layout — takes about a minute, the page shows its progress; never call it twice in one request); back to the automatic layout (reset_book_layout); the price (quote_book_price).
+- The live preview updates by itself right after your edits — never tell the user to refresh, re-render, or wait for changes to appear.
+- design_book_layout and reset_book_layout fail asking for confirmation when the layout has manual edits — pass overwriteEdits only after the user explicitly confirms.
+- Layout taste, when the user leaves the choice to you: fill the page, stay symmetric. Prefer photos side by side or in grids over lone small images; a standout photo belongs on its own full page. Avoid layouts that leave a photo stuck to one side with empty space beside it.
+- You cannot place the order — that is the "Order this book" button on this page; point the user there when they're happy.
+- If a tool returns an error, explain it plainly and suggest the fix; never pretend an action succeeded.
+- Reply in the language the user writes in. Keep replies short and friendly; light Markdown is fine, never raw JSON or tool names.`;
+}
+
+/** Run the book-scoped agent loop for the builder's embedded chat. */
+export async function runBookAgent(
+  history: ChatTurn[],
+  ctx: ToolContext,
+  book: { id: string; title: string },
+): Promise<AgentResult> {
+  return runToolLoop(bookSystem(book, ctx), bookTools, history, ctx);
+}
+
+/** The shared think→act loop: one system prompt, one tool catalog, one conversation. */
+async function runToolLoop(
+  system: string,
+  toolset: Tool[],
+  history: ChatTurn[],
+  ctx: ToolContext,
+): Promise<AgentResult> {
   const messages: ChatCompletionMessageParam[] = [
-    { role: 'system', content: BASE_SYSTEM + contextNote(ctx) },
+    { role: 'system', content: system },
     ...toModelTurns(history),
   ];
 
-  const schemas = toOpenAISchemas();
+  const schemas = toOpenAISchemas(toolset);
+  const byName = new Map(toolset.map((t) => [t.name, t]));
   const receipts: Receipt[] = [];
   let storyDraft: StoryDraft | null = null;
 
@@ -252,7 +317,7 @@ export async function runAgent(history: ChatTurn[], ctx: ToolContext): Promise<A
 
     for (const call of toolCalls) {
       if (call.type !== 'function') continue;
-      const content = await runToolCall(call.function.name, call.function.arguments, ctx, (r) => {
+      const content = await runToolCall(byName, call.function.name, call.function.arguments, ctx, (r) => {
         if (r.receipt) receipts.push(r.receipt);
         if (r.storyDraft) storyDraft = r.storyDraft;
       });
@@ -265,12 +330,13 @@ export async function runAgent(history: ChatTurn[], ctx: ToolContext): Promise<A
 
 /** Validate + execute a single tool call, returning the text to feed back to the model. */
 async function runToolCall(
+  byName: Map<string, Tool>,
   name: string,
   rawArgs: string,
   ctx: ToolContext,
   onSuccess: (r: { receipt?: Receipt; storyDraft?: StoryDraft }) => void,
 ): Promise<string> {
-  const tool = toolsByName.get(name);
+  const tool = byName.get(name);
   if (!tool) return `Error: unknown tool "${name}".`;
 
   let parsedArgs: unknown;
