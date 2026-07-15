@@ -145,6 +145,8 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 | `DATABASE_URL` | Postgres connection | Coolify Postgres resource → internal URL |
 | `BETTER_AUTH_SECRET` | auth signing secret | `openssl rand -base64 32` |
 | `BETTER_AUTH_URL` | app's public origin | must equal the live domain: `https://family.clepp.de` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in (optional) | Google Cloud → OAuth 2.0 Web client. Redirect URI: `<BETTER_AUTH_URL>/api/auth/callback/google`. Both must be set to enable the provider server-side |
+| `NEXT_PUBLIC_GOOGLE_AUTH_ENABLED` | show the Google button | `true` to render "Continue with Google" on login/signup. Set together with the two `GOOGLE_*` secrets (it's build-time inlined, so a redeploy is needed to toggle) |
 | `OPENROUTER_API_KEY` | story styling | OpenRouter |
 | `STYLING_MODEL` | which LLM to style with | e.g. `anthropic/claude-opus-4-8` (swap for cost) |
 | `GROQ_API_KEY` | voice transcription | Groq (optional — voice only) |

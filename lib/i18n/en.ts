@@ -50,6 +50,8 @@ export const en = {
     tellUsYourName: 'Tell us your name',
     signUpFailed: 'Sign up failed',
     alreadyHaveAccount: 'Already have an account?',
+    continueWithGoogle: 'Continue with Google',
+    or: 'or',
   },
   account: {
     title: 'Account',
