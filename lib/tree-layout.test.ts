@@ -223,4 +223,99 @@ describe('layoutFamilyTree', () => {
     const { validEdges } = layoutFamilyTree(people, edges);
     expect(validEdges).toHaveLength(1);
   });
+
+  it("aligns a marry-in's parents with their in-laws, not with the tree roots", () => {
+    // One side has an extra recorded generation (GrandpaA above ParentA).
+    // ParentB has no recorded parents but is the same generation as ParentA —
+    // depth-from-roots used to pin ParentB to the top row next to GrandpaA
+    // and push ChildB two rows below their own parent.
+    const people = [
+      person('GrandpaA', '1930-01-01'),
+      person('ParentA', '1960-01-01'),
+      person('ParentB', '1962-01-01'),
+      person('ChildA', '1990-01-01'),
+      person('ChildB', '1992-01-01'),
+      person('SiblingB', '1994-01-01'),
+    ];
+    const edges = [
+      parent('GrandpaA', 'ParentA'),
+      parent('ParentA', 'ChildA'),
+      parent('ParentB', 'ChildB'),
+      parent('ParentB', 'SiblingB'),
+      spouse('ChildA', 'ChildB'),
+    ];
+    const { rows } = layoutFamilyTree(people, edges);
+    expect(rowIndexOf(rows, 'ParentB')).toBe(rowIndexOf(rows, 'ParentA'));
+    expect(rowIndexOf(rows, 'ChildB')).toBe(rowIndexOf(rows, 'ParentB') + 1);
+    // Siblings share a row even though only one of them married "down".
+    expect(rowIndexOf(rows, 'SiblingB')).toBe(rowIndexOf(rows, 'ChildB'));
+  });
+
+  it('keeps both families level in the app-screenshot shape (Chira bug)', () => {
+    // Real structure: Chira and Laura are the Hartwigs' daughters; Kathrin's
+    // parents add an extra generation on the Ortlepp side. Björn+Silke must
+    // sit with Karsten+Kathrin (not with the Strauß grandparents), Chira with
+    // her husband AND her sister, and the Neumann kids with Bruno/Ava.
+    const people = [
+      person('BjornH', '1962-01-01'), person('SilkeH', '1964-01-01'),
+      person('ChristianS', '1936-01-01'), person('IngeburgS', '1938-01-01'),
+      person('KathrinO', '1963-01-01'), person('KarstenO', '1961-01-01'),
+      person('LauraN', '1988-01-01'), person('GerritN', '1986-01-01'),
+      person('ChiraH', '1995-01-01'),
+      person('ChristophO', '1992-01-01'), person('NagoreN', '1993-01-01'),
+      person('ClemensO', '1994-01-01'),
+      person('JasperN', '2018-01-01'), person('XaverN', '2020-01-01'),
+      person('BrunoO', '2024-01-01'), person('AvaO', '2026-01-01'),
+    ];
+    const edges = [
+      ...couple('ChristianS', 'IngeburgS', ['KathrinO']),
+      ...couple('BjornH', 'SilkeH', ['LauraN', 'ChiraH']),
+      ...couple('KathrinO', 'KarstenO', ['ChristophO', 'ClemensO']),
+      ...couple('LauraN', 'GerritN', ['JasperN', 'XaverN']),
+      spouse('ChristophO', 'NagoreN'),
+      spouse('ClemensO', 'ChiraH'),
+      ...['BrunoO'].flatMap((c) => [parent('ChristophO', c), parent('NagoreN', c)]),
+      ...['AvaO'].flatMap((c) => [parent('ClemensO', c), parent('ChiraH', c)]),
+    ];
+    const { rows, crossings } = layoutFamilyTree(people, edges);
+
+    expect(rowIndexOf(rows, 'BjornH')).toBe(rowIndexOf(rows, 'KarstenO'));
+    expect(rowIndexOf(rows, 'ChiraH')).toBe(rowIndexOf(rows, 'ClemensO'));
+    expect(rowIndexOf(rows, 'ChiraH')).toBe(rowIndexOf(rows, 'LauraN'));
+    // Parents directly above — the connector cannot pass through another row.
+    expect(rowIndexOf(rows, 'ChiraH')).toBe(rowIndexOf(rows, 'BjornH') + 1);
+    expect(rowIndexOf(rows, 'JasperN')).toBe(rowIndexOf(rows, 'BrunoO'));
+    expect(crossings).toBe(0);
+  });
+
+  it('survives cross-generation marriages: children below parents, spouses level', () => {
+    // C marries their parent's sibling Q — the kinship cycle has no
+    // consistent leveling, so the repair pass must still guarantee the
+    // renderer's invariants.
+    const people = ['G', 'P', 'Q', 'C'].map((id) => person(id));
+    const edges = [
+      parent('G', 'P'),
+      parent('G', 'Q'),
+      parent('P', 'C'),
+      spouse('C', 'Q'),
+    ];
+    const { rows } = layoutFamilyTree(people, edges);
+    for (const [p, c] of [['G', 'P'], ['G', 'Q'], ['P', 'C']]) {
+      expect(rowIndexOf(rows, p)).toBeLessThan(rowIndexOf(rows, c));
+    }
+    expect(rowIndexOf(rows, 'C')).toBe(rowIndexOf(rows, 'Q'));
+  });
+
+  it('places a disconnected person on the row matching their birth year', () => {
+    const people = [
+      person('Mom', '1960-01-01'),
+      person('Dad', '1958-01-01'),
+      person('Kid1', '1985-01-01'),
+      person('Kid2', '1988-01-01'),
+      person('Stranger', '1986-01-01'), // same era as the kids
+    ];
+    const edges = couple('Mom', 'Dad', ['Kid1', 'Kid2']);
+    const { rows } = layoutFamilyTree(people, edges);
+    expect(rowIndexOf(rows, 'Stranger')).toBe(rowIndexOf(rows, 'Kid1'));
+  });
 });
