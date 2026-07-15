@@ -34,6 +34,7 @@ import {
   IconPlus,
   IconShoppingCart,
   IconSparkles,
+  IconTrash,
   IconX,
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
@@ -41,6 +42,7 @@ import { useI18n } from '@/lib/i18n/client';
 import type { LayoutTheme, CoverStyle } from '@/lib/book-layout-plan';
 import type { LayoutOp } from '@/lib/books';
 import {
+  deleteBookAction,
   requestAiDesignAction,
   setBookStoriesAction,
   updateBookAction,
@@ -119,6 +121,9 @@ export function BookBuilder({
   // confirmation.
   const [designConsentOpen, setDesignConsentOpen] = useState(false);
 
+  // Deleting is permanent — always confirm.
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
   // No status polling for the render lifecycle — the preview pane is live HTML (see
   // below), always current. The one thing still worth polling for is the AI design
   // pass: it rewrites the layout plan server-side (worker process) with no other
@@ -173,6 +178,18 @@ export function BookBuilder({
     });
   }
 
+  function confirmDelete() {
+    startTransition(async () => {
+      const result = await deleteBookAction(book.id);
+      if (result.error) {
+        setDeleteOpen(false);
+        notifications.show({ message: result.error, color: 'red' });
+        return;
+      }
+      router.push('/books');
+    });
+  }
+
   function saveSettings(patch: Parameters<typeof updateBookAction>[0]) {
     run(() => updateBookAction(patch));
   }
@@ -216,14 +233,30 @@ export function BookBuilder({
           <Title order={2}>{book.title}</Title>
           <Badge variant="light">{t.books.status[book.status]}</Badge>
         </Group>
-        <Button
-          component={Link}
-          href={`/books/${book.id}/order`}
-          leftSection={<IconShoppingCart size={16} />}
-          disabled={book.status !== 'preview_ready'}
-        >
-          {tb.orderCta}
-        </Button>
+        <Group gap="sm">
+          {!locked && (
+            <Tooltip label={tb.deleteBook}>
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                size="lg"
+                aria-label={tb.deleteBook}
+                disabled={pending}
+                onClick={() => setDeleteOpen(true)}
+              >
+                <IconTrash size={18} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <Button
+            component={Link}
+            href={`/books/${book.id}/order`}
+            leftSection={<IconShoppingCart size={16} />}
+            disabled={book.status !== 'preview_ready'}
+          >
+            {tb.orderCta}
+          </Button>
+        </Group>
       </Group>
 
       {locked && (
@@ -527,6 +560,23 @@ export function BookBuilder({
 
       {/* ── Full-width AI chat: the way to change the book beyond the settings ── */}
       <BookChat bookId={book.id} locked={locked} />
+
+      <Modal
+        opened={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title={tb.deleteConfirmTitle}
+        centered
+      >
+        <Text size="sm">{tb.deleteConfirmBody}</Text>
+        <Group justify="flex-end" mt="lg">
+          <Button variant="default" onClick={() => setDeleteOpen(false)} disabled={pending}>
+            {t.common.cancel}
+          </Button>
+          <Button color="red" onClick={confirmDelete} loading={pending}>
+            {tb.deleteConfirm}
+          </Button>
+        </Group>
+      </Modal>
 
       <Modal
         opened={designConsentOpen}

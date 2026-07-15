@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   createBook,
+  deleteBook,
   estimatePageCount,
   getBookForUser,
   getBookLayoutSummary,
@@ -383,6 +384,30 @@ export const resetBookLayoutTool = defineTool({
       ok: true,
       message: 'Layout reset to the automatic default.',
       receipt: { label: `Reset the layout of "${found.book.title}"`, href: `/books/${found.book.id}` },
+    };
+  },
+});
+
+export const deleteBookTool = defineTool({
+  name: 'delete_book',
+  description:
+    'Permanently delete a book. The stories and photos are NOT affected — a book is only a ' +
+    'printable selection over them — but the book itself, its layout, and its rendered PDFs ' +
+    'are gone for good; this cannot be undone. Only call this when the user explicitly and ' +
+    'unambiguously asked to delete THIS book (never to "clean up" on your own); if several ' +
+    'books have similar titles, confirm which one first. Ordered books cannot be deleted.',
+  schema: z.object({
+    book: z.string().min(1).describe('The book title (or id) to delete.'),
+  }),
+  async execute(args, ctx) {
+    const found = await resolveBook(ctx, args.book);
+    if ('error' in found) return { ok: false, error: found.error };
+    const result = await deleteBook({ bookId: found.book.id, userId: ctx.userId });
+    if (!result.ok) return { ok: false, error: result.error };
+    return {
+      ok: true,
+      message: 'Book deleted.',
+      receipt: { label: `Deleted book "${found.book.title}"` },
     };
   },
 });

@@ -393,6 +393,11 @@ export const de: Dictionary = {
         'Lass die KI auf deine Fotos schauen und ein neues Layout vorschlagen — welches Foto das Titelbild wird, was nebeneinander steht, was eine eigene Seite bekommt. Dauert etwa eine Minute.',
       orderCta: 'Dieses Buch bestellen',
       orderedNote: 'Dieses Buch wurde bestellt und kann nicht mehr geändert werden.',
+      deleteBook: 'Buch löschen',
+      deleteConfirmTitle: 'Dieses Buch löschen?',
+      deleteConfirmBody:
+        'Das entfernt das Buch und sein Layout dauerhaft. Deine Geschichten und Fotos bleiben erhalten — du kannst jederzeit ein neues Buch daraus erstellen.',
+      deleteConfirm: 'Endgültig löschen',
       theme: 'Stil',
       themeOptions: {
         classic: 'Klassisch',

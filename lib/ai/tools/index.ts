@@ -27,6 +27,7 @@ import {
 import { inviteMemberTool } from './members';
 import {
   createBookTool,
+  deleteBookTool,
   designBookLayoutTool,
   getBookTool,
   listBooksTool,
@@ -72,6 +73,7 @@ export const tools: Tool[] = [
   updateBookLayoutTool,
   resetBookLayoutTool,
   quoteBookPriceTool,
+  deleteBookTool,
   // review-then-save
   draftStoryTool,
   updateStoryTool,
