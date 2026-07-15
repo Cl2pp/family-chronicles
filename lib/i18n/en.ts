@@ -38,6 +38,8 @@ export const en = {
     email: 'Email',
     emailPlaceholder: 'you@example.com',
     password: 'Password',
+    confirmPassword: 'Confirm password',
+    passwordsDoNotMatch: 'Passwords do not match',
     signIn: 'Sign in',
     signInFailed: 'Sign in failed',
     enterValidEmail: 'Enter a valid email',

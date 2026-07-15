@@ -36,6 +36,8 @@ export const de: Dictionary = {
     email: 'E-Mail',
     emailPlaceholder: 'du@beispiel.de',
     password: 'Passwort',
+    confirmPassword: 'Passwort bestätigen',
+    passwordsDoNotMatch: 'Passwörter stimmen nicht überein',
     signIn: 'Anmelden',
     signInFailed: 'Anmeldung fehlgeschlagen',
     enterValidEmail: 'Gib eine gültige E-Mail-Adresse ein',
