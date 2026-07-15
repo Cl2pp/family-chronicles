@@ -180,12 +180,13 @@ reload itself.
 
 Containers are named by Coolify; **find them dynamically** (the `-<id>` suffix changes each deploy):
 ```bash
-WEB=$(docker ps --format '{{.Names}}' | grep -E '^gm0yf0r8' | head -1)   # web app
-WK=$(docker ps  --format '{{.Names}}' | grep -E '^yy7pbe3' | head -1)    # worker app
+WEB=$(docker ps --format '{{.Names}}' | grep -E '^lfezes7na9u52r8ka10dh57e' | head -1)   # web app
+WK=$(docker ps  --format '{{.Names}}' | grep -E '^jopm4dv6n3x5uhygcixtalhl' | head -1)   # worker app
 PG=$(docker ps  --format '{{.Names}}' | grep -E '^bznln3o' | head -1)    # app Postgres
 ```
-(Those prefixes are the apps' stable Coolify names as of this writing; re-derive from `docker ps`
-if the resources are ever recreated.)
+(Those prefixes are the apps' stable Coolify names as of July 2026; re-derive from `docker ps` if
+the resources are ever recreated — check `docker logs` to tell which is which: web prints
+"✓ Ready in", worker prints "[worker] ready".)
 
 ```bash
 docker ps                              # what's running
