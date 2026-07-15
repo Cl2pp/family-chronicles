@@ -3,6 +3,10 @@
  * unit-tested and evolved without touching rendering.
  *
  * Layered (Sugiyama-style) layout specialised for genealogy:
+ * - Generations are RELATIVE, not depth-from-roots: levels propagate through
+ *   spouse (same row) and parent (one row down) edges in both directions, so
+ *   in-law branches line up with their counterpart generation; disconnected
+ *   components are aligned by birth year (~30 years per generation).
  * - Couples stay adjacent: each row is a sequence of "blocks" (spouse-connected
  *   groups); ordering and placement move blocks, never split them.
  * - Row order comes from iterated down/up barycenter sweeps followed by a
@@ -86,10 +90,105 @@ export function layoutFamilyTree<E extends LayoutEdge>(
     return { rows: [], validEdges, margins: new Map(), crossings: 0 };
   }
 
-  // ---- Generation assignment: monotonic relaxation (gens only ever increase).
-  // Children end up strictly below both parents; spouses share a row.
+  // ---- Deterministic person ordering helpers.
+  const bornTime = (id: string): number => {
+    const b = byId.get(id)?.bornOn;
+    if (!b) return Number.POSITIVE_INFINITY;
+    const d = typeof b === 'string' ? new Date(b) : b;
+    const t = d.getTime();
+    return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
+  };
+  const nameOf = (id: string) => byId.get(id)?.displayName ?? '';
+  const personCmp = (a: string, b: string) =>
+    cmpNum(bornTime(a), bornTime(b)) ||
+    nameOf(a).localeCompare(nameOf(b)) ||
+    (a < b ? -1 : a > b ? 1 : 0);
+
+  // ---- Generation assignment, three passes.
+  // 1. Relative BFS per connected component: spouse edges share a level,
+  //    parent edges go exactly one level down. Levels must propagate through
+  //    marriages in BOTH directions — min-depth-from-roots (the old approach)
+  //    pinned every parentless person to the top row, so a marry-in's parents
+  //    floated generations above their in-laws while the spouse rule dragged
+  //    the marry-in below their own siblings.
+  // 2. Disconnected components share no kinship constraint; align them by
+  //    birth year where known (~30 years per generation).
+  // 3. Monotonic relaxation as a safety net for kinship cycles whose offsets
+  //    don't add up (e.g. cross-generation marriages): children always end
+  //    strictly below both parents, spouses share a row.
   const gen = new Map<string, number>();
-  for (const id of ids) gen.set(id, 0);
+  const compId = new Map<string, number>();
+  {
+    const neighbors = new Map<string, { id: string; off: number }[]>();
+    const addN = (a: string, b: string, off: number) => {
+      const arr = neighbors.get(a);
+      if (arr) arr.push({ id: b, off });
+      else neighbors.set(a, [{ id: b, off }]);
+    };
+    for (const e of validEdges) {
+      if (e.type === 'parent') {
+        addN(e.from, e.to, 1);
+        addN(e.to, e.from, -1);
+      } else {
+        addN(e.from, e.to, 0);
+        addN(e.to, e.from, 0);
+      }
+    }
+    let nextComp = 0;
+    for (const seed of [...ids].sort()) {
+      if (gen.has(seed)) continue;
+      const comp = nextComp++;
+      gen.set(seed, 0);
+      compId.set(seed, comp);
+      const queue = [seed];
+      for (let qi = 0; qi < queue.length; qi++) {
+        const cur = queue[qi];
+        const g = gen.get(cur)!;
+        for (const { id: n, off } of neighbors.get(cur) ?? []) {
+          if (gen.has(n)) continue; // first (shortest-path) assignment wins
+          gen.set(n, g + off);
+          compId.set(n, comp);
+          queue.push(n);
+        }
+      }
+    }
+
+    // Normalize each component to start at 0, then shift dated components so
+    // people born in the same era land near the same row as the component
+    // with the most known birth dates.
+    const minOf = new Map<number, number>();
+    for (const [id, g] of gen) {
+      const c = compId.get(id)!;
+      minOf.set(c, Math.min(minOf.get(c) ?? Number.POSITIVE_INFINITY, g));
+    }
+    for (const [id, g] of gen) gen.set(id, g - minOf.get(compId.get(id)!)!);
+
+    const YEARS_PER_GEN = 30;
+    // Per component: mean of (birth year − 30·gen), i.e. the component's
+    // "year of generation zero". Matching these intercepts aligns eras.
+    const intercepts = new Map<number, { sum: number; n: number }>();
+    for (const [id, g] of gen) {
+      const t = bornTime(id);
+      if (!Number.isFinite(t)) continue;
+      const c = compId.get(id)!;
+      const s = intercepts.get(c) ?? { sum: 0, n: 0 };
+      s.sum += new Date(t).getUTCFullYear() - YEARS_PER_GEN * g;
+      s.n += 1;
+      intercepts.set(c, s);
+    }
+    if (intercepts.size > 1) {
+      const [refComp, refStat] = [...intercepts.entries()].sort(
+        (a, b) => b[1].n - a[1].n || a[0] - b[0],
+      )[0];
+      for (const [id, g] of gen) {
+        const c = compId.get(id)!;
+        const s = intercepts.get(c);
+        if (!s || c === refComp) continue;
+        const shift = Math.round((s.sum / s.n - refStat.sum / refStat.n) / YEARS_PER_GEN);
+        gen.set(id, g + shift);
+      }
+    }
+  }
   const cap = people.length * 4 + 4;
   for (let iter = 0; iter < cap; iter++) {
     let changed = false;
@@ -114,20 +213,6 @@ export function layoutFamilyTree<E extends LayoutEdge>(
     }
     if (!changed) break;
   }
-
-  // ---- Deterministic person ordering helpers.
-  const bornTime = (id: string): number => {
-    const b = byId.get(id)?.bornOn;
-    if (!b) return Number.POSITIVE_INFINITY;
-    const d = typeof b === 'string' ? new Date(b) : b;
-    const t = d.getTime();
-    return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
-  };
-  const nameOf = (id: string) => byId.get(id)?.displayName ?? '';
-  const personCmp = (a: string, b: string) =>
-    cmpNum(bornTime(a), bornTime(b)) ||
-    nameOf(a).localeCompare(nameOf(b)) ||
-    (a < b ? -1 : a > b ? 1 : 0);
 
   const parentSet = new Map<string, Set<string>>();
   for (const [c, ps] of parentsOf) parentSet.set(c, new Set(ps));
@@ -493,28 +578,6 @@ export function layoutFamilyTree<E extends LayoutEdge>(
   // floating units, so relaxation can leave an arbitrary void between them;
   // pack each component as far left as its rows allow, left-to-right.
   {
-    const adj = new Map<string, string[]>();
-    for (const e of validEdges) {
-      push(adj, e.from, e.to);
-      push(adj, e.to, e.from);
-    }
-    const compId = new Map<string, number>();
-    let nextComp = 0;
-    for (const id of ids) {
-      if (compId.has(id)) continue;
-      const stack = [id];
-      compId.set(id, nextComp);
-      while (stack.length) {
-        const c = stack.pop()!;
-        for (const n of adj.get(c) ?? []) {
-          if (!compId.has(n)) {
-            compId.set(n, nextComp);
-            stack.push(n);
-          }
-        }
-      }
-      nextComp++;
-    }
     const blocksByComp = new Map<number, { r: number; bi: number }[]>();
     state.forEach((row, r) =>
       row.forEach((b, bi) => {
