@@ -1,8 +1,6 @@
 import { cookies } from 'next/headers';
-import Link from 'next/link';
 import { and, eq } from 'drizzle-orm';
 import { Box, Card, Group, Stack, Text, Title } from '@mantine/core';
-import { IconChevronRight } from '@tabler/icons-react';
 import { db } from '@/db';
 import { account } from '@/db/schema';
 import { requireUser } from '@/lib/session';
@@ -12,6 +10,7 @@ import { resolveActiveChronicle } from '@/lib/chronicles';
 import { type AccessRole } from '@/lib/permissions';
 import { getI18n } from '@/lib/i18n/server';
 import { LOCALE_BCP47 } from '@/lib/i18n/config';
+import { BooksLinkCard } from './books-link-card';
 import { ChangePasswordForm } from './change-password-form';
 import { ChroniclesCard } from './chronicles-card';
 import { InstallCard } from './install-card';
@@ -77,18 +76,7 @@ export default async function SettingsPage() {
         }
         app={
           <Stack gap="lg">
-            {/* Mobile has no Books tab — this row is the way back to /books there. */}
-            <Card withBorder radius="md" p="lg" component={Link} href="/books">
-              <Group justify="space-between" align="center">
-                <Stack gap={2}>
-                  <Text fw={600}>{t.books.title}</Text>
-                  <Text size="sm" c="dimmed">
-                    {t.books.intro}
-                  </Text>
-                </Stack>
-                <IconChevronRight size={18} color="var(--mantine-color-slate-4)" />
-              </Group>
-            </Card>
+            <BooksLinkCard />
 
             <Box>
               <Title order={3} mb="xs">
