@@ -43,13 +43,6 @@ export interface AutoLayoutInput {
  *  spec's 2-4 range so placement is deterministic. */
 const PARAGRAPH_CHUNK = 3;
 
-/** Minimum remaining word count to float a portrait beside text rather than stack it. */
-const FLOAT_MIN_WORDS = 120;
-
-function isPortrait(img: AutoLayoutImage): boolean {
-  return img.height > img.width;
-}
-
 function resolution(img: AutoLayoutImage): number {
   return img.width * img.height;
 }
@@ -68,21 +61,23 @@ function pickHighestResolution(images: AutoLayoutImage[]): AutoLayoutImage {
 /**
  * Builds the block list for one chapter: paragraphs interleaved with image groups.
  *
- * Heuristics (docs/BOOK_LAYOUT_PLAN.md §5):
+ * Heuristics (docs/BOOK_LAYOUT_PLAN.md §5, revised for the fill-the-page rules):
  * - A chapter with >=3 photos has its highest-resolution image promoted to its own
  *   `photo-page`, pulled out of the interleaved flow.
- * - Remaining images are consumed left-to-right: two adjacent portraits pair into a
- *   `photo-row`; a landscape (or square) image becomes a full-width `figure`; a lone
- *   trailing run of 3-4 images becomes a `photo-grid` instead of being split up; a
- *   lone portrait with >=120 words of text still to come floats beside it
- *   (`float-left`/`float-right`, alternating), otherwise it falls back to a full
- *   figure so it never floats over an empty page.
+ * - Remaining images are consumed left-to-right, preferring groups that fill the
+ *   column width: a trailing run of 3-4 images becomes a `photo-grid`; any two
+ *   adjacent images pair into a justified `photo-row` (the renderer sizes both to
+ *   one shared height across the full width, whatever the orientations); only a
+ *   lone leftover image becomes a full-width centered `figure`. The auto-layouter
+ *   never emits floats — a float whose neighboring text runs short leaves the photo
+ *   glued to one side with white space beside it, exactly the asymmetry the layout
+ *   rules forbid (floats remain available as a manual/AI choice).
  * - Image groups are inserted after every `PARAGRAPH_CHUNK` paragraphs; once the
  *   chapter's images run out, remaining paragraphs are appended as a trailing block.
  *   If more image groups exist than there are paragraph boundaries, the rest are
  *   appended after the last paragraph block (never before the first).
  */
-function buildChapterBlocks(chapter: AutoLayoutChapter, startFloatSide: 'float-left' | 'float-right'): Block[] {
+function buildChapterBlocks(chapter: AutoLayoutChapter): Block[] {
   const paragraphCount = chapter.paragraphWordCounts.length;
   let pool = chapter.images.slice();
 
@@ -100,11 +95,7 @@ function buildChapterBlocks(chapter: AutoLayoutChapter, startFloatSide: 'float-l
     boundaries.push(end);
   }
 
-  const wordsAfter = (paragraphIdx: number) =>
-    chapter.paragraphWordCounts.slice(paragraphIdx + 1).reduce((a, b) => a + b, 0);
-
   const groups: Block[] = [];
-  let side = startFloatSide;
   let i = 0;
   let boundaryIdx = 0;
   while (i < pool.length) {
@@ -115,23 +106,11 @@ function buildChapterBlocks(chapter: AutoLayoutChapter, startFloatSide: 'float-l
       i = pool.length;
       break;
     }
-    const a = pool[i];
-    const b = pool[i + 1];
-    if (b && isPortrait(a) && isPortrait(b)) {
-      groups.push({ type: 'photo-row', assetIds: [a.assetId, b.assetId] });
+    if (remaining >= 2) {
+      groups.push({ type: 'photo-row', assetIds: [pool[i].assetId, pool[i + 1].assetId] });
       i += 2;
-    } else if (!isPortrait(a)) {
-      groups.push({ type: 'figure', assetId: a.assetId, size: 'full' });
-      i += 1;
     } else {
-      const boundaryParagraph = boundaries[boundaryIdx] ?? paragraphCount - 1;
-      const hasRoom = paragraphCount > 0 && wordsAfter(boundaryParagraph) >= FLOAT_MIN_WORDS;
-      if (hasRoom) {
-        groups.push({ type: 'figure', assetId: a.assetId, size: side });
-        side = side === 'float-left' ? 'float-right' : 'float-left';
-      } else {
-        groups.push({ type: 'figure', assetId: a.assetId, size: 'full' });
-      }
+      groups.push({ type: 'figure', assetId: pool[i].assetId, size: 'full' });
       i += 1;
     }
     boundaryIdx++;
@@ -162,9 +141,9 @@ function buildChapterBlocks(chapter: AutoLayoutChapter, startFloatSide: 'float-l
 
 /** Builds a full layout plan for a book from its chapters' content + image geometry. */
 export function buildLayoutPlan(input: AutoLayoutInput): LayoutPlan {
-  const chapters: ChapterPlan[] = input.chapters.map((chapter, idx) => ({
+  const chapters: ChapterPlan[] = input.chapters.map((chapter) => ({
     storyId: chapter.storyId,
-    blocks: buildChapterBlocks(chapter, idx % 2 === 0 ? 'float-left' : 'float-right'),
+    blocks: buildChapterBlocks(chapter),
   }));
 
   const heroAssetId =

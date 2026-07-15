@@ -388,8 +388,6 @@ export const de: Dictionary = {
       pdfProof: 'PDF-Vorlage',
       livePreviewNote:
         'Diese Vorschau zeigt immer deinen aktuellen Entwurf und nutzt reduzierte Fotoqualität. Beim Bestellen entsteht ein druckfertiges PDF in voller Auflösung.',
-      editWithAI: 'Mit KI bearbeiten',
-      editWithAIHint: 'Frag im Chat, z. B. „Schieb die Hochzeitsgeschichte an den Anfang meines Buchs.“',
       designBook: 'Mein Buch gestalten',
       designingBook: 'Wird gestaltet…',
       designBookHint:
@@ -406,26 +404,14 @@ export const de: Dictionary = {
         framed: 'Gerahmt',
         'full-bleed': 'Randloses Foto',
       },
-      layout: 'Layout',
-      layoutHint:
-        'Passe an, wo jedes Foto steht: seine Größe, ob es eine eigene Seite bekommt, und seine Reihenfolge unter den Fotos des Kapitels.',
-      layoutEmpty: 'Noch keine Fotos im Layout platziert.',
-      figureSizeOptions: {
-        full: 'Volle Breite',
-        'float-left': 'Links im Text',
-        'float-right': 'Rechts im Text',
+      chat: {
+        title: 'Mit KI bearbeiten',
+        hint: 'Sag der KI, was sich ändern soll — sie bearbeitet dieses Buch direkt und die Vorschau aktualisiert sich von selbst. Z. B. „Schieb die Hochzeitsgeschichte an den Anfang“, „Mach das Strandfoto zum Titelbild“, „Gib dem Foto von Oma eine eigene Seite“.',
+        placeholder: 'Was soll sich an deinem Buch ändern?',
+        send: 'Senden',
+        thinking: 'Einen Moment…',
+        error: 'Entschuldige — das hat nicht geklappt. Versuch es bitte noch einmal.',
       },
-      photoRowLabel: 'Nebeneinander',
-      photoGridLabel: 'Fotoraster',
-      photoPageLabel: 'Eigene Seite',
-      cycleSize: 'Fotogröße ändern',
-      promoteToPhotoPage: 'Diesem Foto eine eigene Seite geben',
-      demoteFromPhotoPage: 'Von der eigenen Seite entfernen',
-      moveBlockUp: 'Nach vorne',
-      moveBlockDown: 'Nach hinten',
-      resetLayout: 'Layout zurücksetzen',
-      resetLayoutHint: 'Baut das automatische Fotolayout neu auf. Stil und Titelfoto bleiben erhalten.',
-      layoutEditedNote: 'Dieses Layout wurde von Hand bearbeitet.',
       overwriteEditsTitle: 'Deine manuellen Layout-Änderungen ersetzen?',
       overwriteEditsBody:
         'Das Layout dieses Buchs wurde von Hand bearbeitet. Das ersetzt diese Änderungen jetzt durch ein neu erstelltes Layout.',

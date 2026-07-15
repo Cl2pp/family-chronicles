@@ -196,6 +196,22 @@ function figureHtml(img: LayoutImage, extraClass = ''): string {
     </figure>`;
 }
 
+/**
+ * One figure of a justified photo-row: the flex share equals the image's aspect ratio
+ * and the img carries the same ratio via `aspect-ratio`, so every image in the row
+ * renders at the SAME height while the row fills the full column width — no cropping,
+ * no one-sided white space, whatever the orientation mix (the math: width_i = a_i · h
+ * and Σ width_i = W means h is the row's single free variable).
+ */
+function rowFigureHtml(img: LayoutImage): string {
+  const aspect = (img.width / img.height).toFixed(4);
+  return `
+    <figure style="flex: ${aspect} 1 0%">
+      <img src="${img.src}" alt="" style="aspect-ratio: ${img.width} / ${img.height}" />
+      ${img.caption ? `<figcaption>${esc(img.caption)}</figcaption>` : ''}
+    </figure>`;
+}
+
 function paragraphsHtml(
   block: Extract<Block, { type: 'paragraphs' }>,
   content: LayoutChapterContent,
@@ -204,8 +220,19 @@ function paragraphsHtml(
   return slice.map((p) => `<p>${esc(p)}</p>`).join('\n');
 }
 
+/** White mat between a photo-page image and its hairline frame, per edge (mm). */
+const PHOTO_PAGE_MAT_MM = 3;
+/** Height reserved under a photo-page image for its caption (mm). */
+const PHOTO_PAGE_CAPTION_MM = 10;
+
+/** The page's content box, in mm — what a photo-page block may fill. */
+interface ContentBox {
+  w: number;
+  h: number;
+}
+
 /** Renders one chapter's block list against its resolved images/paragraphs. */
-function renderBlocks(blocks: Block[], content: LayoutChapterContent): string {
+function renderBlocks(blocks: Block[], content: LayoutChapterContent, box: ContentBox): string {
   const byId = new Map(content.images.map((img) => [img.assetId, img]));
   const pieces: string[] = [];
 
@@ -257,7 +284,7 @@ function renderBlocks(blocks: Block[], content: LayoutChapterContent): string {
       case 'photo-row': {
         const imgs = block.assetIds.map((id) => byId.get(id)).filter((i): i is LayoutImage => !!i);
         if (imgs.length === 0) break;
-        pieces.push(`<div class="photo-row">${imgs.map((img) => figureHtml(img)).join('\n')}</div>`);
+        pieces.push(`<div class="photo-row">${imgs.map((img) => rowFigureHtml(img)).join('\n')}</div>`);
         break;
       }
       case 'photo-grid': {
@@ -292,9 +319,20 @@ function renderBlocks(blocks: Block[], content: LayoutChapterContent): string {
       case 'photo-page': {
         const img = byId.get(block.assetId);
         if (!img) break;
+        // The frame is sized here, deterministically, to the largest rectangle of the
+        // image's aspect ratio that fits the content box (minus the mat and caption
+        // room) — not with CSS percentage tricks, which have no definite height to
+        // resolve against in the paged flow. The caption then sits directly under the
+        // frame instead of being pushed to the bottom of the page.
+        const mat = PHOTO_PAGE_MAT_MM * 2;
+        const availW = box.w - mat;
+        const availH = box.h - mat - (img.caption ? PHOTO_PAGE_CAPTION_MM : 0);
+        const scale = Math.min(availW / img.width, availH / img.height);
+        const frameW = (img.width * scale + mat).toFixed(1);
+        const frameH = (img.height * scale + mat).toFixed(1);
         pieces.push(`
           <section class="page photo-page-block">
-            <img src="${img.src}" alt="" />
+            <div class="photo-frame" style="width: ${frameW}mm; height: ${frameH}mm"><img src="${img.src}" alt="" /></div>
             ${img.caption ? `<p class="caption">${esc(img.caption)}</p>` : ''}
           </section>`);
         break;
@@ -311,6 +349,10 @@ export function renderBookHtml(input: LayoutInput): string {
   const pageH = input.trim.h + bleed * 2;
   // Inner margins are measured from the TRIM edge; bleed is added on top.
   const m = { top: 18 + bleed, bottom: 20 + bleed, inner: 20 + bleed, outer: 16 + bleed };
+  // The page's content box height, minus 1mm rounding safety — a full-page photo block
+  // sized exactly to the content box must never overflow it, or pagination pushes an
+  // empty sliver onto a blank extra page.
+  const contentH = pageH - m.top - m.bottom - 1;
 
   // No watermark on `screen`: it's an auth-gated live-editing surface, not a
   // distributable file — unlike the PDF, there's nothing to mark up before order.
@@ -323,14 +365,33 @@ export function renderBookHtml(input: LayoutInput): string {
   // chunking the document into real `.pagedjs_page` boxes using the same `@page`
   // rules Chromium prints from. `after` stamps a data attribute a caller (or a test
   // driving the iframe) can poll for instead of guessing when pagination settled.
+  //
+  // fitPages scales the paginated pages to the viewport width: a page is laid out at
+  // its physical size (pageW mm ≈ 800px for the portrait format), far wider than the
+  // builder's preview iframe — unscaled, the iframe shows a zoomed-in corner of the
+  // page instead of whole pages. CSS zoom keeps the layout math (done in mm, pre-zoom)
+  // untouched and merely displays it smaller.
   const pagedScript =
     input.variant === 'screen'
       ? `
   <script>
-    window.PagedConfig = {
-      auto: true,
-      after: () => { document.documentElement.setAttribute('data-pagedjs-ready', 'true'); },
-    };
+    (function () {
+      var PAGE_W_PX = ${pageW} * 96 / 25.4;
+      function fitPages() {
+        var pages = document.querySelector('.pagedjs_pages');
+        if (!pages) return;
+        var avail = document.documentElement.clientWidth - 16; // room for the sheet shadow
+        pages.style.zoom = Math.min(1, avail / PAGE_W_PX);
+      }
+      window.PagedConfig = {
+        auto: true,
+        after: function () {
+          fitPages();
+          document.documentElement.setAttribute('data-pagedjs-ready', 'true');
+        },
+      };
+      window.addEventListener('resize', fitPages);
+    })();
   </script>
   <script src="${PAGEDJS_POLYFILL_URL}"></script>`
       : '';
@@ -408,6 +469,7 @@ export function renderBookHtml(input: LayoutInput): string {
       </ol>
     </section>`;
 
+  const contentBox: ContentBox = { w: pageW - m.inner - m.outer, h: contentH };
   const chapters = input.plan.chapters
     .map((planChapter) => {
       const c = contentByStory.get(planChapter.storyId);
@@ -418,7 +480,7 @@ export function renderBookHtml(input: LayoutInput): string {
           ${c.eventLabel ? `<p class="chapter-year">${esc(c.eventLabel)}</p>` : ''}
           <h2>${esc(c.title)}</h2>
         </header>
-        ${renderBlocks(planChapter.blocks, c)}
+        ${renderBlocks(planChapter.blocks, c, contentBox)}
       </section>`;
     })
     .join('\n');
@@ -547,7 +609,9 @@ ${pageNumberCss(theme)}
   }
   .toc-year { color: var(--fc-color-muted); white-space: nowrap; }
 
-  .chapter { page-break-before: right; }
+  /* 'always', not 'right': forcing chapters onto right-hand pages inserts blank
+     left-hand pages, and the books should have no empty pages. */
+  .chapter { page-break-before: always; }
   /* Clears floated figures at the end of the chapter so nothing spills into the
      next page's margin. */
   .chapter::after { content: ''; display: table; clear: both; }
@@ -602,19 +666,24 @@ ${pageNumberCss(theme)}
     object-fit: cover;
   }
 
-  /* Two portraits side by side, equal-height slots. Flexbox, not grid: Chromium's
-     print engine fragments CSS Grid containers unreliably across a page break even
-     with break-inside: avoid, occasionally dropping/clipping grid items. Flexbox
-     fragments as a single block, which is what "avoid" actually needs here. */
+  /* Two photos side by side as one justified row: each figure's flex share and its
+     img's aspect-ratio come inline from the image's real dimensions (see
+     rowFigureHtml), so both images share one height and the row fills the full
+     column width — uncropped, symmetric, no white space on either side. Flexbox,
+     not grid: Chromium's print engine fragments CSS Grid containers unreliably
+     across a page break even with break-inside: avoid, occasionally dropping/
+     clipping grid items. Flexbox fragments as a single block, which is what
+     "avoid" actually needs here. */
   .photo-row {
     display: flex;
+    align-items: flex-start;
     gap: var(--fc-photo-gap);
     margin: 5mm 0;
     page-break-inside: avoid;
     break-inside: avoid;
   }
-  .photo-row figure { margin: 0; flex: 1; min-width: 0; }
-  .photo-row img { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; display: block; }
+  .photo-row figure { margin: 0; min-width: 0; }
+  .photo-row img { width: 100%; height: auto; display: block; }
 
   /* 3-4 leftover images. 3 => one dominant + two stacked; 4 => 2x2. */
   .photo-grid {
@@ -644,30 +713,37 @@ ${pageNumberCss(theme)}
   .photo-grid.grid-4 { flex-wrap: wrap; }
   .photo-grid.grid-4 figure { width: calc(50% - var(--fc-photo-gap) / 2); height: calc(50% - var(--fc-photo-gap) / 2); }
 
-  /* A standout image on its own page. */
+  /* A standout image on its own page: the block is sized to the page's full content
+     box (a definite mm height — a percentage would compute to none in the paged flow
+     and let a tall portrait overflow, stalling Paged.js), and the frame inside it is
+     sized inline by renderBlocks to the largest fit of the image's aspect ratio —
+     centered both ways, a white mat + hairline frame hugging the photo, the caption
+     directly beneath. The page margin is the outer frame — no more quarter-page
+     photo floating in empty space. */
   .photo-page-block {
+    height: ${contentH}mm;
     page-break-before: always;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 12mm 16mm;
   }
-  .photo-page-block img {
-    max-width: 100%;
-    /* Fixed cap, not a percentage: the flex parent has no definite height, so a
-       % max-height computes to none — leaving a tall portrait free to overflow
-       the page, which stalls Paged.js. ~200mm leaves room for the caption on
-       both trim sizes. */
-    max-height: 200mm;
-    width: auto;
-    height: auto;
-    object-fit: contain;
+  .photo-page-block .photo-frame {
+    box-sizing: border-box;
+    background: #fff;
+    padding: ${PHOTO_PAGE_MAT_MM}mm;
+    border: 0.3mm solid rgba(30, 36, 48, 0.14);
     border-radius: var(--fc-photo-radius);
     box-shadow: 0 3mm 8mm rgba(20, 20, 20, 0.15);
   }
+  .photo-page-block .photo-frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
   .photo-page-block .caption {
-    margin-top: 6mm;
+    margin: 4mm 0 0;
     text-align: center;
   }
 

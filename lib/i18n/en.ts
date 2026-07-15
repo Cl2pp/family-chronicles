@@ -375,8 +375,6 @@ export const en = {
       pdfProof: 'PDF proof',
       livePreviewNote:
         'This preview always reflects your current draft and uses reduced-quality photos. Ordering creates a full-resolution, print-ready PDF.',
-      editWithAI: 'Edit with AI',
-      editWithAIHint: 'Ask in Chat, e.g. “Move the wedding story to the front of my book.”',
       designBook: 'Design my book',
       designingBook: 'Designing…',
       designBookHint:
@@ -393,26 +391,14 @@ export const en = {
         framed: 'Framed',
         'full-bleed': 'Full-bleed photo',
       },
-      layout: 'Layout',
-      layoutHint:
-        'Fine-tune where each photo sits: its size, whether it gets its own page, and its order among the chapter\'s photos.',
-      layoutEmpty: 'No photos placed in the layout yet.',
-      figureSizeOptions: {
-        full: 'Full width',
-        'float-left': 'Float left',
-        'float-right': 'Float right',
+      chat: {
+        title: 'Edit with AI',
+        hint: 'Tell the AI what to change — it edits this book directly and the preview updates on its own. E.g. “Move the wedding story to the front”, “Make the beach photo the cover”, “Give the photo of Oma its own page”.',
+        placeholder: 'What should change in your book?',
+        send: 'Send',
+        thinking: 'Working on it…',
+        error: 'Sorry — that didn\'t work. Please try again.',
       },
-      photoRowLabel: 'Side by side',
-      photoGridLabel: 'Photo grid',
-      photoPageLabel: 'Own page',
-      cycleSize: 'Change photo size',
-      promoteToPhotoPage: 'Give this photo its own page',
-      demoteFromPhotoPage: 'Remove from its own page',
-      moveBlockUp: 'Move earlier',
-      moveBlockDown: 'Move later',
-      resetLayout: 'Reset layout',
-      resetLayoutHint: 'Rebuild the automatic photo layout. Your theme and cover choices are kept.',
-      layoutEditedNote: 'This layout has manual edits.',
       overwriteEditsTitle: 'Replace your manual layout edits?',
       overwriteEditsBody:
         'This book\'s layout has been edited by hand. Doing this now will replace those edits with a freshly generated layout.',

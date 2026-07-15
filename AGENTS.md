@@ -65,9 +65,12 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
   silently on any failure — `books.design_requested_at` tracks the in-flight state for the
   builder's poll. Manual fine-tuning (theme, cover style/photo, a figure's size, its own
   page, its order) goes through `updateBookLayout`'s targeted ops (`lib/books.ts`, mirrored
-  by the agent's `update_book_layout` tool and the builder's Layout card), rendered by one
+  by the agent's `update_book_layout` tool); beyond the settings card, the builder's edit
+  surface is an embedded book-scoped chat (`book-chat.tsx` → `bookChatAction` →
+  `runBookAgent` in `lib/ai/agent.ts`, book tools only). Plans are rendered by one
   of two themes — `classic` and `modern` — expressed as a CSS-variables map in
-  `lib/book-layout.ts`. Full plan: `docs/BOOK_FEATURE_PLAN.md` (layout v2 plan:
+  `lib/book-layout.ts`; layout rules: fill pages symmetrically (justified photo
+  rows, full-page framed photo-pages, no auto floats, no blank pages). Full plan: `docs/BOOK_FEATURE_PLAN.md` (layout v2 plan:
   `docs/book-layout-plan` branch, `docs/BOOK_LAYOUT_PLAN.md`).
 
 ## Workflow

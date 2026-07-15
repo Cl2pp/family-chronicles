@@ -79,11 +79,11 @@ export const tools: Tool[] = [
   saveStoryTool,
 ];
 
-export const toolsByName = new Map(tools.map((t) => [t.name, t]));
-
-/** The tool catalog as OpenAI function-tool schemas (parameters derived from each zod schema). */
-export function toOpenAISchemas(): ChatCompletionTool[] {
-  return tools.map((t) => ({
+/** A tool catalog as OpenAI function-tool schemas (parameters derived from each zod
+ *  schema). Defaults to the full chat-agent catalog; scoped agents (e.g. the book
+ *  builder's chat) pass their own subset. */
+export function toOpenAISchemas(list: Tool[] = tools): ChatCompletionTool[] {
+  return list.map((t) => ({
     type: 'function',
     function: {
       name: t.name,

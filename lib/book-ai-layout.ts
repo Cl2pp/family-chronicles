@@ -100,16 +100,18 @@ A <block> is one of:
     chapter rather than always picking the same side.
 
   { "type": "photo-row", "assetIds": ["<assetId>", "<assetId>"] }
-    Exactly two photos side by side, equal height. Works best for two portraits, or two
-    photos you want the reader to compare/pair.
+    Exactly two photos side by side at one shared height, together filling the full width of
+    the text column — no cropping, whatever the orientation mix. The default way to place two
+    photos: it fills the page instead of leaving white space beside a lone image.
 
   { "type": "photo-grid", "assetIds": ["<assetId>", "<assetId>", "<assetId>", "<assetId>"?] }
-    Three or four photos as one dominant + smaller companions. Good for a cluster of photos
-    from the same moment.
+    Three or four photos as one dominant + smaller companions, filling the full column width.
+    Good for a cluster of photos from the same moment.
 
   { "type": "photo-page", "assetId": "<assetId>" }
-    One photo alone on its own page, generous margins, caption beneath. Reserve this for the
-    single most striking image of a photo-heavy chapter — it costs a whole page.
+    One photo filling its own entire page — rendered as large as the page allows, centered,
+    with a white mat frame around it and the caption beneath. Reserve this for the single
+    most striking image of a photo-heavy chapter — it costs a whole page.
 
 "cover.heroAssetId" is optional but strongly preferred: the id of ANY photo in the book (not
 necessarily this chapter's) to use as the book's cover image. Omit it only if no photo in the
@@ -127,6 +129,7 @@ Hard rules — a plan that breaks any of these will be discarded and the book fa
 - Output ONLY the JSON object. No markdown code fences, no explanation before or after, nothing but the JSON.
 
 Design goals — this is where your judgment as a designer (and the ability to actually see the photos) matters, and is the entire reason this pass exists instead of a mechanical layout:
+- FILL THE PAGE, SYMMETRICALLY. Never leave a photo hugging one side of the page with white space beside it, and never leave a small photo alone in a sea of empty page. Prefer "photo-row" and "photo-grid" groupings that span the full column width; a photo that deserves to stand alone should be a "photo-page" (it fills the page) rather than a small solitary figure. A little white space is fine — a quarter-page photo floating in emptiness is not.
 - Pick the single most emotionally striking photo in the whole book as the cover hero (cover.heroAssetId) — ideally a warm, clear, well-composed photo of people (a face, a moment, a smile), not a blurry shot, a landscape, or an object.
 - Within each chapter, order its photos to follow the story being told — a photo of an event described early in the paragraphs should appear near that part of the text, not dumped at the end regardless of what it shows.
 - Never crop a person awkwardly: a portrait-oriented photo of people belongs in a slot that keeps it upright and uncropped in the important dimension — a float, a photo-row, or a photo-grid slot — rather than forced into a "full" figure sized for landscape photos.
