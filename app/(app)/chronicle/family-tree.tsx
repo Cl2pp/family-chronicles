@@ -40,6 +40,7 @@ import {
 } from '@tabler/icons-react';
 import type { Gender, PersonRelation, TreeEdge, TreePerson } from '@/lib/people';
 import { layoutFamilyTree } from '@/lib/tree-layout';
+import { routeParentConnectors, type ParentBus } from '@/lib/tree-routing';
 import { birthSurname, personFullName } from '@/lib/person-name';
 import { formatEventDate } from '@/lib/dates';
 import type { DatePrecision } from '@/lib/stories';
@@ -132,7 +133,7 @@ interface Pos {
 interface Connectors {
   width: number;
   height: number;
-  parents: string[]; // svg path `d` strings
+  parents: ParentBus[];
   spouses: { x1: number; x2: number; y: number }[];
 }
 
@@ -186,6 +187,11 @@ export function FamilyTree({
     () => layoutFamilyTree(people, edges, { cardWidth: CARD_WIDTH, hGap: 24 }),
     [people, edges],
   );
+  const rowIndexOf = useMemo(() => {
+    const m = new Map<string, number>();
+    rows.forEach((row, r) => row.ids.forEach((id) => m.set(id, r)));
+    return m;
+  }, [rows]);
 
   const measure = useCallback(() => {
     const world = worldRef.current;
@@ -212,48 +218,24 @@ export function FamilyTree({
       });
     }
 
-    const parents: string[] = [];
     const spouses: { x1: number; x2: number; y: number }[] = [];
-    const parentPosOfChild = new Map<string, Pos[]>();
     for (const e of validEdges) {
+      if (e.type !== 'spouse') continue;
       const a = pos.get(e.from);
       const b = pos.get(e.to);
       if (!a || !b) continue;
-      if (e.type === 'parent') {
-        const arr = parentPosOfChild.get(e.to) ?? [];
-        arr.push(a);
-        parentPosOfChild.set(e.to, arr);
-      } else {
-        const [l, r] = a.cx <= b.cx ? [a, b] : [b, a];
-        const y = (l.midY + r.midY) / 2;
-        spouses.push({ x1: l.right, x2: r.left, y });
-      }
+      const [l, r] = a.cx <= b.cx ? [a, b] : [b, a];
+      spouses.push({ x1: l.right, x2: r.left, y: (l.midY + r.midY) / 2 });
     }
 
-    // Parent connectors. When both parents sit side by side, drop ONE line from
-    // the middle of the couple (the spouse bar) — two separate elbows read as if
-    // the child descended from several couples at once.
-    for (const [childId, pps] of parentPosOfChild) {
-      const child = pos.get(childId);
-      if (!child) continue;
-      // Rows are top-aligned, so compare tops: cards in the same row can have
-      // different heights (born-surname line, life span), which shifts midY.
-      const sideBySide =
-        pps.length === 2 &&
-        Math.abs(pps[0].top - pps[1].top) < 4 &&
-        Math.abs(pps[0].cx - pps[1].cx) < CARD_WIDTH * 2;
-      if (sideBySide) {
-        const x = (pps[0].cx + pps[1].cx) / 2;
-        const startY = (pps[0].midY + pps[1].midY) / 2;
-        const busY = (Math.max(pps[0].bottom, pps[1].bottom) + child.top) / 2;
-        parents.push(`M ${x} ${startY} V ${busY} H ${child.cx} V ${child.top}`);
-      } else {
-        for (const p of pps) {
-          const busY = (p.bottom + child.top) / 2;
-          parents.push(`M ${p.cx} ${p.bottom} V ${busY} H ${child.cx} V ${child.top}`);
-        }
-      }
-    }
+    // Parent connectors: one sibling bus per couple (or lone parent), with
+    // overlapping rails pushed onto separate lanes — see lib/tree-routing.ts.
+    const parents = routeParentConnectors({
+      positions: pos,
+      edges: validEdges,
+      rowIndexOf,
+      cardWidth: CARD_WIDTH,
+    });
 
     setConnectors({
       width: world.offsetWidth,
@@ -261,7 +243,7 @@ export function FamilyTree({
       parents,
       spouses,
     });
-  }, [validEdges]);
+  }, [validEdges, rowIndexOf]);
 
   // Push the current pan/zoom onto the world element. Called imperatively from
   // gesture handlers (no state update) and re-asserted after every React commit
@@ -423,6 +405,30 @@ export function FamilyTree({
     };
   }, [applyTransform, zoomAt, people.length]);
 
+  // Tint each bus with its family's tag color (muted) so parallel rails from
+  // different families stay tellable apart. The family a bus "produces" is
+  // the children's shared birth surname (falling back to the parents').
+  const busColor = useCallback(
+    (bus: ParentBus): string | null => {
+      const surnameOf = (id: string): string | null => {
+        const p = peopleById.get(id);
+        const s = (p?.birthFamilyName ?? p?.familyName)?.trim();
+        return s && colorByTag[s] ? s : null;
+      };
+      const counts = new Map<string, number>();
+      for (const id of bus.childIds) {
+        const s = surnameOf(id);
+        if (s) counts.set(s, (counts.get(s) ?? 0) + 1);
+      }
+      const majority = [...counts.entries()].sort(
+        (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+      )[0]?.[0];
+      const tag = majority ?? bus.parentIds.map(surnameOf).find(Boolean);
+      return tag ? colorByTag[tag] : null;
+    },
+    [peopleById, colorByTag],
+  );
+
   const selected = selectedId ? peopleById.get(selectedId) : undefined;
   const [unlinking, startUnlink] = useTransition();
   // Edits/links act on the active family, so the person must be one of its members.
@@ -576,15 +582,19 @@ export function FamilyTree({
                   zIndex: 0,
                 }}
               >
-                {connectors.parents.map((d, i) => (
-                  <path
-                    key={`p-${i}`}
-                    d={d}
-                    fill="none"
-                    stroke="var(--mantine-color-slate-3)"
-                    strokeWidth={1.5}
-                  />
-                ))}
+                {connectors.parents.map((bus, i) => {
+                  const color = busColor(bus);
+                  return (
+                    <path
+                      key={`p-${i}`}
+                      d={bus.d}
+                      fill="none"
+                      stroke={color ?? 'var(--mantine-color-slate-3)'}
+                      strokeOpacity={color ? 0.45 : 1}
+                      strokeWidth={1.5}
+                    />
+                  );
+                })}
                 {connectors.spouses.map((s, i) => (
                   <g key={`s-${i}`} stroke="var(--mantine-color-slate-4)" strokeWidth={1.5}>
                     <line x1={s.x1} y1={s.y - 2} x2={s.x2} y2={s.y - 2} />
