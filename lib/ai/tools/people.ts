@@ -12,9 +12,36 @@ import {
   updatePerson,
   type PersonPatch,
 } from '@/lib/people';
-import { parseYear, yearToDate } from '@/lib/dates';
+import { parsePartialDate, partsToEventDate } from '@/lib/dates';
 import { defineTool } from './types';
 import { ensureContributor, resolvePerson } from './util';
+
+const DATE_FORMAT_ERROR = 'Dates must be "YYYY", "YYYY-MM", or "YYYY-MM-DD".';
+
+/**
+ * A tool's partial-date string as stored date + precision. `null`/missing input
+ * clears; an unparsable string returns an error instead of silently clearing.
+ */
+/** A stored date back to "YYYY[-MM[-DD]]" at its precision ('circa' shows only the year). */
+function partialDateString(date: Date | null, precision: string | null): string | null {
+  if (!date) return null;
+  const d = new Date(date);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const year = String(d.getUTCFullYear());
+  if (precision === 'day') return `${year}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+  if (precision === 'month') return `${year}-${pad(d.getUTCMonth() + 1)}`;
+  return year;
+}
+
+function toStoredDate(
+  value: string | null | undefined,
+): { date: Date | null; precision: 'day' | 'month' | 'year' | null } | { error: string } {
+  if (value == null) return { date: null, precision: null };
+  const parts = parsePartialDate(value);
+  if (!parts) return { error: DATE_FORMAT_ERROR };
+  const { eventDate, eventDatePrecision } = partsToEventDate(parts);
+  return { date: eventDate, precision: eventDatePrecision };
+}
 
 const relation = z
   .enum(['parent', 'child', 'partner'])
@@ -36,8 +63,11 @@ export const addPersonTool = defineTool({
       .nullish()
       .describe('Surname at birth, if it differs from the current surname (e.g. maiden name).'),
     gender: gender.nullish(),
-    bornYear: z.number().int().nullish().describe('Birth year, if known.'),
-    diedYear: z.number().int().nullish().describe('Death year, if known.'),
+    born: z
+      .string()
+      .nullish()
+      .describe('Birth date as "YYYY", "YYYY-MM", or "YYYY-MM-DD" — as precise as known.'),
+    died: z.string().nullish().describe('Death date, same format as born.'),
     relateTo: z
       .object({ name: z.string().min(1).describe('An existing relative in this chronicle.'), relation })
       .nullish()
@@ -58,18 +88,20 @@ export const addPersonTool = defineTool({
       relative = found.person;
     }
 
-    const bornYear = parseYear(args.bornYear);
-    const diedYear = parseYear(args.diedYear);
+    const born = toStoredDate(args.born);
+    if ('error' in born) return { ok: false, error: born.error };
+    const died = toStoredDate(args.died);
+    if ('error' in died) return { ok: false, error: died.error };
 
     const person = await createPerson({
       displayName,
       familyName: args.familyName?.trim() || null,
       birthFamilyName: args.birthFamilyName?.trim() || null,
       gender: args.gender ?? null,
-      bornOn: bornYear !== undefined ? yearToDate(bornYear) : null,
-      bornPrecision: bornYear !== undefined ? 'year' : null,
-      diedOn: diedYear !== undefined ? yearToDate(diedYear) : null,
-      diedPrecision: diedYear !== undefined ? 'year' : null,
+      bornOn: born.date,
+      bornPrecision: born.precision,
+      diedOn: died.date,
+      diedPrecision: died.precision,
       createdBy: ctx.userId,
       chronicleId: gate.chronicleId,
     });
@@ -84,6 +116,8 @@ export const addPersonTool = defineTool({
       detail = `${args.relateTo.relation} of ${relative.displayName}`;
     }
 
+    const bornYear = born.date?.getUTCFullYear();
+    const diedYear = died.date?.getUTCFullYear();
     const years = bornYear || diedYear ? ` (${bornYear ?? ''}${diedYear ? `–${diedYear}` : ''})` : '';
     return {
       ok: true,
@@ -174,7 +208,7 @@ export const editPersonTool = defineTool({
   name: 'edit_person',
   description:
     "Update an existing person in the active chronicle's tree — correct their name, surname, " +
-    'birth name, gender, or birth/death year. Pass only the fields to change; pass null to ' +
+    'birth name, gender, or birth/death date. Pass only the fields to change; pass null to ' +
     'clear a field. Contributor access required.',
   schema: z.object({
     name: z.string().min(1).describe('The person to edit (their current name in the tree).'),
@@ -185,8 +219,11 @@ export const editPersonTool = defineTool({
       .nullish()
       .describe('The surname at birth, e.g. a maiden name (null to clear).'),
     gender: gender.nullish().describe("The person's gender (null to clear)."),
-    bornYear: z.number().int().nullish().describe('Corrected birth year (null to clear).'),
-    diedYear: z.number().int().nullish().describe('Corrected death year (null to clear).'),
+    born: z
+      .string()
+      .nullish()
+      .describe('Corrected birth date as "YYYY", "YYYY-MM", or "YYYY-MM-DD" (null to clear).'),
+    died: z.string().nullish().describe('Corrected death date, same format (null to clear).'),
   }),
   async execute(args, ctx) {
     const gate = await ensureContributor(ctx);
@@ -206,18 +243,20 @@ export const editPersonTool = defineTool({
       patch.birthFamilyName = args.birthFamilyName?.trim() || null;
     }
     if (args.gender !== undefined) patch.gender = args.gender;
-    if (args.bornYear !== undefined) {
-      const y = parseYear(args.bornYear);
-      patch.bornOn = args.bornYear === null || y === undefined ? null : yearToDate(y);
-      patch.bornPrecision = patch.bornOn ? 'year' : null;
+    if (args.born !== undefined) {
+      const born = toStoredDate(args.born);
+      if ('error' in born) return { ok: false, error: born.error };
+      patch.bornOn = born.date;
+      patch.bornPrecision = born.precision;
     }
-    if (args.diedYear !== undefined) {
-      const y = parseYear(args.diedYear);
-      patch.diedOn = args.diedYear === null || y === undefined ? null : yearToDate(y);
-      patch.diedPrecision = patch.diedOn ? 'year' : null;
+    if (args.died !== undefined) {
+      const died = toStoredDate(args.died);
+      if ('error' in died) return { ok: false, error: died.error };
+      patch.diedOn = died.date;
+      patch.diedPrecision = died.precision;
     }
     if (Object.keys(patch).length === 0) {
-      return { ok: false, error: 'Nothing to change — provide a new name, surname, gender, or year.' };
+      return { ok: false, error: 'Nothing to change — provide a new name, surname, gender, or date.' };
     }
 
     await updatePerson(found.person.id, patch);
@@ -269,7 +308,7 @@ export const deletePersonTool = defineTool({
 export const getFamilyTreeTool = defineTool({
   name: 'get_family_tree',
   description:
-    "List everyone in the active chronicle's tree with their gender, birth/death years, derived " +
+    "List everyone in the active chronicle's tree with their gender, birth/death dates, derived " +
     'family tags, and the kinship relationships between them. Use before adding or linking people ' +
     'to avoid duplicates, wrong links, or giving someone a third parent.',
   schema: z.object({}),
@@ -291,8 +330,8 @@ export const getFamilyTreeTool = defineTool({
           birthFamilyName: p.birthFamilyName,
           familyTags: p.familyTags,
           gender: p.gender,
-          born: p.bornOn ? new Date(p.bornOn).getUTCFullYear() : null,
-          died: p.diedOn ? new Date(p.diedOn).getUTCFullYear() : null,
+          born: partialDateString(p.bornOn, p.bornPrecision),
+          died: partialDateString(p.diedOn, p.diedPrecision),
         })),
         relationships: tree.edges.map((e) =>
           e.type === 'parent'

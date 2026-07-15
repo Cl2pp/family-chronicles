@@ -56,6 +56,17 @@ export function partsToEventDate(parts: {
   return { eventDate: d, eventDatePrecision: 'day' };
 }
 
+/** Parse "YYYY", "YYYY-MM", or "YYYY-MM-DD" into fuzzy date parts; null if unparsable. */
+export function parsePartialDate(value: string): EventDateParts | null {
+  const m = value.trim().match(/^(\d{1,4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?$/);
+  if (!m) return null;
+  return {
+    year: Number(m[1]),
+    month: m[2] ? Number(m[2]) : null,
+    day: m[3] ? Number(m[3]) : null,
+  };
+}
+
 /** Split a stored fuzzy date back into form segments; 'circa' exposes only its year. */
 export function eventDateToParts(
   date: Date | string | null | undefined,

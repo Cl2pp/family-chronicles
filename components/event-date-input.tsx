@@ -46,19 +46,24 @@ const segmentStyle: React.CSSProperties = {
 };
 
 /**
- * One visual input with day.month.year segments for a story's fuzzy event date.
- * Only the year makes it a date; day and month are optional refinements (they map
- * to `eventDatePrecision`). Typing auto-advances between segments; Backspace on an
- * empty segment jumps back.
+ * One visual input with day.month.year segments for a fuzzy date (story event,
+ * birth, death). Only the year makes it a date; day and month are optional
+ * refinements (they map to a `date_precision`). Typing auto-advances between
+ * segments; Backspace on an empty segment jumps back. Defaults to the story
+ * event-date label/hint; pass `label` (and optionally `description`) otherwise.
  */
 export function EventDateInput({
   value,
   onChange,
   mb,
+  label,
+  description,
 }: {
   value: EventDateValue;
   onChange: (v: EventDateValue) => void;
   mb?: string | number;
+  label?: string;
+  description?: string;
 }) {
   const { t } = useI18n();
   const dayRef = useRef<HTMLInputElement>(null);
@@ -88,7 +93,11 @@ export function EventDateInput({
   }
 
   return (
-    <Input.Wrapper label={t.dates.eventDateLabel} description={t.dates.eventDateHint} mb={mb}>
+    <Input.Wrapper
+      label={label ?? t.dates.eventDateLabel}
+      description={description ?? (label ? undefined : t.dates.eventDateHint)}
+      mb={mb}
+    >
       <Input
         component="div"
         w={190}
