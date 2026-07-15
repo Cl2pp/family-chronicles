@@ -25,11 +25,13 @@ function SignupForm() {
   const [loading, setLoading] = useState(false);
 
   const form = useForm({
-    initialValues: { name: '', email: '', password: '' },
+    initialValues: { name: '', email: '', password: '', confirmPassword: '' },
     validate: {
       name: (v) => (v.trim().length >= 2 ? null : t.auth.tellUsYourName),
       email: (v) => (/^\S+@\S+\.\S+$/.test(v) ? null : t.auth.enterValidEmail),
       password: (v) => (v.length >= 8 ? null : t.auth.atLeast8Chars),
+      confirmPassword: (v, values) =>
+        v === values.password ? null : t.auth.passwordsDoNotMatch,
     },
   });
 
@@ -67,6 +69,10 @@ function SignupForm() {
             {...form.getInputProps('email')}
           />
           <PasswordInput label={t.auth.password} {...form.getInputProps('password')} />
+          <PasswordInput
+            label={t.auth.confirmPassword}
+            {...form.getInputProps('confirmPassword')}
+          />
           <Button type="submit" loading={loading} fullWidth>
             {t.home.createAccount}
           </Button>
