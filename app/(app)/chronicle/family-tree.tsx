@@ -166,9 +166,14 @@ export function FamilyTree({
   // Current pan/zoom, applied imperatively to `worldRef` so gestures never
   // trigger a React re-render. `didFit` guards the one-time initial fit;
   // `moved` suppresses the card-select click at the end of a drag/pinch.
+  // `interacted` tracks whether the user has panned/zoomed since the last fit:
+  // until they do, container/content resizes (fonts and flex settling after
+  // mount, window resizes) keep re-fitting the view instead of leaving the
+  // tree at a stale — possibly MIN_ZOOM-clamped — initial fit.
   const view = useRef({ scale: 1, x: 0, y: 0 });
   const didFitRef = useRef(false);
   const movedRef = useRef(false);
+  const interactedRef = useRef(false);
   const [connectors, setConnectors] = useState<Connectors | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [linkRelation, setLinkRelation] = useState<PersonRelation>('parent');
@@ -264,6 +269,7 @@ export function FamilyTree({
   // pinned under the cursor / pinch midpoint.
   const zoomAt = useCallback(
     (px: number, py: number, factor: number) => {
+      interactedRef.current = true;
       const t = view.current;
       const next = clampZoom(t.scale * factor);
       const k = next / t.scale;
@@ -291,6 +297,8 @@ export function FamilyTree({
       x: (cw - ww * scale) / 2,
       y: (ch - wh * scale) / 2,
     };
+    // Fitting (initial, on resize, or via the fit button) re-arms auto-fit.
+    interactedRef.current = false;
     applyTransform();
   }, [applyTransform]);
 
@@ -318,14 +326,22 @@ export function FamilyTree({
     window.addEventListener('resize', measure);
     let ro: ResizeObserver | undefined;
     if (container && typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(() => measure());
+      ro = new ResizeObserver(() => {
+        measure();
+        // The initial fit can run before fonts/flex settle the container (or
+        // the cards), storing a badly clamped scale. Until the user pans or
+        // zooms themselves, follow size changes by re-fitting. Transforms
+        // don't affect the observed layout sizes, so this can't loop.
+        if (!interactedRef.current) fitView();
+      });
       ro.observe(container);
+      if (worldRef.current) ro.observe(worldRef.current);
     }
     return () => {
       window.removeEventListener('resize', measure);
       ro?.disconnect();
     };
-  }, [measure]);
+  }, [measure, fitView]);
 
   // Google-Maps-style navigation: drag to pan, wheel/pinch to zoom. Handlers are
   // native (not React props) so the wheel listener can be non-passive and call
@@ -374,6 +390,7 @@ export function FamilyTree({
       } else {
         view.current.x += e.clientX - prev.x;
         view.current.y += e.clientY - prev.y;
+        interactedRef.current = true;
         applyTransform();
         if (Math.hypot(e.clientX - startX, e.clientY - startY) > 4) movedRef.current = true;
       }
