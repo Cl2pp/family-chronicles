@@ -380,6 +380,11 @@ export const en = {
         'Let AI look at your photos and propose a fresh layout — which photo is the cover, what goes side by side, what gets its own page. Takes about a minute.',
       orderCta: 'Order this book',
       orderedNote: 'This book has been ordered and can no longer be changed.',
+      deleteBook: 'Delete book',
+      deleteConfirmTitle: 'Delete this book?',
+      deleteConfirmBody:
+        'This permanently removes the book and its layout. Your stories and photos are not affected — you can always create a new book from them.',
+      deleteConfirm: 'Delete permanently',
       theme: 'Theme',
       themeOptions: {
         classic: 'Classic',

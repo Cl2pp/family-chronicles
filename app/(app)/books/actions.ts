@@ -7,6 +7,7 @@ import { requireUser } from '@/lib/session';
 import { resolveActiveChronicle } from '@/lib/chronicles';
 import {
   createBook,
+  deleteBook,
   getBookForUser,
   requestAiDesign,
   requestPreview,
@@ -100,6 +101,15 @@ export async function resetBookLayoutAction(input: {
   const result = await resetBookLayout({ ...input, userId: user.id });
   revalidatePath(`/books/${input.bookId}`);
   return result.ok ? {} : { error: result.error };
+}
+
+/** Permanently delete a book (stories/photos untouched). The client redirects to /books. */
+export async function deleteBookAction(bookId: string): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await deleteBook({ bookId, userId: user.id });
+  if (!result.ok) return { error: result.error };
+  revalidatePath('/books');
+  return {};
 }
 
 /** One prior turn of the builder's book chat (client-held; the chat is per-visit). */

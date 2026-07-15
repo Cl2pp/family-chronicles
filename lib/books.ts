@@ -12,6 +12,7 @@ import {
 } from '@/db/schema';
 import { getMembership } from '@/lib/chronicles';
 import { canContribute, type AccessRole } from '@/lib/permissions';
+import { deleteObject } from '@/lib/s3';
 import { enqueueDesignBook, enqueueRenderBook } from '@/lib/queue';
 import { quoteBookPrice, type BookFormat, type BookQuote } from '@/lib/gelato';
 import {
@@ -339,6 +340,31 @@ export async function updateBook(input: {
   if (input.format !== undefined) set.format = input.format;
 
   await db.update(books).set(set).where(eq(books.id, input.bookId));
+  return { ok: true };
+}
+
+/**
+ * Delete a book permanently: the row, its story selection (FK cascade), and its
+ * rendered PDFs in storage. The stories and photos themselves are untouched — a
+ * book is only a selection over them. Ordered books are locked (and `book_orders`
+ * restricts their deletion at the DB level anyway).
+ */
+export async function deleteBook(input: { bookId: string; userId: string }): Promise<Result> {
+  const gate = await editableBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+
+  await db.delete(books).where(eq(books.id, input.bookId));
+
+  // Storage cleanup AFTER the row is gone — a failed object delete must not leave a
+  // half-deleted book behind; a stray PDF object is the cheaper failure.
+  for (const key of [gate.book.previewS3Key, gate.book.printS3Key]) {
+    if (!key) continue;
+    try {
+      await deleteObject(key);
+    } catch (e) {
+      console.error(`[books] failed to delete ${key} for removed book ${input.bookId}:`, e);
+    }
+  }
   return { ok: true };
 }
 
