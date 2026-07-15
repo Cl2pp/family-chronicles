@@ -41,8 +41,11 @@ import {
 import type { Gender, PersonRelation, TreeEdge, TreePerson } from '@/lib/people';
 import { layoutFamilyTree } from '@/lib/tree-layout';
 import { birthSurname, personFullName } from '@/lib/person-name';
+import { formatEventDate } from '@/lib/dates';
+import type { DatePrecision } from '@/lib/stories';
 import { useI18n } from '@/lib/i18n/client';
 import type { Dictionary } from '@/lib/i18n';
+import type { Locale } from '@/lib/i18n/config';
 import { relatePeopleAction, removeRelationshipAction } from './actions';
 import { DeletePersonButton } from './delete-person-button';
 import type { AddTarget } from './types';
@@ -60,12 +63,23 @@ function yearOf(d: Date | string | null | undefined): number | null {
   return date.getUTCFullYear();
 }
 
-function lifeSpan(person: TreePerson): string {
+/** Compact years for the tree card: "1948–2019", "born 1948", or "–2019". */
+function lifeSpan(person: TreePerson, t: Dictionary): string {
   const born = yearOf(person.bornOn);
   const died = yearOf(person.diedOn);
   if (born && died) return `${born}–${died}`;
-  if (born) return `${born}–`;
+  if (born) return t.person.bornOnly(String(born));
   if (died) return `–${died}`;
+  return '';
+}
+
+/** Same shape as lifeSpan, but at full stored precision — for the person drawer. */
+function lifeSpanFull(person: TreePerson, t: Dictionary, locale: Locale): string {
+  const born = formatEventDate(person.bornOn, person.bornPrecision as DatePrecision | null, locale);
+  const died = formatEventDate(person.diedOn, person.diedPrecision as DatePrecision | null, locale);
+  if (born && died) return `${born} – ${died}`;
+  if (born) return t.person.bornOnly(born);
+  if (died) return `– ${died}`;
   return '';
 }
 
@@ -144,7 +158,7 @@ export function FamilyTree({
   onAddPerson,
   onEditPerson,
 }: FamilyTreeProps) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -646,9 +660,9 @@ export function FamilyTree({
                               ({t.tree.bornSurname(birthSurname(person)!)})
                             </Text>
                           )}
-                          {lifeSpan(person) && (
+                          {lifeSpan(person, t) && (
                             <Text size="xs" c="dimmed">
-                              {lifeSpan(person)}
+                              {lifeSpan(person, t)}
                             </Text>
                           )}
                           {person.familyTags.length > 0 && (
@@ -737,9 +751,9 @@ export function FamilyTree({
                       {t.tree.bornSurname(birthSurname(selected)!)}
                     </Text>
                   )}
-                  {lifeSpan(selected) && (
+                  {lifeSpanFull(selected, t, locale) && (
                     <Text size="sm" c="dimmed">
-                      {lifeSpan(selected)}
+                      {lifeSpanFull(selected, t, locale)}
                     </Text>
                   )}
                 </div>

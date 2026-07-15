@@ -21,7 +21,7 @@ import {
 } from '@/lib/people';
 import { createInvitation } from '@/lib/invitations';
 import type { AccessRole } from '@/lib/permissions';
-import { parseYear, yearToDate } from '@/lib/dates';
+import { partsToEventDate, type EventDateParts } from '@/lib/dates';
 
 /** Create a chronicle, make it active, and go to the chronicle screen. */
 export async function createChronicleAction(formData: FormData) {
@@ -52,8 +52,8 @@ export interface AddPersonInput {
   familyName?: string;
   birthFamilyName?: string;
   gender?: Gender | null;
-  bornYear?: number;
-  diedYear?: number;
+  born?: EventDateParts;
+  died?: EventDateParts;
   connectTo?: { personId: string; relation: PersonRelation };
 }
 
@@ -67,18 +67,18 @@ export async function addPersonAction(input: AddPersonInput) {
     throw new Error('A name is required.');
   }
 
-  const bornYear = parseYear(input.bornYear);
-  const diedYear = parseYear(input.diedYear);
+  const born = partsToEventDate(input.born ?? {});
+  const died = partsToEventDate(input.died ?? {});
 
   const person = await createPerson({
     displayName,
     familyName: input.familyName?.trim() || null,
     birthFamilyName: input.birthFamilyName?.trim() || null,
     gender: input.gender ?? null,
-    bornOn: bornYear !== undefined ? yearToDate(bornYear) : null,
-    bornPrecision: bornYear !== undefined ? 'year' : null,
-    diedOn: diedYear !== undefined ? yearToDate(diedYear) : null,
-    diedPrecision: diedYear !== undefined ? 'year' : null,
+    bornOn: born.eventDate,
+    bornPrecision: born.eventDatePrecision,
+    diedOn: died.eventDate,
+    diedPrecision: died.eventDatePrecision,
     createdBy: user.id,
     chronicleId: input.chronicleId,
   });
@@ -107,8 +107,8 @@ export async function editPersonAction(input: {
   familyName?: string | null;
   birthFamilyName?: string | null;
   gender?: Gender | null;
-  bornYear?: number | null;
-  diedYear?: number | null;
+  born?: EventDateParts;
+  died?: EventDateParts;
 }) {
   const user = await requireUser();
   await requireContributor(input.chronicleId, user.id);
@@ -119,18 +119,18 @@ export async function editPersonAction(input: {
     throw new Error('That person is not in this chronicle.');
   }
 
-  const bornYear = parseYear(input.bornYear ?? undefined);
-  const diedYear = parseYear(input.diedYear ?? undefined);
+  const born = partsToEventDate(input.born ?? {});
+  const died = partsToEventDate(input.died ?? {});
 
   await updatePerson(input.personId, {
     displayName,
     familyName: input.familyName?.trim() || null,
     birthFamilyName: input.birthFamilyName?.trim() || null,
     gender: input.gender ?? null,
-    bornOn: bornYear !== undefined ? yearToDate(bornYear) : null,
-    bornPrecision: bornYear !== undefined ? 'year' : null,
-    diedOn: diedYear !== undefined ? yearToDate(diedYear) : null,
-    diedPrecision: diedYear !== undefined ? 'year' : null,
+    bornOn: born.eventDate,
+    bornPrecision: born.eventDatePrecision,
+    diedOn: died.eventDate,
+    diedPrecision: died.eventDatePrecision,
   });
 
   revalidatePath('/chronicle');

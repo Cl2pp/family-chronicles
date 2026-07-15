@@ -6,16 +6,20 @@ import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import type { Gender } from '@/lib/people';
 import { useI18n } from '@/lib/i18n/client';
+import { eventDateToParts } from '@/lib/dates';
+import type { DatePrecision } from '@/lib/stories';
+import {
+  EventDateInput,
+  eventDateValueFromParts,
+  eventDateValueToParts,
+  type EventDateValue,
+} from '@/components/event-date-input';
 import { editPersonAction } from './actions';
 import { genderOptions, type PersonRow } from './types';
 
-function yearOf(d: Date | string | null | undefined): string {
-  if (!d) return '';
-  const date = typeof d === 'string' ? new Date(d) : d;
-  return Number.isNaN(date.getTime()) ? '' : String(date.getUTCFullYear());
-}
+const EMPTY_DATE: EventDateValue = { day: '', month: '', year: '' };
 
-/** Edit an existing person's name, surname, and birth/death years. */
+/** Edit an existing person's name, surname, and birth/death dates. */
 export function EditPersonModal({
   chronicleId,
   person,
@@ -35,13 +39,11 @@ export function EditPersonModal({
       familyName: '',
       birthFamilyName: '',
       gender: null as Gender | null,
-      bornYear: '',
-      diedYear: '',
+      born: EMPTY_DATE,
+      died: EMPTY_DATE,
     },
     validate: {
       displayName: (v) => (v.trim() ? null : t.person.nameRequired),
-      bornYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : t.person.use4DigitYear),
-      diedYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : t.person.use4DigitYear),
     },
   });
 
@@ -52,8 +54,12 @@ export function EditPersonModal({
         familyName: person.familyName ?? '',
         birthFamilyName: person.birthFamilyName ?? '',
         gender: person.gender,
-        bornYear: yearOf(person.bornOn),
-        diedYear: yearOf(person.diedOn),
+        born: eventDateValueFromParts(
+          eventDateToParts(person.bornOn, person.bornPrecision as DatePrecision | null),
+        ),
+        died: eventDateValueFromParts(
+          eventDateToParts(person.diedOn, person.diedPrecision as DatePrecision | null),
+        ),
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,8 +76,8 @@ export function EditPersonModal({
           familyName: values.familyName.trim() || null,
           birthFamilyName: values.birthFamilyName.trim() || null,
           gender: values.gender,
-          bornYear: values.bornYear ? Number(values.bornYear) : null,
-          diedYear: values.diedYear ? Number(values.diedYear) : null,
+          born: eventDateValueToParts(values.born),
+          died: eventDateValueToParts(values.died),
         });
         notifications.show({ message: t.person.updated });
         onClose();
@@ -106,16 +112,17 @@ export function EditPersonModal({
             clearable
             {...form.getInputProps('gender')}
           />
-          <Group grow>
-            <TextInput
-              label={t.person.birthYear}
-              placeholder={t.person.birthYearPlaceholder}
-              {...form.getInputProps('bornYear')}
+          <Group grow align="flex-start">
+            <EventDateInput
+              label={t.person.birthDate}
+              description={t.person.dateHint}
+              value={form.values.born}
+              onChange={(v) => form.setFieldValue('born', v)}
             />
-            <TextInput
-              label={t.person.deathYear}
-              placeholder={t.person.deathYearPlaceholder}
-              {...form.getInputProps('diedYear')}
+            <EventDateInput
+              label={t.person.deathDate}
+              value={form.values.died}
+              onChange={(v) => form.setFieldValue('died', v)}
             />
           </Group>
           <Group justify="flex-end" mt="sm">

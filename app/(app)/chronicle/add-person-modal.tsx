@@ -7,8 +7,11 @@ import { notifications } from '@mantine/notifications';
 import type { Gender } from '@/lib/people';
 import { useI18n } from '@/lib/i18n/client';
 import type { Dictionary } from '@/lib/i18n';
+import { EventDateInput, eventDateValueToParts, type EventDateValue } from '@/components/event-date-input';
 import { addPersonAction } from './actions';
 import { genderOptions, type AddTarget } from './types';
+
+const EMPTY_DATE: EventDateValue = { day: '', month: '', year: '' };
 
 const RELATION_TITLE: Record<AddTarget['relation'], (t: Dictionary, name: string) => string> = {
   parent: (t, n) => t.person.addTitleParent(n),
@@ -35,13 +38,11 @@ export function AddPersonModal({
       familyName: '',
       birthFamilyName: '',
       gender: null as Gender | null,
-      bornYear: '',
-      diedYear: '',
+      born: EMPTY_DATE,
+      died: EMPTY_DATE,
     },
     validate: {
       displayName: (v) => (v.trim() ? null : t.person.nameRequired),
-      bornYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : t.person.use4DigitYear),
-      diedYear: (v) => (v === '' || /^\d{1,4}$/.test(v) ? null : t.person.use4DigitYear),
     },
   });
 
@@ -63,8 +64,8 @@ export function AddPersonModal({
           familyName: values.familyName || undefined,
           birthFamilyName: values.birthFamilyName || undefined,
           gender: values.gender,
-          bornYear: values.bornYear ? Number(values.bornYear) : undefined,
-          diedYear: values.diedYear ? Number(values.diedYear) : undefined,
+          born: eventDateValueToParts(values.born),
+          died: eventDateValueToParts(values.died),
           connectTo: target
             ? { personId: target.personId, relation: target.relation }
             : undefined,
@@ -107,16 +108,17 @@ export function AddPersonModal({
             clearable
             {...form.getInputProps('gender')}
           />
-          <Group grow>
-            <TextInput
-              label={t.person.birthYear}
-              placeholder={t.person.birthYearPlaceholder}
-              {...form.getInputProps('bornYear')}
+          <Group grow align="flex-start">
+            <EventDateInput
+              label={t.person.birthDate}
+              description={t.person.dateHint}
+              value={form.values.born}
+              onChange={(v) => form.setFieldValue('born', v)}
             />
-            <TextInput
-              label={t.person.deathYear}
-              placeholder={t.person.deathYearPlaceholder}
-              {...form.getInputProps('diedYear')}
+            <EventDateInput
+              label={t.person.deathDate}
+              value={form.values.died}
+              onChange={(v) => form.setFieldValue('died', v)}
             />
           </Group>
           <Group justify="flex-end" mt="sm">

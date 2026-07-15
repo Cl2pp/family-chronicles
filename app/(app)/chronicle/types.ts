@@ -45,5 +45,7 @@ export interface PersonRow {
   userId: string | null;
   gender: Gender | null;
   bornOn: Date | string | null;
+  bornPrecision: string | null;
   diedOn: Date | string | null;
+  diedPrecision: string | null;
 }
