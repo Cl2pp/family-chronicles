@@ -14,23 +14,14 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
-/** localStorage key holding the epoch-ms timestamp of the last dismissal. */
-const DISMISSED_KEY = 'fc-install-prompt-dismissed-at';
-/** localStorage key set once the user tells us they're done — never nudge again. */
-const SETTLED_KEY = 'fc-install-prompt-settled';
-/** Short on purpose: brushing the card away shouldn't bury it for a month. */
-const SNOOZE_HOURS = 1;
+/** sessionStorage key set on dismissal — hides the card for this visit only. */
+const DISMISSED_KEY = 'fc-install-prompt-dismissed';
 
 /** Routes that show the mobile bottom tab bar; the card floats above it there. */
 const TAB_BAR_ROUTES = ['/chat', '/stories', '/chronicle', '/settings', '/account'];
 
-function isSnoozed() {
-  const at = Number(localStorage.getItem(DISMISSED_KEY));
-  return at > 0 && Date.now() - at < SNOOZE_HOURS * 60 * 60 * 1000;
-}
-
-function isSettled() {
-  return localStorage.getItem(SETTLED_KEY) === '1';
+function isDismissed() {
+  return sessionStorage.getItem(DISMISSED_KEY) === '1';
 }
 
 /**
@@ -39,11 +30,14 @@ function isSettled() {
  * illustrated share-menu steps in place; on Android/Chromium we hold on
  * to `beforeinstallprompt` and trigger the native install dialog.
  *
- * Brushing the card away only snoozes it for an hour, so it comes back on the
- * next visit. Installing, or reaching the end of the iOS guide, settles it for
- * good — iOS fires no `appinstalled` event, so that button is the only signal
- * we get from an iPhone. Either way the steps stay available under
- * Settings → App (see `settings/install-card.tsx`).
+ * Rendered only inside the logged-in app shell — never on the landing or
+ * login/signup pages. As long as the app isn't installed (running in a
+ * browser tab, not standalone), the nudge returns on every new visit;
+ * dismissing it — the X, "Not now", installing, or finishing the iOS
+ * guide — hides it for the rest of the browser session only. Installed
+ * users never see it: launches from the home screen are standalone, and
+ * Chromium doesn't re-fire `beforeinstallprompt` once installed. The steps
+ * stay available under Settings → App (see `settings/install-card.tsx`).
  */
 export function InstallPrompt() {
   const { t } = useI18n();
@@ -53,7 +47,7 @@ export function InstallPrompt() {
   const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
-    if (isStandalone() || isSettled() || isSnoozed()) return;
+    if (isStandalone() || isDismissed()) return;
 
     // Let the page settle before nudging; the check runs at fire time.
     const timer = setTimeout(() => {
@@ -65,7 +59,7 @@ export function InstallPrompt() {
       setInstallEvent(e as BeforeInstallPromptEvent);
       setPlatform('android');
     };
-    const onInstalled = () => settle();
+    const onInstalled = () => dismiss();
     window.addEventListener('beforeinstallprompt', onPrompt);
     window.addEventListener('appinstalled', onInstalled);
     return () => {
@@ -75,24 +69,17 @@ export function InstallPrompt() {
     };
   }, []);
 
-  /** "Not now" / the X — back in an hour. */
+  /** Any way out of the card — gone for this visit, back on the next one. */
   function dismiss() {
-    localStorage.setItem(DISMISSED_KEY, String(Date.now()));
-    setPlatform(null);
-  }
-
-  /** Installed, or finished reading the guide — don't ask again. */
-  function settle() {
-    localStorage.setItem(SETTLED_KEY, '1');
+    sessionStorage.setItem(DISMISSED_KEY, '1');
     setPlatform(null);
   }
 
   async function install() {
     if (!installEvent) return;
     await installEvent.prompt();
-    const { outcome } = await installEvent.userChoice;
-    if (outcome === 'accepted') settle();
-    else dismiss();
+    await installEvent.userChoice;
+    dismiss();
   }
 
   if (!platform) return null;
@@ -124,7 +111,7 @@ export function InstallPrompt() {
             <CloseButton size="sm" onClick={dismiss} aria-label={t.pwa.notNow} />
           </Group>
           <InstallGuideSteps platform="ios" />
-          <Button fullWidth size="compact-md" onClick={settle}>
+          <Button fullWidth size="compact-md" onClick={dismiss}>
             {t.pwa.done}
           </Button>
         </Stack>
