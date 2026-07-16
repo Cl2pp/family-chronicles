@@ -137,7 +137,7 @@ export default function DatenschutzPage() {
         <P>
           Wir speichern personenbezogene Daten so lange, wie es für die genannten Zwecke erforderlich
           ist bzw. wie du dein Konto und deine Inhalte nutzt. Die Rohdaten (Original-Audioaufnahmen
-          und -Fotos) werden zur Nachvollziehbarkeit aufbewahrt, solange die zugehörige Chronik
+          und -Fotos) werden zur Nachvollziehbarkeit aufbewahrt, solange das zugehörige Familienwerk
           besteht. Löschst du dein Konto oder einzelne Inhalte, werden die betroffenen Daten gelöscht,
           soweit keine gesetzlichen Aufbewahrungspflichten entgegenstehen.
         </P>
