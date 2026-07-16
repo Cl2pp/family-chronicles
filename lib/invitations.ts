@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import { db } from '@/db';
-import { invitations, memberships, people } from '@/db/schema';
+import { chronicles, invitations, memberships, people } from '@/db/schema';
 import { getMembership } from '@/lib/chronicles';
 import { isPersonInChronicle, linkUserToPersonIfFree } from '@/lib/people';
 import type { AccessRole } from '@/lib/permissions';
@@ -65,6 +65,41 @@ export async function listPendingInvitations(chronicleId: string) {
     .from(invitations)
     .leftJoin(people, eq(invitations.personId, people.id))
     .where(and(eq(invitations.chronicleId, chronicleId), isNull(invitations.acceptedAt)));
+}
+
+export type InvitePreview =
+  | {
+      status: 'ok';
+      chronicleName: string;
+      /** The tree person the invitee will be linked to on accept, if chosen. */
+      personName: string | null;
+    }
+  | { status: 'not_found' | 'expired' | 'used' };
+
+/**
+ * Read-only look at an invitation for the confirmation screen — acceptance is
+ * a deliberate button click (`acceptInvitation`), never a side effect of a GET:
+ * the token is a bearer credential that may carry a tree identity, and mail
+ * scanners prefetch links.
+ */
+export async function getInvitationByToken(token: string): Promise<InvitePreview> {
+  const [row] = await db
+    .select({
+      acceptedAt: invitations.acceptedAt,
+      expiresAt: invitations.expiresAt,
+      chronicleName: chronicles.name,
+      personName: people.displayName,
+    })
+    .from(invitations)
+    .innerJoin(chronicles, eq(invitations.chronicleId, chronicles.id))
+    .leftJoin(people, eq(invitations.personId, people.id))
+    .where(eq(invitations.token, token))
+    .limit(1);
+
+  if (!row) return { status: 'not_found' };
+  if (row.acceptedAt) return { status: 'used' };
+  if (row.expiresAt.getTime() < Date.now()) return { status: 'expired' };
+  return { status: 'ok', chronicleName: row.chronicleName, personName: row.personName };
 }
 
 export type AcceptResult =

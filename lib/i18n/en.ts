@@ -596,6 +596,10 @@ export const en = {
     expired: 'This invitation has expired. Ask for a new invite.',
     used: 'This invitation has already been used.',
     goToChronicles: 'Go to your chronicles',
+    confirmText: (chronicle: string) => `You've been invited to join “${chronicle}”.`,
+    confirmPerson: (name: string) =>
+      `Your account will be linked to ${name} in the family tree.`,
+    confirmAccept: 'Accept invitation',
     acceptedTitle: 'Welcome!',
     acceptedLinkedText:
       'You now have access to the chronicle, and your place in the family tree is linked to your account.',

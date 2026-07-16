@@ -610,6 +610,10 @@ export const de: Dictionary = {
     expired: 'Diese Einladung ist abgelaufen. Bitte um eine neue Einladung.',
     used: 'Diese Einladung wurde bereits verwendet.',
     goToChronicles: 'Zu deinen Chroniken',
+    confirmText: (chronicle: string) => `Du wurdest eingeladen, „${chronicle}“ beizutreten.`,
+    confirmPerson: (name: string) =>
+      `Dein Konto wird im Stammbaum mit ${name} verknüpft.`,
+    confirmAccept: 'Einladung annehmen',
     acceptedTitle: 'Willkommen!',
     acceptedLinkedText:
       'Du hast jetzt Zugriff auf die Chronik, und dein Platz im Stammbaum ist mit deinem Konto verknüpft.',
