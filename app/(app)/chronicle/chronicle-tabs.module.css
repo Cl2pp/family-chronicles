@@ -1,0 +1,11 @@
+/* The families legend sits above the graph on wider screens, but drops below the
+   tree on mobile so the graph itself — not the legend — is what you see first. */
+.legend {
+  order: 2;
+}
+
+@media (min-width: $mantine-breakpoint-sm) {
+  .legend {
+    order: 0;
+  }
+}
