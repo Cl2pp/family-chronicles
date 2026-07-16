@@ -586,7 +586,8 @@ export const de: Dictionary = {
     install: 'Installieren',
     notNow: 'Später',
     guideTitle: 'Zum Home-Bildschirm hinzufügen',
-    iosStep1: 'Tippe auf das Teilen-Symbol in der Browserleiste.',
+    iosStep1:
+      'Tippe auf das Teilen-Symbol in der Browserleiste. Siehst du es nicht, tippe zuerst auf „…“, um es zu finden.',
     iosStep2: 'Scrolle nach unten und tippe auf „Zum Home-Bildschirm“.',
     iosStep3:
       'Tippe auf „Hinzufügen“ — Familienwerk liegt jetzt wie eine App auf deinem Home-Bildschirm.',

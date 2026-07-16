@@ -572,7 +572,8 @@ export const en = {
     install: 'Install',
     notNow: 'Not now',
     guideTitle: 'Add to Home Screen',
-    iosStep1: 'Tap the Share button in the browser toolbar.',
+    iosStep1:
+      'Tap the Share button in the browser toolbar. Don’t see it? Tap “…” first to find it.',
     iosStep2: 'Scroll down and tap “Add to Home Screen”.',
     iosStep3: 'Tap “Add” — Familienwerk now lives on your Home Screen like an app.',
     iosSafariHint: 'Don’t see “Add to Home Screen”? Open familienwerk.co in Safari and try again.',
