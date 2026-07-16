@@ -3,7 +3,7 @@
 import { SegmentedControl } from '@mantine/core';
 import { useI18n, setLocaleCookie } from '@/lib/i18n/client';
 import { isLocale, LOCALES, LOCALE_NAMES } from '@/lib/i18n/config';
-import { BrandGlyph } from './landing-graphics';
+import { BrandGlyph } from '@/components/brand-glyph';
 import s from './landing.module.css';
 
 /**
@@ -44,6 +44,7 @@ export function LandingTopbar() {
           value={locale}
           onChange={changeLocale}
           data={LOCALES.map((l) => ({ value: l, label: LOCALE_NAMES[l] }))}
+          aria-label={locale === 'de' ? 'Sprache' : 'Language'}
           visibleFrom="xs"
         />
         <a className={`${s.btnPrimary} ${s.btnSm}`} href="/login">

@@ -15,11 +15,6 @@
   padding: 0 20px;
 }
 
-.brand {
-  font-family: var(--fw-font-brand);
-  letter-spacing: -0.02em;
-}
-
 /* ── Nav ─────────────────────────────────────────────────────── */
 .nav {
   display: flex;
@@ -227,35 +222,8 @@
   gap: 10px;
   box-sizing: border-box;
 }
-.heroArtCard {
-  background: #fff;
-  border-radius: 14px;
-  box-shadow: 0 4px 16px rgba(23, 33, 28, 0.07);
-  padding: 14px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: center;
-}
-.artLineLg {
-  width: 60px;
-  height: 6px;
-  border-radius: 3px;
-  background: #e3e8e4;
-}
-.artLineSm {
-  width: 42px;
-  height: 6px;
-  border-radius: 3px;
-  background: #edf1ee;
-}
 
-/* ── Generic card ────────────────────────────────────────────── */
-.card {
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.07);
-  border-radius: 16px;
-}
+/* ── Section spacing ─────────────────────────────────────────── */
 .section {
   padding: 40px 0;
 }
@@ -486,6 +454,7 @@
 }
 .bar {
   height: 8px;
+  max-width: 100%;
   border-radius: 4px;
   background: #e3e8e4;
 }

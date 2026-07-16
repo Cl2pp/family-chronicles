@@ -2,16 +2,8 @@ import { redirect } from 'next/navigation';
 import { getI18n } from '@/lib/i18n/server';
 import { getSession } from '@/lib/session';
 import { LandingTopbar } from './landing-topbar';
-import {
-  BrandGlyph,
-  MicGlyph,
-  HeroArt,
-  PersonGlyph,
-  IconSpeak,
-  IconMemoir,
-  IconPhotos,
-  IconChat,
-} from './landing-graphics';
+import { BrandGlyph, MicGlyph, PersonGlyph } from '@/components/brand-glyph';
+import { HeroArt, IconSpeak, IconMemoir, IconPhotos, IconChat } from './landing-graphics';
 import s from './landing.module.css';
 
 export default async function Home() {
@@ -155,7 +147,7 @@ export default async function Home() {
               ))}
             </div>
             <div className={s.showCopy}>
-              <h3 className={s.showTitle}>{h.timelineTitle}</h3>
+              <h2 className={s.showTitle}>{h.timelineTitle}</h2>
               <p className={s.showText}>{h.timelineText}</p>
             </div>
           </div>
@@ -186,7 +178,7 @@ export default async function Home() {
               </div>
             </div>
             <div className={s.showCopy}>
-              <h3 className={s.showTitle}>{h.treeTitle}</h3>
+              <h2 className={s.showTitle}>{h.treeTitle}</h2>
               <p className={s.showText}>{h.treeText}</p>
             </div>
           </div>

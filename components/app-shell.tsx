@@ -24,7 +24,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { authClient } from '@/lib/auth-client';
 import { useI18n } from '@/lib/i18n/client';
 import type { Dictionary } from '@/lib/i18n';
-import { BrandGlyph } from '@/app/landing-graphics';
+import { BrandGlyph } from '@/components/brand-glyph';
 
 /** Space reserved under content for the fixed mobile tab bar (60px bar + breathing room). */
 export const MOBILE_TABBAR_OFFSET = 72;

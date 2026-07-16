@@ -12,7 +12,8 @@
   --fw-paper: #fbfcfb; /* app background */
 
   --fw-font-brand: var(--font-space-grotesk), 'Space Grotesk', sans-serif;
-  --fw-font-ui: var(--font-outfit), Outfit, system-ui, sans-serif;
+  --fw-font-ui: var(--font-outfit), Outfit, system-ui, -apple-system, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
 }
 
 html,
@@ -25,8 +26,7 @@ body {
 body {
   background: var(--fw-paper);
   color: var(--fw-ink);
-  font-family: var(--font-outfit), Outfit, system-ui, -apple-system, 'Segoe UI', Roboto,
-    Helvetica, Arial, sans-serif;
+  font-family: var(--fw-font-ui);
 }
 
 /* iOS auto-zooms the page when a focused input renders under 16px — the whole app
