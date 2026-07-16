@@ -640,7 +640,7 @@ async function main() {
   /* Chronicle — reuse the user's first one, create if none. */
   const CHRONICLE_DESCRIPTION =
     'Die Geschichten der Familien Müller und Brandt aus Lüneburg — vier Generationen, erzählt von denen, die dabei waren.';
-  let [membership] = await db
+  const [membership] = await db
     .select({ chronicleId: memberships.chronicleId })
     .from(memberships)
     .where(eq(memberships.userId, u.id))
