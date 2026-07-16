@@ -170,13 +170,28 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 ## 9. The deploy loop (every change)
 
 1. `git push` to `main`.
-2. Open Coolify via the SSH tunnel → click **Deploy** on the web app (and the worker app if the
-   change affects it). *(Coolify is private, so there's no GitHub auto-webhook — deploy is one
-   click. A webhook-only public endpoint could be added later for true push-to-deploy.)*
-3. The web container builds, then **runs migrations on startup** and serves; Traefik swaps it in.
+2. **A GitHub webhook auto-deploys on push.** "Auto deploy on push" is configured on **both**
+   apps (repo `Cl2pp/family-chronicles`, branch `main`, empty `watch_paths` = all paths), so a
+   single push fires the webhook and Coolify triggers **both the web and the worker build —
+   concurrently**. (The webhook secret lives in `applications.manual_webhook_secret_github`.)
+3. Each app builds the **same Dockerfile separately**; the web container then **runs migrations
+   on startup** (`docker-entrypoint.sh` — there is **no** Coolify pre/post-deploy command; the
+   pre-deploy hook proved unreliable) and serves; Traefik swaps it in.
 
-Each app builds the same Dockerfile separately. Builds take ~2–4 min on this box (swap covers the
-Next build's memory spike).
+Builds take ~2–4 min each on this box (swap covers the Next build's memory spike).
+
+> **⚠️ Those two concurrent auto-builds are the main deploy-failure cause (see §11).** Two
+> simultaneous Next.js builds on this 2-core / 4 GB box double the RAM and disk-write spike and
+> tend to fail *together*. To deploy **sequentially** (web first, worker only after web finishes)
+> instead of the concurrent webhook fan-out, run the on-box helper:
+> ```bash
+> ssh -i ~/.ssh/family_chronicle_ed25519 root@157.90.165.169 /root/deploy-sequential.sh
+> ```
+> It triggers web via the Coolify deploy API, polls `application_deployment_queues` by
+> `deployment_uuid` until web finishes, then triggers worker. Accepts `web` | `worker` | `both`
+> (default `both`). **Caveat:** this only sequences a *manual* run — a plain `git push` still
+> fans out to both apps via the webhook. Making push-deploys sequential (disable the worker
+> webhook + chain it off web) is tracked in §12.
 
 **Version skew after deploys**: each Docker build writes `.deployment-id` (from Coolify's
 `SOURCE_COMMIT` build arg, or a build timestamp) and `next.config.ts` uses it as Next's
@@ -227,6 +242,25 @@ done (the creds never leave the box).
   you prepend system paths; that breaks eslint (`structuredClone is not defined`). Use the repo's
   default Node 22 for `npm`/build.
 - **ARM (cax) capacity** is often sold out at Hetzner; x86 (cx/cpx) is the fallback (multi-arch image).
+- **Deploys failing under load = disk + concurrency (the #1 operational issue).** The 40 GB disk
+  fills with Docker image layers, and back-to-back app+worker builds outpace cleanup. Symptoms:
+  builds die with `no space left on device`; at 100% full even **coolify-db (Postgres) crashes**
+  and the Coolify UI throws a 500 (`SQLSTATE[53100] … No space left on device`). Debugging notes:
+  - Docker uses the **containerd image store**, so reclaimable layers live in **`/var/lib/containerd`**
+    (~29 GB when full), **not** `/var/lib/docker` — `du` on the latter is misleading. Check with
+    `docker system df` and `du -xh --max-depth=2 /var | sort -rh | head`.
+  - Reclaim: `docker builder prune -af && docker image prune -af` (only removes layers not used by
+    a **running** container — web/worker/db images are safe). Frees ~17 GB in the full state.
+  - **Docker Cleanup** (Coolify → Server → Docker Cleanup) runs on `server_settings.docker_cleanup_frequency`
+    at **`30 * * * *`** (moved off `0 * * * *` on 2026-07-16 so it can't prune mid-build), threshold 80%.
+  - **Concurrent app+worker builds** (both webhooks fire on one push, §9) are the trigger — they
+    double the RAM/disk spike. Deploy **sequentially** via `/root/deploy-sequential.sh` (§9) to avoid it.
+- **Phantom `in_progress` deploys block the queue.** If a build dies mid-run (disk-full, DB crash,
+  a cleanup prune), its `application_deployment_queues` row can stay `in_progress` forever with a
+  frozen `updated_at`, silently blocking every later deploy (Coolify serializes per app). Detect:
+  `select id, application_name, status, extract(epoch from (now()-updated_at)) from
+  application_deployment_queues where status in ('in_progress','queued');` — anything stale >~12 min
+  is dead. Fix: `update application_deployment_queues set status='failed' where id=<id>;` then retrigger.
 
 ## 12. Outstanding / future work
 
@@ -236,8 +270,15 @@ done (the creds never leave the box).
 - **Voice transcription** needs a real `GROQ_API_KEY` (still a placeholder unless set).
 - **Backups**: enable Coolify scheduled Postgres dumps to R2 (and optionally Hetzner snapshots).
   Media already lives durably in R2.
-- **Push-to-deploy**: optional — expose only a Coolify deploy-webhook endpoint publicly (kept the
-  full dashboard private) if one-click deploys become tedious.
+- **Push-to-deploy** already works (GitHub webhook on both apps, §9) — but it fans out to web and
+  worker **concurrently**, which is the main deploy-failure cause (§11). **Open:** make push-deploys
+  sequential — disable the worker's GitHub webhook so a push deploys only web, then set web's
+  `post_deployment_command` to trigger the worker deploy via the Coolify API once web finishes.
+  That gives automatic *and* sequential deploys with no manual step. (Both `pre_/post_deployment_command`
+  fields are currently empty.)
+- **Scale the box**: the 40 GB disk / 4 GB RAM is the underlying ceiling — layers creep back toward
+  full and concurrent builds starve each other for RAM. A one-step `hcloud server resize` to **cx33**
+  (4 vCPU / 8 GB / 80 GB, ~€10/mo) gives durable headroom and faster builds. Requires a brief reboot.
 - **PWA over HTTPS** now works (we're on a real domain) — verify install/offline on devices.
 
 ## 13. Pointers
