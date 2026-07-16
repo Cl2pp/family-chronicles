@@ -56,8 +56,14 @@ export const addPersonTool = defineTool({
     "Add a person to the active chronicle's tree. Optionally connect them to someone already in the " +
     'tree via relateTo. Check get_family_tree first if unsure who already exists. Contributor access required.',
   schema: z.object({
-    displayName: z.string().min(1).describe('The name to show, e.g. "Maria" or "Maria Schmidt".'),
-    familyName: z.string().nullish().describe('Optional surname.'),
+    displayName: z
+      .string()
+      .min(1)
+      .describe(
+        'First name only, e.g. "Maria". If the person has several first names, put all of them ' +
+          'here, e.g. "Anna Maria". Do NOT include the surname — that goes in familyName.',
+      ),
+    familyName: z.string().nullish().describe('The surname (last name), e.g. "Schmidt".'),
     birthFamilyName: z
       .string()
       .nullish()
@@ -212,8 +218,14 @@ export const editPersonTool = defineTool({
     'clear a field. Contributor access required.',
   schema: z.object({
     name: z.string().min(1).describe('The person to edit (their current name in the tree).'),
-    newName: z.string().min(1).nullish().describe('A corrected display name.'),
-    familyName: z.string().nullish().describe('A corrected surname (null to clear).'),
+    newName: z
+      .string()
+      .min(1)
+      .nullish()
+      .describe(
+        'A corrected first name (first name(s) only — all first names go here; the surname belongs in familyName).',
+      ),
+    familyName: z.string().nullish().describe('A corrected surname / last name (null to clear).'),
     birthFamilyName: z
       .string()
       .nullish()

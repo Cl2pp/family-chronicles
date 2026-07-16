@@ -94,7 +94,12 @@ export function EditPersonModal({
     <Modal opened={opened} onClose={onClose} title={t.person.editTitle} radius="md">
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack>
-          <TextInput label={t.person.name} required {...form.getInputProps('displayName')} />
+          <TextInput
+            label={t.person.name}
+            placeholder={t.person.fullNamePlaceholder}
+            required
+            {...form.getInputProps('displayName')}
+          />
           <TextInput
             label={t.person.familyName}
             placeholder={t.common.optional}
