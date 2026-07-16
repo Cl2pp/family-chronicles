@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'Familienwerk',
     // Home-screen label on Android; keep it to one word so it never truncates.
     short_name: 'Familienwerk',
-    description: 'Eure Familie schreibt ihr eigenes Buch — private Familienchronik aus Stimmen und Erinnerungen.',
+    description: 'Eure Familie schreibt ihr eigenes Buch — privates Familienwerk aus Stimmen und Erinnerungen.',
     start_url: '/',
     scope: '/',
     display: 'standalone',

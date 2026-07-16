@@ -40,8 +40,8 @@ export default function DatenschutzPage() {
           personenbezogener Daten innerhalb von Familienwerk (nachfolgend „die Anwendung“).
           Rechtsgrundlagen der Verarbeitung sind, soweit nicht anders angegeben, die Vorschriften der
           Datenschutz-Grundverordnung (DSGVO). Familienwerk ist ein privater, ausschließlich
-          einladungsbasierter Dienst: Inhalte sind nur für die Mitglieder der jeweiligen
-          Familienchronik sichtbar. Es gibt keine öffentlichen Profile, keine Werbung und kein
+          einladungsbasierter Dienst: Inhalte sind nur für die Mitglieder des jeweiligen
+          Familienwerks sichtbar. Es gibt keine öffentlichen Profile, keine Werbung und kein
           Tracking zu Werbezwecken.
         </P>
       </Section>

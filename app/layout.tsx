@@ -30,7 +30,7 @@ const spaceGrotesk = Space_Grotesk({
 
 const SITE_URL = 'https://familienwerk.co';
 const DESCRIPTION =
-  'Eure Familie schreibt ihr eigenes Buch. Erzählt Erinnerungen — getippt oder gesprochen — und Familienwerk macht daraus eine private Familienchronik auf einer Zeitleiste, bis zum gedruckten Hardcover. Zweisprachig, nur auf Einladung.';
+  'Eure Familie schreibt ihr eigenes Buch. Erzählt Erinnerungen — getippt oder gesprochen — und Familienwerk macht daraus ein privates Familienwerk auf einer Zeitleiste, bis zum gedruckten Hardcover. Zweisprachig, nur auf Einladung.';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

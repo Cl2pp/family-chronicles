@@ -33,7 +33,7 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" v
   <text x="64" y="372" font-family="${FONT}" font-size="72" font-weight="700" letter-spacing="-2.5" fill="#FFFFFF">ihr eigenes Buch.</text>
 
   <!-- subtitle -->
-  <text x="66" y="440" font-family="${BODY}" font-size="27" font-weight="400" fill="#A9EE93">Private Familienchronik aus Stimmen &amp; Erinnerungen.</text>
+  <text x="66" y="440" font-family="${BODY}" font-size="27" font-weight="400" fill="#A9EE93">Privates Familienwerk aus Stimmen &amp; Erinnerungen.</text>
 
   <!-- book motif, bottom-right -->
   <g transform="translate(902 250)">
