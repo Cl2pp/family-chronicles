@@ -23,6 +23,9 @@ export const TRIM: Record<string, { w: number; h: number }> = {
 
 export interface PhotoRef {
   id: string;
+  /** The story the photo belongs to — lets per-viewer surfaces drop photos of
+   *  chapters the viewer can't read (docs/STORY_ACCESS_PLAN.md, Books). */
+  storyId: string;
   s3Key: string;
   /** Downscaled WebP (lib/thumbnails.ts), when already generated. */
   thumbS3Key: string | null;
@@ -122,6 +125,7 @@ export async function loadBook(bookId: string): Promise<LoadedBook> {
   for (const p of photoRows) {
     const ref: PhotoRef = {
       id: p.id,
+      storyId: p.storyId,
       s3Key: p.s3Key,
       thumbS3Key: p.thumbS3Key,
       mimeType: p.mimeType,

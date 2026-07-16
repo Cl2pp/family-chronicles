@@ -25,6 +25,9 @@ export async function GET(
 
   const book = await getBookForUser(bookId, session.user.id);
   if (!book || !book.previewS3Key) return new NextResponse('Not found', { status: 404 });
+  // The PDF is a single artifact containing EVERY chapter — all-or-nothing: a viewer
+  // who can't read all of the book's stories gets nothing (owners always qualify).
+  if (book.hiddenChapterCount > 0) return new NextResponse('Forbidden', { status: 403 });
 
   const etag = `"${bookId}-${book.updatedAt.getTime()}"`;
   const headers = {

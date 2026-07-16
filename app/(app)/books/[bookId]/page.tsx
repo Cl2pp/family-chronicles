@@ -5,6 +5,7 @@ import { db } from '@/db';
 import { assets } from '@/db/schema';
 import { requireUser } from '@/lib/session';
 import { getBookForUser, getBookLayoutSummary, readyStoriesForChronicle } from '@/lib/books';
+import { loadStoryAccessContext } from '@/lib/story-access';
 import { presignGet } from '@/lib/s3';
 import { BookBuilder, type CoverOption } from './book-builder';
 
@@ -15,10 +16,13 @@ export default async function BookBuilderPage({
 }) {
   const { bookId } = await params;
   const user = await requireUser();
-  const book = await getBookForUser(bookId, user.id);
+  // One access-context load per request, shared by every per-viewer read below.
+  const access = await loadStoryAccessContext(user.id);
+  const book = await getBookForUser(bookId, user.id, access);
   if (!book) notFound();
 
-  const chronicleStories = await readyStoriesForChronicle(book.chronicleId);
+  // Story picker: only stories the acting user can read (per-viewer, like the chapters).
+  const chronicleStories = await readyStoriesForChronicle(book.chronicleId, user.id, access);
 
   // Cover candidates: photos of the included stories. The picker renders 72px
   // tiles, so serve the WebP thumbnail and only fall back to the original for
@@ -49,7 +53,7 @@ export default async function BookBuilderPage({
   );
 
   // Theme/cover style shown by the settings selects come from the current layout plan.
-  const layoutResult = await getBookLayoutSummary(bookId, user.id);
+  const layoutResult = await getBookLayoutSummary(bookId, user.id, access);
   const layoutSummary = layoutResult.ok ? layoutResult.value : null;
 
   return (
@@ -72,6 +76,7 @@ export default async function BookBuilderPage({
           theme: layoutSummary?.theme ?? 'classic',
           coverStyle: layoutSummary?.coverStyle ?? 'framed',
           chronicleName: book.chronicleName,
+          hiddenChapterCount: book.hiddenChapterCount,
           chapters: book.chapters.map((c) => ({
             storyId: c.storyId,
             title: c.title,
