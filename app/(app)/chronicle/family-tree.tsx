@@ -134,7 +134,7 @@ interface Connectors {
   width: number;
   height: number;
   parents: ParentBus[];
-  spouses: { x1: number; x2: number; y: number }[];
+  spouses: { x1: number; x2: number; y: number; from: string; to: string }[];
 }
 
 export interface FamilyTreeProps {
@@ -142,6 +142,8 @@ export interface FamilyTreeProps {
   edges: TreeEdge[];
   /** Color per derived family tag (surname) — drives the dots under each card. */
   colorByTag: Record<string, string>;
+  /** Family tag being hovered in the legend: its members + their connections light up. */
+  highlightTag?: string | null;
   currentUserId: string;
   activeChronicleId: string;
   canEdit: boolean;
@@ -153,6 +155,7 @@ export function FamilyTree({
   people,
   edges,
   colorByTag,
+  highlightTag = null,
   currentUserId,
   activeChronicleId,
   canEdit,
@@ -223,14 +226,14 @@ export function FamilyTree({
       });
     }
 
-    const spouses: { x1: number; x2: number; y: number }[] = [];
+    const spouses: Connectors['spouses'] = [];
     for (const e of validEdges) {
       if (e.type !== 'spouse') continue;
       const a = pos.get(e.from);
       const b = pos.get(e.to);
       if (!a || !b) continue;
       const [l, r] = a.cx <= b.cx ? [a, b] : [b, a];
-      spouses.push({ x1: l.right, x2: r.left, y: (l.midY + r.midY) / 2 });
+      spouses.push({ x1: l.right, x2: r.left, y: (l.midY + r.midY) / 2, from: e.from, to: e.to });
     }
 
     // Parent connectors: one sibling bus per couple (or lone parent), with
@@ -446,6 +449,16 @@ export function FamilyTree({
     [peopleById, colorByTag],
   );
 
+  // Hovering a family in the legend: members of that surname light up, everything
+  // else fades. `null` when no tag is hovered (nothing dims).
+  const highlightedIds = useMemo(() => {
+    if (!highlightTag) return null;
+    const ids = new Set<string>();
+    for (const p of people) if (p.familyTags.includes(highlightTag)) ids.add(p.id);
+    return ids;
+  }, [people, highlightTag]);
+  const highlightColor = highlightTag ? colorByTag[highlightTag] : undefined;
+
   const selected = selectedId ? peopleById.get(selectedId) : undefined;
   const [unlinking, startUnlink] = useTransition();
   // Edits/links act on the active family, so the person must be one of its members.
@@ -601,23 +614,51 @@ export function FamilyTree({
               >
                 {connectors.parents.map((bus, i) => {
                   const color = busColor(bus);
+                  // While a family is hovered: buses touching a member get its
+                  // color at full strength, all other lines fade out.
+                  const touched = highlightedIds
+                    ? bus.parentIds.some((id) => highlightedIds.has(id)) ||
+                      bus.childIds.some((id) => highlightedIds.has(id))
+                    : null;
                   return (
                     <path
                       key={`p-${i}`}
                       d={bus.d}
                       fill="none"
-                      stroke={color ?? 'var(--mantine-color-slate-3)'}
-                      strokeOpacity={color ? 0.45 : 1}
-                      strokeWidth={1.5}
+                      stroke={
+                        touched && highlightColor
+                          ? highlightColor
+                          : (color ?? 'var(--mantine-color-slate-3)')
+                      }
+                      strokeOpacity={
+                        touched === null ? (color ? 0.45 : 1) : touched ? 0.9 : 0.12
+                      }
+                      strokeWidth={touched ? 2.5 : 1.5}
+                      style={{ transition: 'stroke-opacity 120ms ease, stroke 120ms ease' }}
                     />
                   );
                 })}
-                {connectors.spouses.map((s, i) => (
-                  <g key={`s-${i}`} stroke="var(--mantine-color-slate-4)" strokeWidth={1.5}>
-                    <line x1={s.x1} y1={s.y - 2} x2={s.x2} y2={s.y - 2} />
-                    <line x1={s.x1} y1={s.y + 2} x2={s.x2} y2={s.y + 2} />
-                  </g>
-                ))}
+                {connectors.spouses.map((s, i) => {
+                  const touched = highlightedIds
+                    ? highlightedIds.has(s.from) || highlightedIds.has(s.to)
+                    : null;
+                  return (
+                    <g
+                      key={`s-${i}`}
+                      stroke={
+                        touched && highlightColor
+                          ? highlightColor
+                          : 'var(--mantine-color-slate-4)'
+                      }
+                      strokeOpacity={touched === null ? 1 : touched ? 0.9 : 0.12}
+                      strokeWidth={touched ? 2.5 : 1.5}
+                      style={{ transition: 'stroke-opacity 120ms ease, stroke 120ms ease' }}
+                    >
+                      <line x1={s.x1} y1={s.y - 2} x2={s.x2} y2={s.y - 2} />
+                      <line x1={s.x1} y1={s.y + 2} x2={s.x2} y2={s.y + 2} />
+                    </g>
+                  );
+                })}
               </svg>
             )}
 
@@ -636,6 +677,8 @@ export function FamilyTree({
                     const person = peopleById.get(id);
                     if (!person) return null;
                     const isMe = person.userId === currentUserId;
+                    const isHighlighted = highlightedIds?.has(id) ?? false;
+                    const isDimmed = !!highlightedIds && !isHighlighted;
                     return (
                       <Card
                         key={id}
@@ -652,15 +695,26 @@ export function FamilyTree({
                           if (movedRef.current) return;
                           selectPerson(id);
                         }}
-                          style={{
+                        style={{
                           position: 'relative',
                           width: CARD_WIDTH,
                           flex: '0 0 auto',
                           marginLeft: margins.get(id) ?? 0,
                           cursor: 'pointer',
-                          borderColor: isMe ? 'var(--mantine-color-brand-6)' : undefined,
-                          borderWidth: isMe ? 2 : undefined,
-                          boxShadow: isMe ? '0 0 0 2px var(--mantine-color-brand-1)' : undefined,
+                          opacity: isDimmed ? 0.3 : 1,
+                          borderColor: isHighlighted
+                            ? highlightColor
+                            : isMe
+                              ? 'var(--mantine-color-brand-6)'
+                              : undefined,
+                          borderWidth: isHighlighted || isMe ? 2 : undefined,
+                          boxShadow: isHighlighted
+                            ? `0 0 0 2px color-mix(in srgb, ${highlightColor} 30%, transparent)`
+                            : isMe
+                              ? '0 0 0 2px var(--mantine-color-brand-1)'
+                              : undefined,
+                          transition:
+                            'opacity 120ms ease, border-color 120ms ease, box-shadow 120ms ease',
                         }}
                       >
                         {person.gender && (

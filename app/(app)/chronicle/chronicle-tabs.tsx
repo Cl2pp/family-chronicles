@@ -26,7 +26,29 @@ import { EditPersonModal } from './edit-person-modal';
 import { AccessTab } from './access-tab';
 import type { AddTarget, ChronicleRow, InviteRow, MemberRow, PersonRow } from './types';
 
-const PALETTE = ['brand', 'grape', 'teal', 'orange', 'pink', 'cyan', 'lime', 'violet', 'red'];
+// 12 hues × 3 shades = 36 distinct colors before the cycle repeats. Neighboring
+// hues are ordered for contrast; green ('green') is skipped as too close to brand.
+const PALETTE = [
+  'brand',
+  'grape',
+  'teal',
+  'orange',
+  'pink',
+  'cyan',
+  'lime',
+  'violet',
+  'red',
+  'indigo',
+  'blue',
+  'yellow',
+];
+const SHADES = [6, 8, 4];
+
+function familyColor(i: number): string {
+  const hue = PALETTE[i % PALETTE.length];
+  const shade = SHADES[Math.floor(i / PALETTE.length) % SHADES.length];
+  return `var(--mantine-color-${hue}-${shade})`;
+}
 
 interface ChronicleTabsProps {
   active: ChronicleRow;
@@ -57,6 +79,11 @@ export function ChronicleTabs({
     person: null,
   });
   const [familiesOpen, setFamiliesOpen] = useState(true);
+  // Hover previews a family highlight; click pins it (hover still wins while active,
+  // and pinning is the only way to highlight on touch devices).
+  const [hoverTag, setHoverTag] = useState<string | null>(null);
+  const [pinnedTag, setPinnedTag] = useState<string | null>(null);
+  const highlightTag = hoverTag ?? pinnedTag;
 
   function switchChronicle(id: string) {
     document.cookie = `activeChronicleId=${id}; path=/; max-age=31536000; samesite=lax`;
@@ -77,7 +104,7 @@ export function ChronicleTabs({
 
   const colorByTag: Record<string, string> = {};
   familyTags.forEach((family, i) => {
-    colorByTag[family.tag] = `var(--mantine-color-${PALETTE[i % PALETTE.length]}-6)`;
+    colorByTag[family.tag] = familyColor(i);
   });
 
   const openAdd = (target?: AddTarget) => setAddState({ opened: true, target });
@@ -147,20 +174,39 @@ export function ChronicleTabs({
                   </Text>
                   <Group gap="lg" mt="sm">
                     {familyTags.map(({ tag, count }) => (
-                      <Group key={tag} gap={8} wrap="nowrap">
-                        <Box
-                          w={12}
-                          h={12}
-                          style={{ borderRadius: '50%', background: colorByTag[tag] }}
-                        />
-                        <Text size="sm">
-                          {tag}
-                          <Text span c="dimmed" size="sm">
-                            {' '}
-                            · {count}
+                      <UnstyledButton
+                        key={tag}
+                        aria-pressed={pinnedTag === tag}
+                        onMouseEnter={() => setHoverTag(tag)}
+                        onMouseLeave={() =>
+                          setHoverTag((current) => (current === tag ? null : current))
+                        }
+                        onClick={() =>
+                          setPinnedTag((current) => (current === tag ? null : tag))
+                        }
+                        px={6}
+                        py={2}
+                        style={{
+                          borderRadius: 'var(--mantine-radius-sm)',
+                          background:
+                            pinnedTag === tag ? 'var(--mantine-color-slate-1)' : undefined,
+                        }}
+                      >
+                        <Group gap={8} wrap="nowrap">
+                          <Box
+                            w={12}
+                            h={12}
+                            style={{ borderRadius: '50%', background: colorByTag[tag] }}
+                          />
+                          <Text size="sm">
+                            {tag}
+                            <Text span c="dimmed" size="sm">
+                              {' '}
+                              · {count}
+                            </Text>
                           </Text>
-                        </Text>
-                      </Group>
+                        </Group>
+                      </UnstyledButton>
                     ))}
                   </Group>
                 </Collapse>
@@ -171,6 +217,7 @@ export function ChronicleTabs({
               people={tree.people as TreePerson[]}
               edges={tree.edges}
               colorByTag={colorByTag}
+              highlightTag={highlightTag}
               currentUserId={currentUserId}
               activeChronicleId={active.id}
               canEdit={canContribute(role)}
