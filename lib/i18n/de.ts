@@ -435,6 +435,15 @@ export const de: Dictionary = {
   story: {
     backToStories: 'Zurück zu den Geschichten',
     families: 'Familien',
+    people: 'Personen',
+    noPeopleYet: 'Noch niemand zugeordnet',
+    identifyPeople: 'Personen zuordnen',
+    editPeople: 'Personen bearbeiten',
+    peopleLabel: 'Wer kommt in dieser Geschichte vor?',
+    peopleDescription:
+      'Wähle die Familienmitglieder aus, um die es in dieser Geschichte geht – sie bestimmen die Familiennamen der Geschichte.',
+    peoplePlaceholder: 'Familienmitglieder suchen…',
+    peopleNoneFound: 'Kein passendes Familienmitglied',
     sharedWith: 'Geteilt mit',
     failedTitle: 'Beim Nacherzählen dieser Geschichte ist etwas schiefgelaufen',
     photos: 'Fotos',

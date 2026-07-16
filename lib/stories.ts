@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   assets,
+  chronicleMembers,
   chronicles,
   contributions,
   memberships,
@@ -121,6 +122,35 @@ export async function listStoryPeople(storyId: string) {
     .innerJoin(people, eq(storyPeople.personId, people.id))
     .where(eq(storyPeople.storyId, storyId))
     .orderBy(asc(people.displayName));
+}
+
+/**
+ * People a given user may tag in a story: the tree members of the chronicles the story
+ * is shared into AND that the user is a member of. Scoping to the user's own chronicles
+ * keeps the picker from exposing (or letting an editor tag) people who live only in a
+ * chronicle the actor can't access — a story can be co-shared into chronicles the actor
+ * has no part in. The currently tagged subset comes from {@link listStoryPeople}.
+ */
+export async function listStoryPeopleCandidates(storyId: string, userId: string) {
+  const rows = await db
+    .selectDistinct({
+      id: people.id,
+      displayName: people.displayName,
+      familyName: people.familyName,
+    })
+    .from(storyChronicles)
+    .innerJoin(
+      memberships,
+      and(
+        eq(memberships.chronicleId, storyChronicles.chronicleId),
+        eq(memberships.userId, userId),
+      ),
+    )
+    .innerJoin(chronicleMembers, eq(chronicleMembers.chronicleId, storyChronicles.chronicleId))
+    .innerJoin(people, eq(people.id, chronicleMembers.personId))
+    .where(eq(storyChronicles.storyId, storyId))
+    .orderBy(asc(people.displayName));
+  return rows;
 }
 
 /** Tag people in an existing story. Already-tagged people are skipped. */

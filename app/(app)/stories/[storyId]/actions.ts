@@ -2,11 +2,15 @@
 
 import { revalidatePath } from 'next/cache';
 import {
+  addPeopleToStory,
   addStoryPhotoContribution,
   applyStoryEdit,
   canUserEditStory,
   deleteStoryForUser,
   getStoryForUser,
+  listStoryPeople,
+  listStoryPeopleCandidates,
+  removePeopleFromStory,
   resetStoryForRetry,
   setAssetCaption,
   shareStoryToChronicle,
@@ -126,6 +130,43 @@ export async function updatePhotoCaption(input: {
   const caption = input.caption.trim();
   await setAssetCaption(input.storyId, input.assetId, caption || null);
   revalidatePath(`/stories/${input.storyId}`);
+  return { ok: true };
+}
+
+/**
+ * Set exactly which tree members are tagged in a story (the "who's in this story"
+ * picker). The story's family tags derive from these people. Editors only, and only
+ * people who are in one of the story's chronicles may be tagged.
+ */
+export async function setStoryPeople(input: {
+  storyId: string;
+  personIds: string[];
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!(await canUserEditStory(input.storyId, user.id))) {
+    return {
+      ok: false,
+      error: "Only the story's author or a chronicle owner can change who is in it.",
+    };
+  }
+  const current = (await listStoryPeople(input.storyId)).map((p) => p.id);
+  // A new tag must be someone in one of the story's chronicles; already-tagged people
+  // are always allowed to stay, even if they have since left the chronicle.
+  const candidates = await listStoryPeopleCandidates(input.storyId, user.id);
+  const allowed = new Set([...candidates.map((c) => c.id), ...current]);
+  const desired = [...new Set(input.personIds)].filter((id) => allowed.has(id));
+
+  const currentSet = new Set(current);
+  const desiredSet = new Set(desired);
+
+  const toAdd = desired.filter((id) => !currentSet.has(id));
+  const toRemove = current.filter((id) => !desiredSet.has(id));
+
+  await addPeopleToStory(input.storyId, toAdd);
+  await removePeopleFromStory(input.storyId, toRemove);
+
+  revalidatePath(`/stories/${input.storyId}`);
+  revalidatePath('/stories');
   return { ok: true };
 }
 
