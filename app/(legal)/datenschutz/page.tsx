@@ -3,7 +3,7 @@ import { Stack, Title, Text, Anchor } from '@mantine/core';
 import { Section, P, Bullets } from '../legal-parts';
 
 export const metadata: Metadata = {
-  title: 'Datenschutzerklärung · Familienwerk',
+  title: 'Datenschutzerklärung',
   description: 'Informationen zur Verarbeitung personenbezogener Daten bei Familienwerk.',
 };
 

@@ -3,7 +3,7 @@ import { Stack, Title, Text, Anchor } from '@mantine/core';
 import { Section, P } from '../legal-parts';
 
 export const metadata: Metadata = {
-  title: 'Impressum · Familienwerk',
+  title: 'Impressum',
   description: 'Anbieterkennzeichnung gemäß § 5 DDG für Familienwerk.',
 };
 
