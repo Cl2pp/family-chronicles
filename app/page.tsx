@@ -37,8 +37,53 @@ export default async function Home() {
     { ring: '#12C24A', person: '#12C24A', name: 'Fischer' },
   ];
 
+  // Structured data — helps search engines and AI crawlers understand the product
+  // and mirrors the visible FAQ below (a requirement for FAQPage rich results).
+  const SITE_URL = 'https://familienwerk.co';
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Organization',
+        '@id': `${SITE_URL}/#organization`,
+        name: 'Familienwerk',
+        url: SITE_URL,
+        logo: `${SITE_URL}/icon-512.png`,
+      },
+      {
+        '@type': 'WebSite',
+        '@id': `${SITE_URL}/#website`,
+        name: 'Familienwerk',
+        url: SITE_URL,
+        inLanguage: ['de', 'en'],
+        publisher: { '@id': `${SITE_URL}/#organization` },
+      },
+      {
+        '@type': 'SoftwareApplication',
+        name: 'Familienwerk',
+        applicationCategory: 'LifestyleApplication',
+        operatingSystem: 'Web, iOS, Android (PWA)',
+        url: SITE_URL,
+        description: h.heroSubtitle,
+        inLanguage: ['de', 'en'],
+      },
+      {
+        '@type': 'FAQPage',
+        mainEntity: h.faqItems.map((f) => ({
+          '@type': 'Question',
+          name: f.q,
+          acceptedAnswer: { '@type': 'Answer', text: f.a },
+        })),
+      },
+    ],
+  };
+
   return (
     <div id="top" className={s.page}>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <div className={s.wrap}>
         <LandingTopbar />
 
@@ -226,6 +271,33 @@ export default async function Home() {
               </div>
             </div>
           ))}
+        </section>
+
+        {/* ── FAQ ──────────────────────────────────────────────── */}
+        <section id="faq" className={s.faq}>
+          <div className={s.faqHead}>
+            <span className={s.eyebrow}>{h.faqEyebrow}</span>
+            <h2 className={s.h2}>{h.faqTitle}</h2>
+          </div>
+          <div className={s.faqList}>
+            {h.faqItems.map((f, i) => (
+              <details key={f.q} className={s.faqItem} open={i === 0}>
+                <summary className={s.faqQ}>
+                  {f.q}
+                  <svg className={s.faqChevron} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M6 9l6 6 6-6"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </summary>
+                <p className={s.faqA}>{f.a}</p>
+              </details>
+            ))}
+          </div>
         </section>
 
         {/* ── Closing CTA ──────────────────────────────────────── */}

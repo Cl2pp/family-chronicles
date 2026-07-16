@@ -103,6 +103,35 @@ export const en = {
     footerTagline: 'Familienwerk · familienwerk.co',
     footerImprint: 'Imprint',
     footerPrivacy: 'Privacy',
+    // — FAQ (also emitted as FAQPage structured data for search & AI) —
+    faqEyebrow: 'FAQ',
+    faqTitle: 'Questions, answered',
+    faqItems: [
+      {
+        q: 'What is Familienwerk?',
+        a: 'A private, invite-only place where your family collects its stories — typed or spoken — and Familienwerk turns them into an ongoing family chronicle on a timeline, and ultimately a printed hardcover book.',
+      },
+      {
+        q: 'How do I tell a story?',
+        a: 'Just record a voice note or type a few lines. Familienwerk transcribes the recording automatically and rewrites it as a narrative in the voice of a family book — the original is kept forever.',
+      },
+      {
+        q: 'Are our stories private?',
+        a: 'Yes. Familienwerk is invite-only, with no public profiles and no ads. Your chronicle belongs to your family alone.',
+      },
+      {
+        q: 'Can older family members take part?',
+        a: 'That is exactly who it is built for. Anyone who would rather talk than type simply records a voice message — that is all it takes.',
+      },
+      {
+        q: 'Do we get a real printed book?',
+        a: 'Yes. Chapters and photos are typeset automatically into a hardcover you fine-tune in a live preview and order as a printed book — an heirloom, not an export.',
+      },
+      {
+        q: 'What languages and devices are supported?',
+        a: 'Familienwerk is bilingual in German and English. It runs in any browser and can be installed on your phone as an app (PWA).',
+      },
+    ],
   },
   auth: {
     welcomeBack: 'Welcome back',

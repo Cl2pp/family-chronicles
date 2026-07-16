@@ -101,6 +101,35 @@ export const de: Dictionary = {
     footerTagline: 'Familienwerk · familienwerk.co',
     footerImprint: 'Impressum',
     footerPrivacy: 'Datenschutz',
+    // — FAQ (wird auch als FAQPage-Structured-Data für Suche & KI ausgegeben) —
+    faqEyebrow: 'Häufige Fragen',
+    faqTitle: 'Fragen, kurz beantwortet',
+    faqItems: [
+      {
+        q: 'Was ist Familienwerk?',
+        a: 'Ein privater Ort nur auf Einladung, an dem eure Familie ihre Geschichten sammelt — getippt oder gesprochen. Familienwerk macht daraus eine fortlaufende Familienchronik auf einer Zeitleiste und am Ende ein gedrucktes Hardcover.',
+      },
+      {
+        q: 'Wie erzähle ich eine Geschichte?',
+        a: 'Nimm einfach eine Sprachnotiz auf oder tippe ein paar Zeilen. Familienwerk transkribiert die Aufnahme automatisch und schreibt daraus einen Erzähltext im Ton eines Familienbuchs — das Original bleibt für immer erhalten.',
+      },
+      {
+        q: 'Sind unsere Geschichten privat?',
+        a: 'Ja. Familienwerk ist nur auf Einladung, ohne öffentliches Profil und ohne Werbung. Eure Chronik gehört allein eurer Familie.',
+      },
+      {
+        q: 'Können auch ältere Familienmitglieder mitmachen?',
+        a: 'Genau dafür ist es gebaut. Wer lieber spricht als tippt, nimmt einfach eine Sprachnachricht auf — mehr braucht es nicht.',
+      },
+      {
+        q: 'Bekommen wir am Ende ein echtes Buch?',
+        a: 'Ja. Kapitel und Fotos werden automatisch zu einem Hardcover gesetzt, das ihr in der Live-Vorschau abstimmt und als gedrucktes Buch bestellt — ein Erbstück, kein Export.',
+      },
+      {
+        q: 'Welche Sprachen und Geräte werden unterstützt?',
+        a: 'Familienwerk ist zweisprachig auf Deutsch und Englisch. Es läuft in jedem Browser und lässt sich als App aufs Handy legen (PWA).',
+      },
+    ],
   },
   auth: {
     welcomeBack: 'Willkommen zurück',

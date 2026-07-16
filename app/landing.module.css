@@ -631,6 +631,65 @@
   color: #4a554f;
 }
 
+/* ── FAQ ─────────────────────────────────────────────────────── */
+.faq {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 40px 0;
+}
+.faqHead {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.faqList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 760px;
+}
+.faqItem {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 14px;
+  padding: 2px 20px;
+}
+.faqQ {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 0;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--fw-ink);
+}
+.faqQ::-webkit-details-marker {
+  display: none;
+}
+.faqChevron {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--fw-green-deep);
+  transition: transform 0.2s ease;
+}
+.faqItem[open] .faqChevron {
+  transform: rotate(180deg);
+}
+.faqA {
+  margin: 0;
+  padding: 0 0 16px;
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: #4a554f;
+}
+
 /* ── Footer ──────────────────────────────────────────────────── */
 .footer {
   display: flex;

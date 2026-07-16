@@ -24,9 +24,61 @@ const spaceGrotesk = Space_Grotesk({
   variable: '--font-space-grotesk',
 });
 
+const SITE_URL = 'https://familienwerk.co';
+const DESCRIPTION =
+  'Eure Familie schreibt ihr eigenes Buch. Erzählt Erinnerungen — getippt oder gesprochen — und Familienwerk macht daraus eine private Familienchronik auf einer Zeitleiste, bis zum gedruckten Hardcover. Zweisprachig, nur auf Einladung.';
+
 export const metadata: Metadata = {
-  title: 'Familienwerk',
-  description: 'Eure Familie schreibt ihr eigenes Buch — private Familienchronik aus Stimmen und Erinnerungen.',
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: 'Familienwerk — Eure Familie schreibt ihr eigenes Buch',
+    template: '%s · Familienwerk',
+  },
+  description: DESCRIPTION,
+  applicationName: 'Familienwerk',
+  authors: [{ name: 'Familienwerk' }],
+  creator: 'Familienwerk',
+  publisher: 'Familienwerk',
+  category: 'lifestyle',
+  keywords: [
+    'Familienchronik',
+    'Familienbuch',
+    'Familiengeschichte',
+    'Memoiren',
+    'Stammbaum',
+    'Sprachnotizen',
+    'Familienarchiv',
+    'family chronicle',
+    'family memoir',
+    'family history book',
+  ],
+  alternates: { canonical: '/' },
+  openGraph: {
+    type: 'website',
+    siteName: 'Familienwerk',
+    title: 'Familienwerk — Eure Familie schreibt ihr eigenes Buch',
+    description: DESCRIPTION,
+    url: SITE_URL,
+    locale: 'de_DE',
+    alternateLocale: ['en_US'],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Familienwerk — Eure Familie schreibt ihr eigenes Buch',
+    description: DESCRIPTION,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+      'max-video-preview': -1,
+    },
+  },
+  formatDetection: { telephone: false },
   manifest: '/manifest.webmanifest',
   // `title` is the iOS home-screen label when the PWA is added via Safari.
   appleWebApp: { capable: true, title: 'Familienwerk', statusBarStyle: 'default' },
