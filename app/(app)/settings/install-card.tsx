@@ -21,9 +21,10 @@ function getPlatform(): Platform {
 
 /**
  * Settings → App section explaining how to put the app on the home screen.
- * The floating nudge (`components/install-prompt.tsx`) snoozes for 30 days
- * once dismissed; this is the permanent place to look the steps up again.
- * Mobile only — there is no home screen to add to on a desktop browser.
+ * The floating nudge (`components/install-prompt.tsx`) hides for the rest of
+ * the session once dismissed; this is the permanent place to look the steps
+ * up again. Mobile only — there is no home screen to add to on a desktop
+ * browser.
  */
 export function InstallCard() {
   const { t } = useI18n();
