@@ -24,53 +24,83 @@ export const de: Dictionary = {
     signOut: 'Abmelden',
   },
   home: {
-    tagline:
-      'Ein privater Ort, an dem die Geschichten deiner Familie leben. Schreib sie auf oder sprich einfach — und sieh zu, wie daraus ein gemeinsames Familienbuch auf einer Zeitleiste wird, Generation für Generation.',
-    blurb:
-      'Trage schriftlich oder per Sprachnachricht bei. Geschichten werden transkribiert und behutsam in einer einheitlichen Memoiren-Stimme nacherzählt — mit Fotos, Daten und voller Nennung, wer sie geteilt hat.',
+    // — Navigation —
+    navFeatures: 'Funktionen',
+    navBook: 'Das Buch',
+    navPrivacy: 'Privatsphäre',
     signIn: 'Anmelden',
     createAccount: 'Konto erstellen',
-    eyebrow: 'Die private Chronik deiner Familie',
-    heroTitle: 'Die Geschichten deiner Familie — für immer bewahrt.',
+    // — Hero —
+    eyebrow: 'Privat · Sicher · Nur auf Einladung',
+    heroTitle: 'Eure Familie schreibt ihr eigenes Buch.',
     heroSubtitle:
-      'Sprich eine Erinnerung ein oder tippe sie. Daraus wird ein schön geschriebenes Kapitel — auf einer gemeinsamen Zeitleiste, im Stammbaum, bereit als echtes Buch gedruckt zu werden.',
-    ctaPrimary: 'Kostenlos loslegen',
-    ctaSecondary: 'Anmelden',
-    stepsTitle: 'Von der gesprochenen Erinnerung zum Familienbuch',
-    stepsSubtitle: 'Drei Schritte. Ganz ohne Schreibtalent.',
-    step1Title: 'Erzählen',
-    step1Text:
-      'Sprich einfach los oder tippe ein paar Zeilen. Die Sprachnachricht der Großeltern funktioniert genauso gut wie ein fertiger Absatz.',
-    step2Title: 'Wir formen es',
-    step2Text:
-      'Deine Aufnahme wird transkribiert und behutsam in einer warmen, einheitlichen Memoiren-Stimme nacherzählt — Daten und Fotos bleiben erhalten.',
-    step3Title: 'Bewahren',
-    step3Text:
-      'Jede Geschichte landet auf einer gemeinsamen Zeitleiste und im Stammbaum — und lässt sich als gedrucktes Hardcover-Buch setzen.',
-    featuresTitle: 'Alles, was eine Familienchronik braucht',
-    featureVoiceTitle: 'Sprechen oder schreiben',
-    featureVoiceText:
-      'Nimm eine Sprachnachricht auf oder tippe. Perfekt für ältere Verwandte, die lieber erzählen als schreiben.',
-    featureTimelineTitle: 'Eine lebendige Zeitleiste',
-    featureTimelineText:
-      'Geschichten werden datiert und geordnet — so liest sich eure Familiengeschichte als ein durchgehender Faden.',
-    featureTreeTitle: 'Stammbaum & Familien-Tags',
-    featureTreeText:
-      'Leg deinen Stammbaum einmal an. Geschichten ordnen sich automatisch den richtigen Personen und Zweigen zu.',
-    featureBookTitle: 'Ein echtes gedrucktes Buch',
-    featureBookText:
-      'Mach aus Kapiteln und Fotos ein gesetztes Hardcover, das du in Händen hältst, verschenkst und weitergibst.',
-    featurePrivateTitle: 'Privat von Anfang an',
-    featurePrivateText:
-      'Nur mit Einladung. Eure Erinnerungen bleiben in der Familie — keine öffentlichen Feeds, keine Werbung, keine Fremden.',
-    featureMemoirTitle: 'Eine warme Stimme',
+      'Erzählt Erinnerungen — getippt oder einfach gesprochen. Familienwerk verwandelt sie in eine fortlaufende Familienchronik, die sich liest wie ein echtes Memoir. Und wird am Ende ein gedrucktes Buch.',
+    ctaPrimary: 'Familienwerk starten',
+    ctaSecondary: 'So funktioniert’s',
+    heroTrust: 'Von Oma bis Enkel — alle schreiben mit.',
+    // — So funktioniert’s —
+    howEyebrow: 'So funktioniert’s',
+    howTitle: 'Von der Sprachnotiz zum Kapitel.',
+    howText:
+      'Einfach erzählen — Familienwerk transkribiert, ordnet ein und schreibt daraus einen Erzähltext im Ton eines Familienbuchs. Das Original bleibt für immer erhalten.',
+    demoVoiceLabel: 'Sprachnotiz von Margarete · 4:12',
+    demoVoiceQuote: '„… und dann sind wir mit dem Ruderboot raus, dein Opa konnte ja gar nicht schwimmen …“',
+    demoArrow: 'wird automatisch zur Geschichte',
+    demoTagSeason: 'Sommer 1974',
+    demoStoryTitle: 'Der Sommer am Bodensee',
+    demoStoryText:
+      'Als Karl und Margarete im Juni 1974 das alte Ruderboot zu Wasser ließen, konnte niemand ahnen, dass daraus eine Familientradition werden würde. Karl, der nie schwimmen gelernt hatte, bestand darauf zu rudern —',
+    // — Funktionen —
+    featuresTitle: 'Erzählen reicht. Den Rest macht Familienwerk.',
+    featuresSubtitle:
+      'Gebaut für alle Generationen — auch für die, die nie eine App benutzen wollten.',
+    featureSpeakTitle: 'Einfach sprechen',
+    featureSpeakText:
+      'Sprachnotiz aufnehmen, fertig. Alles wird automatisch transkribiert — Oma muss nur erzählen.',
+    featureMemoirTitle: 'Vom Gestammel zum Memoir',
     featureMemoirText:
-      'Viele Beitragende, ein einheitlicher Memoiren-Stil — und jede Quelle und jedes Foto wird genannt und aufbewahrt.',
-    closingTitle: 'Beginne heute die Chronik deiner Familie',
+      'Aus rohen Notizen wird ein ausformulierter Erzähltext, der klingt wie aus einem echten Familienbuch. Das Original bleibt für immer erhalten.',
+    featurePhotosTitle: 'Fotos gehören dazu',
+    featurePhotosText:
+      'Jede Geschichte trägt Bilder — als Banner, im Raster oder im Vollbild. Die alten Alben bekommen endlich Kontext.',
+    featureChatTitle: 'Verfeinern im Gespräch',
+    featureChatText:
+      'Keine Formulare: Geschichten überarbeitet und erweitert ihr im Chat — „mach den Anfang wärmer“, „frag Papa nach dem Jahr“.',
+    // — Zeitleiste & Stammbaum —
+    timelineTitle: 'Eine lebendige Zeitleiste',
+    timelineText:
+      'Geschichten werden datiert und geordnet — so liest sich eure Familiengeschichte als ein durchgehender Faden, von den Ältesten bis heute.',
+    treeTitle: 'Stammbaum & Familien-Tags',
+    treeText:
+      'Legt euren Stammbaum einmal an. Geschichten ordnen sich automatisch den richtigen Personen und Zweigen zu — filtert die Chronik auf eine Seite der Familie.',
+    // — Das Buch (dunkler Abschnitt) —
+    bookEyebrow: 'Das Finale',
+    bookTitle: 'Am Ende steht ein echtes Buch im Regal.',
+    bookText:
+      'Kapitel und Fotos werden automatisch gesetzt — Thema, Cover und Layout stimmt ihr in der Live-Vorschau oder per Chat ab. Dann: Preisangebot, Druck, Hardcover. Ein Erbstück, kein Export.',
+    bookCta: 'Jetzt starten',
+    bookCoverFamily: 'Familie Müller',
+    bookCoverSubtitle: 'Geschichten aus hundert Jahren',
+    bookCoverMeta: '1924 — 2026 · 214 Seiten',
+    // — Privatsphäre —
+    privacy1Title: 'Nur auf Einladung',
+    privacy1Text: 'Eure Chronik gehört eurer Familie. Kein öffentliches Profil, keine Fremden.',
+    privacy2Title: 'Originale für immer',
+    privacy2Text:
+      'Jede Sprachnotiz, jeder Text, jedes Foto bleibt erhalten — jede Geschichte zeigt, wer wann was beigetragen hat.',
+    privacy3Title: 'Als App installierbar',
+    privacy3Text:
+      'Läuft im Browser, lässt sich aufs Handy legen (PWA) — zweisprachig, Deutsch und Englisch.',
+    // — Abschluss-CTA —
+    closingLine1: 'Die beste Zeit anzufangen war vor 30 Jahren.',
+    closingLine2: 'Die zweitbeste ist heute.',
     closingText:
-      'Eine einzige Erinnerung genügt zum Start. Füge deine hinzu, lade die Familie ein und sieh zu, wie das Buch wächst.',
-    closingCta: 'Chronik erstellen',
-    footerNote: 'Privat · Sicher · Nur für deine Familie',
+      'Startet eure Chronik und ladet die Familie ein — die erste Geschichte ist in fünf Minuten erzählt.',
+    closingCta: 'Familienwerk starten',
+    // — Footer —
+    footerTagline: 'Familienwerk · familienwerk.co',
+    footerImprint: 'Impressum',
+    footerPrivacy: 'Datenschutz',
   },
   auth: {
     welcomeBack: 'Willkommen zurück',

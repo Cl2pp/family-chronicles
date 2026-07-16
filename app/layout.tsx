@@ -4,21 +4,29 @@ import '@mantine/notifications/styles.css';
 import './globals.css';
 
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
+import { Space_Grotesk, Outfit } from 'next/font/google';
 import { mantineHtmlProps } from '@mantine/core';
 import { getLocale } from '@/lib/i18n/server';
 import { Providers } from './providers';
 
-const inter = Inter({
+// Outfit — body & UI. Space Grotesk — wordmark, headings, titles.
+const outfit = Outfit({
   subsets: ['latin'],
   weight: ['400', '500', '600', '700'],
   display: 'swap',
-  variable: '--font-inter',
+  variable: '--font-outfit',
+});
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ['latin'],
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+  variable: '--font-space-grotesk',
 });
 
 export const metadata: Metadata = {
   title: 'Familienwerk',
-  description: 'A private vault where your family stories live.',
+  description: 'Eure Familie schreibt ihr eigenes Buch — private Familienchronik aus Stimmen und Erinnerungen.',
   manifest: '/manifest.webmanifest',
   // `title` is the iOS home-screen label when the PWA is added via Safari.
   appleWebApp: { capable: true, title: 'Familienwerk', statusBarStyle: 'default' },
@@ -33,7 +41,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#2563eb',
+  themeColor: '#12c24a',
   width: 'device-width',
   initialScale: 1,
   // iOS zooms the whole page when a focused input renders under 16px; capping the
@@ -52,7 +60,11 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocale();
   return (
-    <html lang={locale} className={inter.variable} {...mantineHtmlProps}>
+    <html
+      lang={locale}
+      className={`${outfit.variable} ${spaceGrotesk.variable}`}
+      {...mantineHtmlProps}
+    >
       {/* No ColorSchemeScript: the app is forced light and mantineHtmlProps already
           server-renders data-mantine-color-scheme="light"; the client-rendered inline
           <script> only re-set that attribute and triggered React's dev script-tag error. */}
