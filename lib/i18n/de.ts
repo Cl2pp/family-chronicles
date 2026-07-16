@@ -331,6 +331,23 @@ export const de: Dictionary = {
     createInvitation: 'Einladung erstellen',
     invitationCreated: 'Einladung erstellt',
     couldNotCreateInvitation: 'Einladung konnte nicht erstellt werden',
+    treePersonLabel: 'Wer ist das im Stammbaum?',
+    treePersonPlaceholder: 'Person auswählen',
+    notInTreeYet: 'Noch nicht im Stammbaum',
+    inTreeAs: (name: string) => `Im Stammbaum als ${name}`,
+    notLinkedToTree: 'Nicht mit dem Stammbaum verknüpft',
+    willJoinAs: (name: string) => `Tritt dem Stammbaum bei als ${name}`,
+    linkToTree: 'Mit Stammbaum verknüpfen',
+    unlink: 'Verknüpfung lösen',
+    link: 'Verknüpfen',
+    linkModalTitle: 'Konto mit dem Stammbaum verknüpfen',
+    linkModalText: (name: string) => `Welche Person im Stammbaum ist ${name}?`,
+    noUnlinkedPeople:
+      'Alle Personen im Stammbaum sind bereits mit einem Konto verknüpft — füge die Person zuerst dem Stammbaum hinzu.',
+    memberLinked: 'Konto mit dem Stammbaum verknüpft',
+    memberUnlinked: 'Verknüpfung mit dem Stammbaum gelöst',
+    couldNotLink: 'Konto konnte nicht verknüpft werden',
+    couldNotUnlink: 'Verknüpfung konnte nicht gelöst werden',
   },
   roles: {
     owner: 'Eigentümer',
@@ -573,6 +590,9 @@ export const de: Dictionary = {
     expired: 'Diese Einladung ist abgelaufen. Bitte um eine neue Einladung.',
     used: 'Diese Einladung wurde bereits verwendet.',
     goToChronicles: 'Zu deinen Chroniken',
+    acceptedTitle: 'Willkommen!',
+    acceptedLinkedText:
+      'Du hast jetzt Zugriff auf die Chronik, und dein Platz im Stammbaum ist mit deinem Konto verknüpft.',
   },
   offline: {
     title: 'Du bist offline',

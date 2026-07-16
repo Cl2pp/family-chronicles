@@ -17,7 +17,7 @@ export default async function InvitePage({
   }
 
   const result = await acceptInvitation(token, session.user.id);
-  if (result.ok) {
+  if (result.ok && !result.personLinked) {
     redirect(`/chronicle`);
   }
 
@@ -33,8 +33,10 @@ export default async function InvitePage({
       <Container size={420} w="100%" py="xl">
         <Paper withBorder p="xl" radius="md">
           <Stack>
-            <Title order={3}>{t.invite.title}</Title>
-            <Text c="dimmed">{messages[result.reason]}</Text>
+            <Title order={3}>{result.ok ? t.invite.acceptedTitle : t.invite.title}</Title>
+            <Text c="dimmed">
+              {result.ok ? t.invite.acceptedLinkedText : messages[result.reason]}
+            </Text>
             <Button component="a" href="/chronicle">
               {t.invite.goToChronicles}
             </Button>

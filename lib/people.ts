@@ -1,4 +1,5 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notExists, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/db';
 import { chronicleMembers, memberships, people, relationships } from '@/db/schema';
 import { familyTagsByPerson } from '@/lib/family-tags';
@@ -42,6 +43,65 @@ export async function ensurePersonForUser(
     })
     .returning({ id: people.id });
   return created.id;
+}
+
+/**
+ * Claim a person node for a user account, best-effort: a single conditional UPDATE
+ * that only fires while the person is still unlinked AND the user has no person yet
+ * (`people_user_uq` is unique on user_id). Returns whether the link happened.
+ */
+export async function linkUserToPersonIfFree(personId: string, userId: string): Promise<boolean> {
+  const other = alias(people, 'other');
+  const updated = await db
+    .update(people)
+    .set({ userId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(people.id, personId),
+        isNull(people.userId),
+        notExists(
+          db.select({ one: sql`1` }).from(other).where(eq(other.userId, userId)),
+        ),
+      ),
+    )
+    .returning({ id: people.id });
+  return updated.length > 0;
+}
+
+/**
+ * Owner repair: link a chronicle member's account to a tree person. Guards (the
+ * caller gates that the ACTING user is an owner): the person is in this chronicle's
+ * tree and unlinked, and the target user has no person row yet.
+ */
+export async function linkUserToPerson(chronicleId: string, userId: string, personId: string) {
+  if (!(await isPersonInChronicle(chronicleId, personId))) {
+    throw new Error("That person is not in this chronicle's tree.");
+  }
+  const person = await db.query.people.findFirst({ where: eq(people.id, personId) });
+  if (person?.userId) {
+    throw new Error('That person is already linked to an account.');
+  }
+  const existing = await db.query.people.findFirst({ where: eq(people.userId, userId) });
+  if (existing) {
+    throw new Error(`This account is already linked to ${existing.displayName}.`);
+  }
+  const linked = await linkUserToPersonIfFree(personId, userId);
+  if (!linked) {
+    throw new Error('Could not link — the person or account was claimed meanwhile.');
+  }
+}
+
+/** Owner repair: unlink a member's account from its tree person (in this chronicle). */
+export async function unlinkUserPerson(chronicleId: string, userId: string) {
+  const person = await db.query.people.findFirst({ where: eq(people.userId, userId) });
+  if (!person) return; // nothing linked — a no-op
+  if (!(await isPersonInChronicle(chronicleId, person.id))) {
+    throw new Error("That account's person is not in this chronicle's tree.");
+  }
+  await db
+    .update(people)
+    .set({ userId: null, updatedAt: new Date() })
+    .where(and(eq(people.id, person.id), eq(people.userId, userId)));
 }
 
 export interface NewPerson {

@@ -20,31 +20,47 @@ import { notifications } from '@mantine/notifications';
 import { IconCopy, IconMailPlus } from '@tabler/icons-react';
 import type { AccessRole } from '@/lib/permissions';
 import { useI18n } from '@/lib/i18n/client';
-import { invite } from './actions';
+import { invite, linkMemberPersonAction, unlinkMemberPersonAction } from './actions';
 import type { InviteRow, MemberRow } from './types';
 import { initials } from './utils';
+
+/** A person of the active chronicle's tree, for the link pickers. */
+export interface TreePersonOption {
+  id: string;
+  displayName: string;
+  userId: string | null;
+}
 
 export function AccessTab({
   chronicleId,
   members,
   invites,
   canManage: manage,
+  treePeople,
 }: {
   chronicleId: string;
   members: MemberRow[];
   invites: InviteRow[];
   canManage: boolean;
+  treePeople: TreePersonOption[];
 }) {
   const { t } = useI18n();
   const [opened, setOpened] = useState(false);
   const [pending, startTransition] = useTransition();
+  const [linkPending, startLinkTransition] = useTransition();
   const [link, setLink] = useState<string | null>(null);
+  const [linkTarget, setLinkTarget] = useState<MemberRow | null>(null);
+  const [linkPersonId, setLinkPersonId] = useState<string | null>(null);
   const form = useForm({
-    initialValues: { email: '', role: 'contributor' as AccessRole },
+    initialValues: { email: '', role: 'contributor' as AccessRole, personId: '' },
     validate: {
       email: (v) => (/^\S+@\S+\.\S+$/.test(v) ? null : t.auth.enterValidEmail),
     },
   });
+
+  // Only tree people without an account can be linked ('' = not in the tree yet).
+  const unlinkedPeople = treePeople.filter((p) => !p.userId);
+  const personOptions = unlinkedPeople.map((p) => ({ value: p.id, label: p.displayName }));
 
   function openInvite() {
     form.reset();
@@ -55,7 +71,12 @@ export function AccessTab({
   function handleSubmit(values: typeof form.values) {
     startTransition(async () => {
       try {
-        const { token } = await invite({ chronicleId, email: values.email, role: values.role });
+        const { token } = await invite({
+          chronicleId,
+          email: values.email,
+          role: values.role,
+          personId: values.personId || null,
+        });
         const origin = typeof window !== 'undefined' ? window.location.origin : '';
         setLink(`${origin}/invite/${token}`);
         notifications.show({ message: t.access.invitationCreated });
@@ -63,6 +84,37 @@ export function AccessTab({
         notifications.show({
           color: 'red',
           message: e instanceof Error ? e.message : t.access.couldNotCreateInvitation,
+        });
+      }
+    });
+  }
+
+  function handleLink() {
+    if (!linkTarget || !linkPersonId) return;
+    const userId = linkTarget.userId;
+    startLinkTransition(async () => {
+      try {
+        await linkMemberPersonAction({ chronicleId, userId, personId: linkPersonId });
+        setLinkTarget(null);
+        notifications.show({ message: t.access.memberLinked });
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : t.access.couldNotLink,
+        });
+      }
+    });
+  }
+
+  function handleUnlink(member: MemberRow) {
+    startLinkTransition(async () => {
+      try {
+        await unlinkMemberPersonAction({ chronicleId, userId: member.userId });
+        notifications.show({ message: t.access.memberUnlinked });
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : t.access.couldNotUnlink,
         });
       }
     });
@@ -99,13 +151,41 @@ export function AccessTab({
                       <Text size="xs" c="dimmed">
                         {m.email}
                       </Text>
+                      <Text size="xs" c="dimmed">
+                        {m.personName ? t.access.inTreeAs(m.personName) : t.access.notLinkedToTree}
+                      </Text>
                     </div>
                   </Group>
                 </Table.Td>
                 <Table.Td style={{ textAlign: 'right' }}>
-                  <Badge variant="light" color="slate">
-                    {t.roles[m.role]}
-                  </Badge>
+                  <Group justify="flex-end" gap="xs" wrap="nowrap">
+                    {manage &&
+                      (m.personId ? (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          color="slate"
+                          loading={linkPending}
+                          onClick={() => handleUnlink(m)}
+                        >
+                          {t.access.unlink}
+                        </Button>
+                      ) : (
+                        <Button
+                          size="compact-xs"
+                          variant="subtle"
+                          onClick={() => {
+                            setLinkPersonId(null);
+                            setLinkTarget(m);
+                          }}
+                        >
+                          {t.access.linkToTree}
+                        </Button>
+                      ))}
+                    <Badge variant="light" color="slate">
+                      {t.roles[m.role]}
+                    </Badge>
+                  </Group>
                 </Table.Td>
               </Table.Tr>
             ))}
@@ -125,6 +205,11 @@ export function AccessTab({
                   <Table.Tr key={i.id}>
                     <Table.Td>
                       <Text size="sm">{i.email}</Text>
+                      {i.personName && (
+                        <Text size="xs" c="dimmed">
+                          {t.access.willJoinAs(i.personName)}
+                        </Text>
+                      )}
                     </Table.Td>
                     <Table.Td style={{ textAlign: 'right' }}>
                       <Badge variant="outline" color="slate">
@@ -182,6 +267,12 @@ export function AccessTab({
                 allowDeselect={false}
                 {...form.getInputProps('role')}
               />
+              <Select
+                label={t.access.treePersonLabel}
+                data={[{ value: '', label: t.access.notInTreeYet }, ...personOptions]}
+                allowDeselect={false}
+                {...form.getInputProps('personId')}
+              />
               <Group justify="flex-end" mt="sm">
                 <Button variant="default" onClick={() => setOpened(false)}>
                   {t.common.cancel}
@@ -193,6 +284,42 @@ export function AccessTab({
             </Stack>
           </form>
         )}
+      </Modal>
+
+      <Modal
+        opened={linkTarget !== null}
+        onClose={() => setLinkTarget(null)}
+        title={t.access.linkModalTitle}
+        radius="md"
+      >
+        <Stack>
+          {personOptions.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              {t.access.noUnlinkedPeople}
+            </Text>
+          ) : (
+            <Select
+              label={linkTarget ? t.access.linkModalText(linkTarget.name) : undefined}
+              placeholder={t.access.treePersonPlaceholder}
+              data={personOptions}
+              value={linkPersonId}
+              onChange={setLinkPersonId}
+              allowDeselect={false}
+            />
+          )}
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={() => setLinkTarget(null)}>
+              {t.common.cancel}
+            </Button>
+            <Button
+              onClick={handleLink}
+              loading={linkPending}
+              disabled={!linkPersonId}
+            >
+              {t.access.link}
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
     </Stack>
   );

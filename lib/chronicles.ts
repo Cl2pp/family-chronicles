@@ -1,7 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { db } from '@/db';
-import { chronicles, chronicleMembers, memberships, user } from '@/db/schema';
+import { chronicles, chronicleMembers, memberships, people, user } from '@/db/schema';
 import { type AccessRole, canContribute, canManage } from '@/lib/permissions';
 import { ensurePersonForUser } from '@/lib/people';
 import { isLocale, type Locale } from '@/lib/i18n/config';
@@ -99,7 +99,7 @@ export async function requireOwner(chronicleId: string, userId: string) {
   return m;
 }
 
-/** Access members of a chronicle (user accounts + their access role). */
+/** Access members of a chronicle (user accounts + role + their linked tree person). */
 export async function listMembers(chronicleId: string) {
   return db
     .select({
@@ -108,9 +108,12 @@ export async function listMembers(chronicleId: string) {
       email: user.email,
       role: memberships.accessRole,
       joinedAt: memberships.createdAt,
+      personId: people.id,
+      personName: people.displayName,
     })
     .from(memberships)
     .innerJoin(user, eq(memberships.userId, user.id))
+    .leftJoin(people, eq(people.userId, user.id))
     .where(eq(memberships.chronicleId, chronicleId))
     .orderBy(memberships.createdAt);
 }

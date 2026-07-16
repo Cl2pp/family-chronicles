@@ -329,6 +329,23 @@ export const en = {
     createInvitation: 'Create invitation',
     invitationCreated: 'Invitation created',
     couldNotCreateInvitation: 'Could not create invitation',
+    treePersonLabel: 'Who is this in the family tree?',
+    treePersonPlaceholder: 'Pick a person',
+    notInTreeYet: 'Not in the tree yet',
+    inTreeAs: (name: string) => `In the tree as ${name}`,
+    notLinkedToTree: 'Not linked to the family tree',
+    willJoinAs: (name: string) => `Will join the tree as ${name}`,
+    linkToTree: 'Link to tree',
+    unlink: 'Unlink',
+    link: 'Link',
+    linkModalTitle: 'Link account to the family tree',
+    linkModalText: (name: string) => `Which person in the family tree is ${name}?`,
+    noUnlinkedPeople:
+      'Everyone in the tree is already linked to an account — add the person to the tree first.',
+    memberLinked: 'Account linked to the family tree',
+    memberUnlinked: 'Account unlinked from the family tree',
+    couldNotLink: 'Could not link the account',
+    couldNotUnlink: 'Could not unlink the account',
   },
   roles: {
     owner: 'Owner',
@@ -559,6 +576,9 @@ export const en = {
     expired: 'This invitation has expired. Ask for a new invite.',
     used: 'This invitation has already been used.',
     goToChronicles: 'Go to your chronicles',
+    acceptedTitle: 'Welcome!',
+    acceptedLinkedText:
+      'You now have access to the chronicle, and your place in the family tree is linked to your account.',
   },
   offline: {
     title: 'You’re offline',
