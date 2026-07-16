@@ -2,10 +2,11 @@ import nodemailer from 'nodemailer';
 import { env } from '@/lib/env';
 
 /**
- * Minimal outbound email. First consumer is the book-order notification;
- * better-auth magic links can adopt this later. Without SMTP_URL the message
- * is logged instead of sent, so development and half-configured deploys never
- * fail on email — callers treat sending as best-effort.
+ * Minimal outbound email. Consumers: better-auth verification emails
+ * (lib/auth.ts); the book-order notification may adopt this later. Without
+ * SMTP_URL the message is logged instead of sent, so development and
+ * half-configured deploys never fail on email — callers treat sending as
+ * best-effort.
  */
 
 const transporter = env.SMTP_URL ? nodemailer.createTransport(env.SMTP_URL) : null;

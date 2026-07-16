@@ -154,6 +154,14 @@ export const en = {
     alreadyHaveAccount: 'Already have an account?',
     continueWithGoogle: 'Continue with Google',
     or: 'or',
+    checkInboxAfterSignup: 'Welcome! We sent you a link to confirm your email address.',
+    verifyEmailTitle: 'Confirm your email address',
+    verifyEmailBody:
+      'Your email address is not confirmed yet. Check your inbox for the confirmation link, or request a new one. A confirmed address also lets you sign in with Google.',
+    resendVerification: 'Resend link',
+    verificationSent: 'Confirmation email sent',
+    accountNotLinked:
+      'An account with this email already exists, but its address has not been confirmed yet. Sign in with your password and confirm your email first — then Google sign-in will work.',
   },
   account: {
     title: 'Account',
