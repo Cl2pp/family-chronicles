@@ -10,8 +10,19 @@ import s from './landing.module.css';
  * Marketing-page top bar: brand mark, section links, a compact language switch,
  * and the sign-in button. Client-side so the language toggle can persist the
  * cookie and reload; the rest of the landing page stays a server component.
+ *
+ * Reused on the legal pages (Impressum/Datenschutz), which live on their own
+ * routes: there the in-page section anchors don't exist, so pass
+ * `logoHref="/"` and `showSections={false}` to point the logo home and drop
+ * the dead `#…` links.
  */
-export function LandingTopbar() {
+export function LandingTopbar({
+  logoHref = '#top',
+  showSections = true,
+}: {
+  logoHref?: string;
+  showSections?: boolean;
+} = {}) {
   const { locale, t } = useI18n();
   const h = t.home;
 
@@ -23,22 +34,24 @@ export function LandingTopbar() {
 
   return (
     <nav className={s.nav}>
-      <a className={s.logo} href="#top" aria-label="Familienwerk">
+      <a className={s.logo} href={logoHref} aria-label="Familienwerk">
         <BrandGlyph size={24} />
         <span className={s.logoWord}>Familienwerk</span>
       </a>
       <div className={s.navRight}>
-        <div className={s.navLinks}>
-          <a className={s.navLink} href="#funktionen">
-            {h.navFeatures}
-          </a>
-          <a className={s.navLink} href="#buch">
-            {h.navBook}
-          </a>
-          <a className={s.navLink} href="#privat">
-            {h.navPrivacy}
-          </a>
-        </div>
+        {showSections && (
+          <div className={s.navLinks}>
+            <a className={s.navLink} href="#funktionen">
+              {h.navFeatures}
+            </a>
+            <a className={s.navLink} href="#buch">
+              {h.navBook}
+            </a>
+            <a className={s.navLink} href="#privat">
+              {h.navPrivacy}
+            </a>
+          </div>
+        )}
         <SegmentedControl
           size="xs"
           value={locale}

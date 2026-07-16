@@ -320,8 +320,8 @@ export default async function Home() {
             <span>{h.footerTagline}</span>
           </div>
           <div className={s.footerLinks}>
-            <a href="#top">{h.footerImprint}</a>
-            <a href="#top">{h.footerPrivacy}</a>
+            <a href="/impressum">{h.footerImprint}</a>
+            <a href="/datenschutz">{h.footerPrivacy}</a>
           </div>
         </footer>
       </div>
