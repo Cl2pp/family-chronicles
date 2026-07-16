@@ -19,6 +19,19 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
+  // Wired up only when both credentials are present, so local dev and CI boot
+  // without Google configured. The signup/login button is gated separately by
+  // NEXT_PUBLIC_GOOGLE_AUTH_ENABLED — set all three together in prod.
+  ...(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
+    ? {
+        socialProviders: {
+          google: {
+            clientId: env.GOOGLE_CLIENT_ID,
+            clientSecret: env.GOOGLE_CLIENT_SECRET,
+          },
+        },
+      }
+    : {}),
   session: {
     // The session (and its cookie) slides — any visit at least a day after the
     // last refresh re-issues both — so only a month of absence logs you out.

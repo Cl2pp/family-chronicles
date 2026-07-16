@@ -15,6 +15,7 @@ import {
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { authClient } from '@/lib/auth-client';
+import { GoogleAuthButton } from '@/components/google-auth-button';
 import { useI18n } from '@/lib/i18n/client';
 
 function LoginForm() {
@@ -63,6 +64,7 @@ function LoginForm() {
           <Button type="submit" loading={loading} fullWidth>
             {t.auth.signIn}
           </Button>
+          <GoogleAuthButton next={next} />
         </Stack>
       </form>
 

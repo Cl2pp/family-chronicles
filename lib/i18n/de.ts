@@ -50,6 +50,8 @@ export const de: Dictionary = {
     tellUsYourName: 'Verrate uns deinen Namen',
     signUpFailed: 'Registrierung fehlgeschlagen',
     alreadyHaveAccount: 'Schon ein Konto?',
+    continueWithGoogle: 'Mit Google fortfahren',
+    or: 'oder',
   },
   account: {
     title: 'Konto',

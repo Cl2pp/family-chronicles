@@ -16,6 +16,11 @@ const schema = z.object({
   // Auth (better-auth)
   BETTER_AUTH_SECRET: z.string().min(16),
   BETTER_AUTH_URL: z.string().url(),
+  // Google OAuth (optional). Both must be set to enable Google sign-in; the
+  // provider is wired up only when both are present (see lib/auth.ts), and the
+  // client-side button is gated separately by NEXT_PUBLIC_GOOGLE_AUTH_ENABLED.
+  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
 
   // AI — story styling via OpenRouter (OpenAI-compatible)
   OPENROUTER_API_KEY: z.string().min(1),
