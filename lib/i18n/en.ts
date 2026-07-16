@@ -32,6 +32,47 @@ export const en = {
       'Contribute by writing or by voice message. Stories are transcribed and gently retold in a consistent memoir voice, with photos, dates, and full credit to whoever shared them.',
     signIn: 'Sign in',
     createAccount: 'Create account',
+    eyebrow: 'Your family’s private chronicle',
+    heroTitle: 'Your family’s stories, kept forever.',
+    heroSubtitle:
+      'Speak or type a memory. It becomes a beautifully written chapter — on a shared timeline, in your family tree, ready to print as a real book.',
+    ctaPrimary: 'Get started — it’s free',
+    ctaSecondary: 'Sign in',
+    stepsTitle: 'From a spoken memory to a family book',
+    stepsSubtitle: 'Three steps. No writing skills required.',
+    step1Title: 'Tell it',
+    step1Text:
+      'Just start talking or type a few lines. A grandparent’s voice note works just as well as a polished paragraph.',
+    step2Title: 'We shape it',
+    step2Text:
+      'Your recording is transcribed and gently retold in a warm, consistent memoir voice — with dates and photos kept intact.',
+    step3Title: 'Keep it',
+    step3Text:
+      'Every story lands on a shared timeline and family tree — and can be typeset into a printable hardcover book.',
+    featuresTitle: 'Everything a family chronicle needs',
+    featureVoiceTitle: 'Speak or write',
+    featureVoiceText:
+      'Record a voice message or type. Perfect for older relatives who’d rather talk than write.',
+    featureTimelineTitle: 'A living timeline',
+    featureTimelineText:
+      'Stories are dated and placed in order, so your family history reads as one continuous thread.',
+    featureTreeTitle: 'Tree & family tags',
+    featureTreeText:
+      'Build your family tree once. Stories tag themselves to the right people and branches automatically.',
+    featureBookTitle: 'A real printed book',
+    featureBookText:
+      'Turn chapters and photos into a typeset hardcover you can hold, gift, and pass on.',
+    featurePrivateTitle: 'Private by default',
+    featurePrivateText:
+      'Invite-only. Your memories stay with your family — no public feeds, no ads, no strangers.',
+    featureMemoirTitle: 'One warm voice',
+    featureMemoirText:
+      'Many contributors, one consistent memoir style — while every source and photo is credited and kept.',
+    closingTitle: 'Start your family’s chronicle today',
+    closingText:
+      'It takes one memory to begin. Add yours, invite the family, and watch the book grow.',
+    closingCta: 'Create your chronicle',
+    footerNote: 'Private · Secure · Just for your family',
   },
   auth: {
     welcomeBack: 'Welcome back',
