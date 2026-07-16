@@ -1,0 +1,48 @@
+# Familienwerk
+
+> Familienwerk is a private, invite-only web app (installable as a PWA) where families collect their stories — typed or spoken — and have them turned into a shared, third-person family memoir placed on a timeline, and ultimately printed as a hardcover book. Website: https://familienwerk.co
+
+Familienwerk is bilingual (German, the default, and English) and built for every generation, including older relatives who would rather talk than type. Voice notes are transcribed automatically and rewritten in a consistent, warm memoir voice; every original recording, text, and photo is preserved with full attribution. Stories are dated onto a shared timeline and auto-tagged to the right people and family branches via a family tree. Chapters and photos can be typeset into a printable hardcover.
+
+## Key facts
+
+- Product: private family-memoir / family-chronicle app (PWA)
+- Website: https://familienwerk.co
+- Privacy: invite-only; no public profiles, no ads, no strangers
+- Languages: German (default) and English
+- Platforms: any web browser; installable on phones as a PWA
+- Input: voice notes (auto-transcribed) or typed text
+- Output: a shared timeline, a family tree, and a printable hardcover book
+- Originals (audio, text, photos) are kept forever with attribution
+
+## How it works
+
+1. Tell a memory — record a voice note or type a few lines.
+2. Familienwerk transcribes it and rewrites it as a narrative in the voice of a family book; the original is kept forever.
+3. Stories land on a shared timeline and family tree, and can be typeset and ordered as a real hardcover book.
+
+## Pages
+
+- [Home](https://familienwerk.co/): product overview, how it works, features, FAQ
+- [Sign in](https://familienwerk.co/login)
+- [Create an account](https://familienwerk.co/signup)
+
+## FAQ
+
+### What is Familienwerk?
+A private, invite-only place where your family collects its stories — typed or spoken — and Familienwerk turns them into an ongoing family chronicle on a timeline, and ultimately a printed hardcover book.
+
+### How do I tell a story?
+Record a voice note or type a few lines. Familienwerk transcribes the recording automatically and rewrites it as a narrative in the voice of a family book; the original is kept forever.
+
+### Are our stories private?
+Yes. Familienwerk is invite-only, with no public profiles and no ads. Your chronicle belongs to your family alone.
+
+### Can older family members take part?
+That is exactly who it is built for. Anyone who would rather talk than type simply records a voice message.
+
+### Do we get a real printed book?
+Yes. Chapters and photos are typeset automatically into a hardcover you fine-tune in a live preview and order as a printed book — an heirloom, not an export.
+
+### What languages and devices are supported?
+Familienwerk is bilingual in German and English. It runs in any browser and can be installed on a phone as an app (PWA).

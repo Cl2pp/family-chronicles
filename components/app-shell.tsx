@@ -19,12 +19,12 @@ import {
   IconSettings,
   IconUserCircle,
 } from '@tabler/icons-react';
-import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { authClient } from '@/lib/auth-client';
 import { useI18n } from '@/lib/i18n/client';
 import type { Dictionary } from '@/lib/i18n';
+import { BrandGlyph } from '@/components/brand-glyph';
 
 /** Space reserved under content for the fixed mobile tab bar (60px bar + breathing room). */
 export const MOBILE_TABBAR_OFFSET = 72;
@@ -88,8 +88,12 @@ export function AppChrome({
         withBorder
       >
         <Group gap={8} mb="md" px={6}>
-          <Image src="/icon.svg" alt="" width={22} height={22} priority />
-          <Text fw={700} fz={14}>
+          <BrandGlyph size={22} variant="ink" />
+          <Text
+            fw={600}
+            fz={15}
+            style={{ fontFamily: 'var(--fw-font-brand)', letterSpacing: '-0.02em' }}
+          >
             Familienwerk
           </Text>
         </Group>
@@ -107,9 +111,9 @@ export function AppChrome({
                 py={8}
                 style={{
                   borderRadius: 8,
-                  background: activeItem ? 'var(--mantine-color-brand-1)' : undefined,
+                  background: activeItem ? 'var(--mantine-color-brand-0)' : undefined,
                   color: activeItem
-                    ? 'var(--mantine-color-brand-7)'
+                    ? 'var(--mantine-color-brand-8)'
                     : 'var(--mantine-color-slate-7)',
                 }}
               >
@@ -200,14 +204,14 @@ export function AppChrome({
                     stroke={1.8}
                     color={
                       activeItem
-                        ? 'var(--mantine-color-brand-7)'
+                        ? 'var(--mantine-color-brand-8)'
                         : 'var(--mantine-color-slate-4)'
                     }
                   />
                   <Text
                     fz={10}
                     fw={activeItem ? 600 : 500}
-                    c={activeItem ? 'brand.7' : 'dimmed'}
+                    c={activeItem ? 'brand.8' : 'dimmed'}
                   >
                     {item.label(t)}
                   </Text>

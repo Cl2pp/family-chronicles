@@ -1,33 +1,10 @@
 import { redirect } from 'next/navigation';
-import {
-  Container,
-  Title,
-  Text,
-  Button,
-  Group,
-  Stack,
-  SimpleGrid,
-  Card,
-  Box,
-  Badge,
-  ThemeIcon,
-  Divider,
-} from '@mantine/core';
 import { getI18n } from '@/lib/i18n/server';
 import { getSession } from '@/lib/session';
 import { LandingTopbar } from './landing-topbar';
-import {
-  PipelineGraphic,
-  TimelineGraphic,
-  TreeGraphic,
-  BookGraphic,
-  MicIcon,
-  TimelineIcon,
-  TreeIcon,
-  BookIcon,
-  LockIcon,
-  QuoteIcon,
-} from './landing-graphics';
+import { BrandGlyph, MicGlyph, PersonGlyph } from '@/components/brand-glyph';
+import { HeroArt, IconSpeak, IconMemoir, IconPhotos, IconChat } from './landing-graphics';
+import s from './landing.module.css';
 
 export default async function Home() {
   // The PWA's start_url is "/" — a signed-in user cold-starting the pinned app
@@ -38,191 +15,316 @@ export default async function Home() {
   const { t } = await getI18n();
   const h = t.home;
 
-  const steps = [
-    { n: '1', title: h.step1Title, text: h.step1Text },
-    { n: '2', title: h.step2Title, text: h.step2Text },
-    { n: '3', title: h.step3Title, text: h.step3Text },
-  ];
-
-  const showcases = [
-    { title: h.featureTimelineTitle, text: h.featureTimelineText, graphic: <TimelineGraphic /> },
-    { title: h.featureTreeTitle, text: h.featureTreeText, graphic: <TreeGraphic /> },
-    { title: h.featureBookTitle, text: h.featureBookText, graphic: <BookGraphic /> },
-  ];
-
   const features = [
-    { icon: <MicIcon />, title: h.featureVoiceTitle, text: h.featureVoiceText },
-    { icon: <QuoteIcon />, title: h.featureMemoirTitle, text: h.featureMemoirText },
-    { icon: <TimelineIcon />, title: h.featureTimelineTitle, text: h.featureTimelineText },
-    { icon: <TreeIcon />, title: h.featureTreeTitle, text: h.featureTreeText },
-    { icon: <BookIcon />, title: h.featureBookTitle, text: h.featureBookText },
-    { icon: <LockIcon />, title: h.featurePrivateTitle, text: h.featurePrivateText },
+    { icon: <IconSpeak />, title: h.featureSpeakTitle, text: h.featureSpeakText },
+    { icon: <IconMemoir />, title: h.featureMemoirTitle, text: h.featureMemoirText },
+    { icon: <IconPhotos />, title: h.featurePhotosTitle, text: h.featurePhotosText },
+    { icon: <IconChat />, title: h.featureChatTitle, text: h.featureChatText },
   ];
+
+  // Timeline rows — years with representative bar widths; the last is "now".
+  const timeline = [
+    { year: '1948', bar: 150 },
+    { year: '1971', bar: 110 },
+    { year: '1994', bar: 170 },
+    { year: '2026', bar: 130, now: true },
+  ];
+
+  // Family-tree leaves — surname tags derived automatically (see lib/family-tags).
+  const branches = [
+    { ring: '#A9E9A0', person: '#5FCB5A', name: 'Müller' },
+    { ring: '#0C8038', person: '#0C8038', name: 'Schneider' },
+    { ring: '#12C24A', person: '#12C24A', name: 'Fischer' },
+  ];
+
+  // Structured data — helps search engines and AI crawlers understand the product
+  // and mirrors the visible FAQ below (a requirement for FAQPage rich results).
+  const SITE_URL = 'https://familienwerk.co';
+  const jsonLd = {
+    '@context': 'https://schema.org',
+    '@graph': [
+      {
+        '@type': 'Organization',
+        '@id': `${SITE_URL}/#organization`,
+        name: 'Familienwerk',
+        url: SITE_URL,
+        logo: `${SITE_URL}/icon-512.png`,
+      },
+      {
+        '@type': 'WebSite',
+        '@id': `${SITE_URL}/#website`,
+        name: 'Familienwerk',
+        url: SITE_URL,
+        inLanguage: ['de', 'en'],
+        publisher: { '@id': `${SITE_URL}/#organization` },
+      },
+      {
+        '@type': 'SoftwareApplication',
+        name: 'Familienwerk',
+        applicationCategory: 'LifestyleApplication',
+        operatingSystem: 'Web, iOS, Android (PWA)',
+        url: SITE_URL,
+        description: h.heroSubtitle,
+        inLanguage: ['de', 'en'],
+      },
+      {
+        '@type': 'FAQPage',
+        mainEntity: h.faqItems.map((f) => ({
+          '@type': 'Question',
+          name: f.q,
+          acceptedAnswer: { '@type': 'Answer', text: f.a },
+        })),
+      },
+    ],
+  };
 
   return (
-    <Box bg="white" mih="100dvh">
-      <Container size="lg" py="md">
+    <div id="top" className={s.page}>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <div className={s.wrap}>
         <LandingTopbar />
-      </Container>
 
-      {/* ── Hero ─────────────────────────────────────────────── */}
-      <Box
-        style={{
-          background:
-            'linear-gradient(180deg, var(--mantine-color-brand-0) 0%, var(--mantine-color-white) 100%)',
-        }}
-      >
-        <Container size="lg" py={{ base: 40, sm: 72 }}>
-          <SimpleGrid cols={{ base: 1, md: 2 }} spacing={48} verticalSpacing={40}>
-            <Stack gap="lg" justify="center">
-              <Badge
-                variant="light"
-                color="brand"
-                radius="sm"
-                size="lg"
-                w="fit-content"
-                tt="none"
-                fw={600}
-              >
-                {h.eyebrow}
-              </Badge>
-              <Title order={1} fz={{ base: 34, sm: 48 }} lh={1.1} c="slate.9">
-                {h.heroTitle}
-              </Title>
-              <Text fz={{ base: 'md', sm: 'lg' }} c="slate.6" maw={520}>
-                {h.heroSubtitle}
-              </Text>
-              <Group gap="sm" mt="xs">
-                <Button component="a" href="/signup" size="md">
-                  {h.ctaPrimary}
-                </Button>
-                <Button component="a" href="/login" size="md" variant="default">
-                  {h.ctaSecondary}
-                </Button>
-              </Group>
-              <Text size="sm" c="slate.5" mt={4}>
-                {h.footerNote}
-              </Text>
-            </Stack>
+        {/* ── Hero ─────────────────────────────────────────────── */}
+        <header className={s.hero}>
+          <div className={s.heroCopy}>
+            <span className={s.eyebrow}>{h.eyebrow}</span>
+            <h1 className={s.h1}>{h.heroTitle}</h1>
+            <p className={s.lead} style={{ maxWidth: 480 }}>
+              {h.heroSubtitle}
+            </p>
+            <div className={s.heroCtas}>
+              <a className={`${s.btnPrimary} ${s.btnMd}`} href="/signup">
+                {h.ctaPrimary}
+              </a>
+              <a className={`${s.btnGhost} ${s.btnMd}`} href="#funktionen">
+                {h.ctaSecondary}
+              </a>
+            </div>
+            <div className={s.trust}>
+              <span className={s.avatars}>
+                <span className={s.avatar} style={{ background: '#E9FAE5', color: '#0C8038' }}>
+                  MM
+                </span>
+                <span className={s.avatar} style={{ background: '#17211C', color: '#fff' }}>
+                  KM
+                </span>
+                <span className={s.avatar} style={{ background: '#12C24A', color: '#fff' }}>
+                  LF
+                </span>
+              </span>
+              {h.heroTrust}
+            </div>
+          </div>
+          <div className={s.heroArt}>
+            <HeroArt />
+          </div>
+        </header>
 
-            <Box style={{ alignSelf: 'center', width: '100%' }}>
-              <PipelineGraphic />
-            </Box>
-          </SimpleGrid>
-        </Container>
-      </Box>
+        {/* ── How it works ─────────────────────────────────────── */}
+        <section className={s.how}>
+          <div className={s.howCopy}>
+            <span className={s.eyebrow}>{h.howEyebrow}</span>
+            <h2 className={s.h2}>{h.howTitle}</h2>
+            <p className={s.lead}>{h.howText}</p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div className={s.voiceRow}>
+              <span className={s.voiceIcon}>
+                <MicGlyph size={16} color="#fff" />
+              </span>
+              <div>
+                <div className={s.voiceLabel}>{h.demoVoiceLabel}</div>
+                <div className={s.voiceQuote}>{h.demoVoiceQuote}</div>
+              </div>
+            </div>
+            <div className={s.arrowNote}>
+              <span className={s.arrowBadge}>↓</span>
+              {h.demoArrow}
+            </div>
+            <div className={s.storyCard}>
+              <div className={s.storyBanner}>
+                <span className={s.storyBannerLabel}>[ Bodensee · 1974 ]</span>
+              </div>
+              <div className={s.storyBody}>
+                <div className={s.tagRow}>
+                  <span className={s.tag}>Müller</span>
+                  <span className={`${s.tag} ${s.tagNeutral}`}>{h.demoTagSeason}</span>
+                </div>
+                <div className={s.storyTitle}>{h.demoStoryTitle}</div>
+                <div className={s.storyText}>{h.demoStoryText}</div>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      {/* ── How it works ─────────────────────────────────────── */}
-      <Container size="lg" py={{ base: 48, sm: 80 }}>
-        <Stack gap={8} align="center" ta="center" mb={40}>
-          <Title order={2} fz={{ base: 26, sm: 34 }} c="slate.9">
-            {h.stepsTitle}
-          </Title>
-          <Text c="slate.6" fz="lg" maw={560}>
-            {h.stepsSubtitle}
-          </Text>
-        </Stack>
-        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="xl">
-          {steps.map((s) => (
-            <Card key={s.n} withBorder radius="lg" p="xl" bg="white">
-              <ThemeIcon size={44} radius="xl" variant="light" color="brand" fw={700}>
-                <Text fw={700} fz="lg" c="brand.7">
-                  {s.n}
-                </Text>
-              </ThemeIcon>
-              <Title order={3} fz="xl" mt="md" c="slate.9">
-                {s.title}
-              </Title>
-              <Text c="slate.6" mt="xs" fz="sm" lh={1.6}>
-                {s.text}
-              </Text>
-            </Card>
-          ))}
-        </SimpleGrid>
-      </Container>
-
-      {/* ── Showcase (with generated graphics) ───────────────── */}
-      <Box bg="slate.0">
-        <Container size="lg" py={{ base: 48, sm: 80 }}>
-          <Stack gap={64}>
-            {showcases.map((sc, i) => (
-              <SimpleGrid key={sc.title} cols={{ base: 1, md: 2 }} spacing={48} verticalSpacing={24}>
-                <Box style={{ order: i % 2 === 1 ? 2 : 1 }}>
-                  <Card withBorder radius="lg" p="xl" bg="white" h="100%">
-                    <Box maw={340} mx="auto" w="100%">
-                      {sc.graphic}
-                    </Box>
-                  </Card>
-                </Box>
-                <Stack gap="sm" justify="center" style={{ order: i % 2 === 1 ? 1 : 2 }}>
-                  <Title order={3} fz={{ base: 22, sm: 28 }} c="slate.9">
-                    {sc.title}
-                  </Title>
-                  <Text c="slate.6" fz="md" lh={1.7} maw={460}>
-                    {sc.text}
-                  </Text>
-                </Stack>
-              </SimpleGrid>
-            ))}
-          </Stack>
-        </Container>
-      </Box>
-
-      {/* ── Feature grid ─────────────────────────────────────── */}
-      <Container size="lg" py={{ base: 48, sm: 80 }}>
-        <Title order={2} fz={{ base: 26, sm: 34 }} c="slate.9" ta="center" mb={40}>
-          {h.featuresTitle}
-        </Title>
-        <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="lg">
-          {features.map((f) => (
-            <Card key={f.title} withBorder radius="lg" p="lg" bg="white">
-              <ThemeIcon size={42} radius="md" variant="light" color="brand">
+        {/* ── Feature grid ─────────────────────────────────────── */}
+        <section id="funktionen" className={s.section}>
+          <div className={s.featureHead}>
+            <h2 className={s.h2}>{h.featuresTitle}</h2>
+            <p className={s.lead}>{h.featuresSubtitle}</p>
+          </div>
+          <div className={s.featureGrid}>
+            {features.map((f) => (
+              <div key={f.title} className={s.feature}>
                 {f.icon}
-              </ThemeIcon>
-              <Title order={3} fz="md" mt="md" c="slate.9">
-                {f.title}
-              </Title>
-              <Text c="slate.6" mt={6} fz="sm" lh={1.6}>
-                {f.text}
-              </Text>
-            </Card>
+                <div className={s.featureTitle}>{f.title}</div>
+                <div className={s.featureText}>{f.text}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* ── Timeline & Tree ──────────────────────────────────── */}
+        <section className={s.showcase}>
+          {/* Timeline: viz left, copy right (desktop) */}
+          <div className={s.showCard}>
+            <div className={s.timeline}>
+              <div className={s.timelineRail} />
+              {timeline.map((row) => (
+                <div key={row.year} className={s.timelineRow}>
+                  <span className={`${s.timelineDot} ${row.now ? s.timelineDotNow : ''}`} />
+                  <span className={s.yearChip}>{row.year}</span>
+                  <span className={s.bar} style={{ width: row.bar }} />
+                </div>
+              ))}
+            </div>
+            <div className={s.showCopy}>
+              <h2 className={s.showTitle}>{h.timelineTitle}</h2>
+              <p className={s.showText}>{h.timelineText}</p>
+            </div>
+          </div>
+
+          {/* Tree: copy left, viz right (desktop) — reversed */}
+          <div className={`${s.showCard} ${s.showCardReverse}`}>
+            <div className={s.tree}>
+              <div className={s.treeRow}>
+                <span className={s.treeAvatar} style={{ border: '3px solid #12C24A' }}>
+                  <PersonGlyph size={28} color="#12C24A" />
+                </span>
+                <span className={s.treeAvatar} style={{ border: '3px solid #7BE84B' }}>
+                  <PersonGlyph size={28} color="#7BE84B" />
+                </span>
+              </div>
+              <div className={s.treeStem} />
+              <div className={s.treeBeam} />
+              <div className={s.treeLeaves}>
+                {branches.map((b) => (
+                  <div key={b.name} className={s.treeNode}>
+                    <div className={s.treeStem} style={{ height: 16 }} />
+                    <span className={s.treeAvatar} style={{ border: `3px solid ${b.ring}` }}>
+                      <PersonGlyph size={26} color={b.person} />
+                    </span>
+                    <span className={s.tag}>{b.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className={s.showCopy}>
+              <h2 className={s.showTitle}>{h.treeTitle}</h2>
+              <p className={s.showText}>{h.treeText}</p>
+            </div>
+          </div>
+        </section>
+
+        {/* ── The book (dark) ──────────────────────────────────── */}
+        <section id="buch" className={s.book}>
+          <div className={s.bookCopy}>
+            <span className={`${s.eyebrow} ${s.eyebrowDark}`}>{h.bookEyebrow}</span>
+            <h2 className={s.bookTitle}>{h.bookTitle}</h2>
+            <p className={s.bookText}>{h.bookText}</p>
+            <a className={`${s.btnLime} ${s.btnMd} ${s.bookCtaDesktop}`} href="/signup">
+              {h.bookCta}
+            </a>
+          </div>
+          <div className={s.bookCoverWrap}>
+            <div className={s.bookCover}>
+              <BrandGlyph size={36} variant="onGreen" />
+              <div className={s.bookCoverTitle}>{h.bookCoverFamily}</div>
+              <div className={s.bookCoverSub}>{h.bookCoverSubtitle}</div>
+              <div className={s.bookCoverMeta}>{h.bookCoverMeta}</div>
+            </div>
+          </div>
+          <a
+            className={`${s.btnLime} ${s.btnMd} ${s.bookCtaMobile}`}
+            href="/signup"
+            style={{ width: '100%' }}
+          >
+            {h.bookCta}
+          </a>
+        </section>
+
+        {/* ── Privacy ──────────────────────────────────────────── */}
+        <section id="privat" className={s.privacy}>
+          {[
+            { n: '1', title: h.privacy1Title, text: h.privacy1Text },
+            { n: '2', title: h.privacy2Title, text: h.privacy2Text },
+            { n: '3', title: h.privacy3Title, text: h.privacy3Text },
+          ].map((p) => (
+            <div key={p.n} className={s.privacyItem}>
+              <span className={s.privacyNum}>{p.n}</span>
+              <div>
+                <div className={s.privacyTitle}>{p.title}</div>
+                <div className={s.privacyText}>{p.text}</div>
+              </div>
+            </div>
           ))}
-        </SimpleGrid>
-      </Container>
+        </section>
 
-      {/* ── Closing CTA ──────────────────────────────────────── */}
-      <Box
-        style={{
-          background:
-            'linear-gradient(135deg, var(--mantine-color-brand-7) 0%, var(--mantine-color-brand-9) 100%)',
-        }}
-      >
-        <Container size="md" py={{ base: 56, sm: 88 }}>
-          <Stack gap="lg" align="center" ta="center">
-            <Title order={2} fz={{ base: 26, sm: 36 }} c="white" maw={620}>
-              {h.closingTitle}
-            </Title>
-            <Text c="brand.1" fz="lg" maw={520}>
-              {h.closingText}
-            </Text>
-            <Button component="a" href="/signup" size="lg" color="white" c="brand.8" mt="xs">
-              {h.closingCta}
-            </Button>
-          </Stack>
-        </Container>
-      </Box>
+        {/* ── FAQ ──────────────────────────────────────────────── */}
+        <section id="faq" className={s.faq}>
+          <div className={s.faqHead}>
+            <span className={s.eyebrow}>{h.faqEyebrow}</span>
+            <h2 className={s.h2}>{h.faqTitle}</h2>
+          </div>
+          <div className={s.faqList}>
+            {h.faqItems.map((f, i) => (
+              <details key={f.q} className={s.faqItem} open={i === 0}>
+                <summary className={s.faqQ}>
+                  {f.q}
+                  <svg className={s.faqChevron} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M6 9l6 6 6-6"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </summary>
+                <p className={s.faqA}>{f.a}</p>
+              </details>
+            ))}
+          </div>
+        </section>
 
-      <Container size="lg" py="xl">
-        <Divider mb="md" />
-        <Group justify="space-between" wrap="wrap">
-          <Text size="sm" c="slate.5">
-            Familienwerk
-          </Text>
-          <Text size="sm" c="slate.5">
-            {h.footerNote}
-          </Text>
-        </Group>
-      </Container>
-    </Box>
+        {/* ── Closing CTA ──────────────────────────────────────── */}
+        <section className={s.closing}>
+          <h2 className={s.closingTitle}>
+            {h.closingLine1}
+            <br />
+            {h.closingLine2}
+          </h2>
+          <p className={s.closingText}>{h.closingText}</p>
+          <a className={`${s.btnPrimary} ${s.btnMd}`} href="/signup">
+            {h.closingCta}
+          </a>
+        </section>
+
+        {/* ── Footer ───────────────────────────────────────────── */}
+        <footer className={s.footer}>
+          <div className={s.footerBrand}>
+            <BrandGlyph size={18} />
+            <span>{h.footerTagline}</span>
+          </div>
+          <div className={s.footerLinks}>
+            <a href="#top">{h.footerImprint}</a>
+            <a href="#top">{h.footerPrivacy}</a>
+          </div>
+        </footer>
+      </div>
+    </div>
   );
 }

@@ -26,53 +26,112 @@ export const en = {
     signOut: 'Sign out',
   },
   home: {
-    tagline:
-      'A private vault where your family’s stories live. Write them down or just speak — and watch them become a shared family book, placed on a timeline, generation after generation.',
-    blurb:
-      'Contribute by writing or by voice message. Stories are transcribed and gently retold in a consistent memoir voice, with photos, dates, and full credit to whoever shared them.',
+    // — nav —
+    navFeatures: 'Features',
+    navBook: 'The book',
+    navPrivacy: 'Privacy',
     signIn: 'Sign in',
     createAccount: 'Create account',
-    eyebrow: 'Your family’s private chronicle',
-    heroTitle: 'Your family’s stories, kept forever.',
+    // — hero —
+    eyebrow: 'Private · Secure · Invite-only',
+    heroTitle: 'Your family writes its own book.',
     heroSubtitle:
-      'Speak or type a memory. It becomes a beautifully written chapter — on a shared timeline, in your family tree, ready to print as a real book.',
-    ctaPrimary: 'Get started — it’s free',
-    ctaSecondary: 'Sign in',
-    stepsTitle: 'From a spoken memory to a family book',
-    stepsSubtitle: 'Three steps. No writing skills required.',
-    step1Title: 'Tell it',
-    step1Text:
-      'Just start talking or type a few lines. A grandparent’s voice note works just as well as a polished paragraph.',
-    step2Title: 'We shape it',
-    step2Text:
-      'Your recording is transcribed and gently retold in a warm, consistent memoir voice — with dates and photos kept intact.',
-    step3Title: 'Keep it',
-    step3Text:
-      'Every story lands on a shared timeline and family tree — and can be typeset into a printable hardcover book.',
-    featuresTitle: 'Everything a family chronicle needs',
-    featureVoiceTitle: 'Speak or write',
-    featureVoiceText:
-      'Record a voice message or type. Perfect for older relatives who’d rather talk than write.',
-    featureTimelineTitle: 'A living timeline',
-    featureTimelineText:
-      'Stories are dated and placed in order, so your family history reads as one continuous thread.',
-    featureTreeTitle: 'Tree & family tags',
-    featureTreeText:
-      'Build your family tree once. Stories tag themselves to the right people and branches automatically.',
-    featureBookTitle: 'A real printed book',
-    featureBookText:
-      'Turn chapters and photos into a typeset hardcover you can hold, gift, and pass on.',
-    featurePrivateTitle: 'Private by default',
-    featurePrivateText:
-      'Invite-only. Your memories stay with your family — no public feeds, no ads, no strangers.',
-    featureMemoirTitle: 'One warm voice',
+      'Share memories — typed or simply spoken. Familienwerk turns them into an ongoing family chronicle that reads like a real memoir. And, in the end, becomes a printed book.',
+    ctaPrimary: 'Start Familienwerk',
+    ctaSecondary: 'How it works',
+    heroTrust: 'From grandma to grandkid — everyone writes along.',
+    // — how it works —
+    howEyebrow: 'How it works',
+    howTitle: 'From a voice note to a chapter.',
+    howText:
+      'Just talk — Familienwerk transcribes it, places it in context, and writes a narrative in the voice of a family book. The original is kept forever.',
+    demoVoiceLabel: 'Voice note from Margarete · 4:12',
+    demoVoiceQuote: '“… and then we took the rowboat out — your grandpa couldn’t even swim …”',
+    demoArrow: 'becomes a story automatically',
+    demoTagSeason: 'Summer 1974',
+    demoStoryTitle: 'The Summer at Lake Constance',
+    demoStoryText:
+      'When Karl and Margarete put the old rowboat in the water in June 1974, no one could have guessed it would become a family tradition. Karl, who had never learned to swim, insisted on rowing —',
+    // — feature grid —
+    featuresTitle: 'Just tell it. Familienwerk does the rest.',
+    featuresSubtitle:
+      'Built for every generation — even the ones who never wanted to use an app.',
+    featureSpeakTitle: 'Just speak',
+    featureSpeakText:
+      'Record a voice note, done. Everything is transcribed automatically — grandma only has to talk.',
+    featureMemoirTitle: 'From rambling to memoir',
     featureMemoirText:
-      'Many contributors, one consistent memoir style — while every source and photo is credited and kept.',
-    closingTitle: 'Start your family’s chronicle today',
+      'Raw notes become a fully written narrative that sounds like a real family book. The original is kept forever.',
+    featurePhotosTitle: 'Photos belong in it',
+    featurePhotosText:
+      'Every story carries pictures — as a banner, in a grid, or full-bleed. The old albums finally get context.',
+    featureChatTitle: 'Refine in conversation',
+    featureChatText:
+      'No forms: you revise and expand stories in chat — “make the opening warmer”, “ask Dad about the year”.',
+    // — timeline & tree —
+    timelineTitle: 'A living timeline',
+    timelineText:
+      'Stories are dated and ordered — so your family history reads as one continuous thread, from the eldest to today.',
+    treeTitle: 'Family tree & tags',
+    treeText:
+      'Set up your family tree once. Stories sort themselves to the right people and branches automatically — filter the chronicle to one side of the family.',
+    // — the book (dark section) —
+    bookEyebrow: 'The finale',
+    bookTitle: 'In the end, a real book on the shelf.',
+    bookText:
+      'Chapters and photos are typeset automatically — you fine-tune the theme, cover, and layout in the live preview or by chat. Then: a quote, printing, hardcover. An heirloom, not an export.',
+    bookCta: 'Get started',
+    bookCoverFamily: 'The Müller Family',
+    bookCoverSubtitle: 'Stories from a hundred years',
+    bookCoverMeta: '1924 — 2026 · 214 pages',
+    // — privacy —
+    privacy1Title: 'Invite-only',
+    privacy1Text: 'Your chronicle belongs to your family. No public profile, no strangers.',
+    privacy2Title: 'Originals forever',
+    privacy2Text:
+      'Every voice note, every text, every photo is kept — each story shows who contributed what, and when.',
+    privacy3Title: 'Installable as an app',
+    privacy3Text:
+      'Runs in the browser, adds to your phone (PWA) — bilingual, German and English.',
+    // — closing CTA —
+    closingLine1: 'The best time to start was 30 years ago.',
+    closingLine2: 'The second best is today.',
     closingText:
-      'It takes one memory to begin. Add yours, invite the family, and watch the book grow.',
-    closingCta: 'Create your chronicle',
-    footerNote: 'Private · Secure · Just for your family',
+      'Start your chronicle and invite the family — the first story takes five minutes to tell.',
+    closingCta: 'Start Familienwerk',
+    // — footer —
+    footerTagline: 'Familienwerk · familienwerk.co',
+    footerImprint: 'Imprint',
+    footerPrivacy: 'Privacy',
+    // — FAQ (also emitted as FAQPage structured data for search & AI) —
+    faqEyebrow: 'FAQ',
+    faqTitle: 'Questions, answered',
+    faqItems: [
+      {
+        q: 'What is Familienwerk?',
+        a: 'A private, invite-only place where your family collects its stories — typed or spoken — and Familienwerk turns them into an ongoing family chronicle on a timeline, and ultimately a printed hardcover book.',
+      },
+      {
+        q: 'How do I tell a story?',
+        a: 'Just record a voice note or type a few lines. Familienwerk transcribes the recording automatically and rewrites it as a narrative in the voice of a family book — the original is kept forever.',
+      },
+      {
+        q: 'Are our stories private?',
+        a: 'Yes. Familienwerk is invite-only, with no public profiles and no ads. Your chronicle belongs to your family alone.',
+      },
+      {
+        q: 'Can older family members take part?',
+        a: 'That is exactly who it is built for. Anyone who would rather talk than type simply records a voice message — that is all it takes.',
+      },
+      {
+        q: 'Do we get a real printed book?',
+        a: 'Yes. Chapters and photos are typeset automatically into a hardcover you fine-tune in a live preview and order as a printed book — an heirloom, not an export.',
+      },
+      {
+        q: 'What languages and devices are supported?',
+        a: 'Familienwerk is bilingual in German and English. It runs in any browser and can be installed on your phone as an app (PWA).',
+      },
+    ],
   },
   auth: {
     welcomeBack: 'Welcome back',

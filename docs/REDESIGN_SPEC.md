@@ -6,6 +6,13 @@
 >
 > **Audience.** UI/UX design first (sections 1–5), engineering second (sections 6–9).
 >
+> **⚠️ Visual language superseded (2026-07).** §2.1–2.2 originally specified a blue/Inter
+> palette; the shipped brand is **Familienwerk green** — Werk Green `#12C24A` as the single
+> accent, **Space Grotesk** (headings) + **Outfit** (body), pill buttons, and the
+> "Familienstimmen" voice-bars logo. Those sections are updated below; the live source of
+> truth is `app/theme.ts` + `app/globals.css` (`--fw-*`). The structure/product sections
+> are unchanged.
+>
 > **Status.** Active spec. Design wireframes delivered; implementation pending.
 > **Roadmap & current step:** `~/.claude/plans/curious-gliding-dijkstra.md`. Most data-model
 > and product decisions are now resolved — see §8. Full data model + permissions in §6.
@@ -21,7 +28,7 @@ timeline.
 This redesign does four things:
 
 1. **Rebrand the visual language** from warm terracotta to a modern, clean
-   **blue / white / black** app aesthetic.
+   **green / paper / ink** app aesthetic (Werk Green `#12C24A`).
 2. **Restructure navigation** into a desktop app layout: a persistent **left
    vertical sidebar** + a **center content area**.
 3. **Replace story creation** (today: Write / Speak tabbed composer) with a
@@ -47,71 +54,75 @@ This redesign does four things:
 
 ## 2. Design language
 
-### 2.1 Color system — blue / white / black
+### 2.1 Color system — green / paper / ink
 
-Move from warm terracotta (`sienna`) to a cool, modern palette. **Blue** is the brand
-and primary action color; **white / near-white** are surfaces; **black / slate** is
-text and structure.
+Move from warm terracotta (`sienna`) to the **Familienwerk green** system. **Werk Green**
+is the *single* accent (primary action, active state, tags, links, record indicator);
+**paper / shade** are surfaces; **warm ink-green** is text and structure. Everything that
+isn't the one green stays paper/shade/ink so the content is the star.
 
-**Brand blue (primary).** A vivid, confident blue — think modern SaaS, not corporate
-navy. Target the `#2563EB` family (around Mantine/Tailwind "blue 600").
+**Werk Green (primary).** A vivid, alive green — warm and modern, "a work in progress".
 
 | Token | Hex | Use |
 |---|---|---|
-| `brand/50` | `#EFF4FF` | tinted backgrounds, hover wash |
-| `brand/100` | `#DBE6FE` | selected nav item background, soft chips |
-| `brand/200` | `#BFD3FE` | borders on tinted surfaces |
-| `brand/300` | `#93B4FD` | disabled primary, subtle accents |
-| `brand/400` | `#609AFA` | hover for secondary blue elements |
-| `brand/500` | `#3B82F6` | links, active icons |
-| `brand/600` | `#2563EB` | **primary buttons, brand, focus ring** |
-| `brand/700` | `#1D4ED8` | primary button hover/pressed |
-| `brand/800` | `#1E40AF` | high-contrast accents on light |
-| `brand/900` | `#1E3A8A` | deepest brand, rare |
+| `brand/0` | `#E9FAE5` | Green Tint — chips, selection, light badges |
+| `brand/1` | `#C6F5D5` | soft fills |
+| `brand/2` | `#97ECB2` | borders on tinted surfaces |
+| `brand/3` | `#5FE08C` | subtle accents |
+| `brand/4` | `#33D26E` | — |
+| `brand/5` | `#1CC957` | — |
+| `brand/6` | `#12C24A` | **primary buttons, brand, active nav, focus ring** |
+| `brand/7` | `#0FA03D` | primary button hover/pressed |
+| `brand/8` | `#0C8038` | Deep Green — links, green text on light |
+| `brand/9` | `#0A6B2E` | deepest brand, rare |
 
-**Neutrals (white → black).** Cool-gray ramp so neutrals feel related to the blue.
+Plus **Lime `#7BE84B`** — highlights on dark surfaces only (e.g. the dark "book" section);
+not part of the ramp.
+
+**Neutrals (warm ink-green ramp, paper → ink).** Greenish grays so neutrals relate to the green.
 
 | Token | Hex | Use |
 |---|---|---|
 | `surface/base` | `#FFFFFF` | cards, content surfaces |
-| `surface/subtle` | `#F8FAFC` | app background, sidebar |
-| `surface/muted` | `#F1F5F9` | hover rows, inset wells, chat assistant bubble |
-| `border/default` | `#E2E8F0` | hairlines, card borders |
-| `border/strong` | `#CBD5E1` | inputs, dividers needing weight |
-| `text/secondary` | `#64748B` | metadata, captions, dimmed |
-| `text/primary` | `#0F172A` | body + headings (near-black slate) |
-| `ink/black` | `#020617` | max-contrast headings, logo |
+| `surface/paper` | `#FBFCFB` | app background, sidebar |
+| `surface/shade` | `#F3F6F4` | hover rows, inset wells, chat assistant bubble, panels |
+| `border/default` | `#E6EBE8` | hairlines, card borders |
+| `border/strong` | `#CBD4CF` | inputs, dividers needing weight |
+| `text/muted` | `#6E7C75` | metadata, captions, dimmed |
+| `text/secondary` | `#4A554F` | body-muted |
+| `text/primary` | `#17211C` | Ink — body + headings |
 
-**Semantic.** `success #16A34A`, `warning #D97706`, `error #DC2626`, `info` = brand.
+**Semantic.** `success` = brand green (`#12C24A`/`#0C8038`), `warning #D97706`,
+`error #DC2626`, `info` = brand.
 
-**Status mapping** (story lifecycle, replaces today's badge colors):
-`draft` → neutral gray · `processing` → brand blue (animated) · `ready` → success green ·
+**Status mapping** (story lifecycle):
+`draft` → neutral gray · `processing` → brand green (animated) · `ready` → green ·
 `failed` → error red.
 
-> **Mantine v9 implementation.** Replace the `sienna` tuple in `app/theme.ts` with a
-> `brand` tuple (indices 0–9 = the 50–900 above), set `primaryColor: 'brand'`,
-> `primaryShade: 6`. **Light-mode only** (decided) — black is text/structure on light
-> surfaces; no dark theme in scope.
+> **Mantine v9 implementation.** The `brand` tuple in `app/theme.ts` is the green ramp
+> (indices 0–9 above), `primaryColor: 'brand'`, `primaryShade: 6`; the `slate` tuple is
+> the warm ink-green neutrals. Buttons are pills (`Button.defaultProps.radius = 999`).
+> **Light-mode only.** Tokens are also exposed as `--fw-*` CSS variables in `app/globals.css`.
 >
 > ```ts
 > const brand: MantineColorsTuple = [
->   '#EFF4FF','#DBE6FE','#BFD3FE','#93B4FD','#609AFA',
->   '#3B82F6','#2563EB','#1D4ED8','#1E40AF','#1E3A8A',
+>   '#e9fae5','#c6f5d5','#97ecb2','#5fe08c','#33d26e',
+>   '#1cc957','#12c24a','#0fa03d','#0c8038','#0a6b2e',
 > ];
 > ```
 
 ### 2.2 Typography
 
-**Decision: fully modern sans everywhere** — drop the Georgia serif headings and the
-memoir-book feel entirely. One typeface family across chrome, chat, cards, *and* the
-story reading view, for a clean, consistent app look.
+**Decision: fully modern sans everywhere** — no Georgia serif headings, no memoir-book
+serif. Two families for a clean, consistent app look:
 
-- **UI + reading:** `Inter` (or system `-apple-system, Segoe UI, Roboto…` as fallback),
-  used everywhere including long memoir bodies.
+- **Space Grotesk** — wordmark, headings, titles (weight 600, ~−2% letter-spacing).
+- **Outfit** — body & UI everywhere else, including long memoir bodies (400 / 500;
+  friendly-geometric and very legible for older family members; UI text ≥13px).
 - **Reading view tuning:** the story body still gets generous reading ergonomics —
-  ~18px / 1.7 line-height, max ~68ch measure — just in sans, not serif.
+  ~18px / 1.7 line-height, max ~68ch measure — in Outfit, not serif.
 - **Scale:** `display 32/40` · `h1 24/32` · `h2 20/28` · `h3 16/24` ·
-  `body 15/24` · `small 13/20` · `caption 12/16`. Weights 400 / 500 / 600.
+  `body 15/24` · `small 13/20` · `caption 12/16`.
 
 ### 2.3 Shape, depth, motion
 
@@ -273,7 +284,7 @@ The current family is a **tree of people**. This screen has a few tabs:
 - **Account:** profile (name, avatar, email), **"My families"** list with the user's
   relationship role in each + quick switch, sign out.
 - **Auth screens** (login / signup / invite-accept): restyle to the new palette;
-  centered card on `surface/subtle`, brand blue primary button.
+  centered card on `surface/paper`, green pill primary button.
 
 ---
 
@@ -576,7 +587,7 @@ Rules that follow:
 
 ## 7. Component inventory for Claude Design
 
-Concrete components to design in the new blue/white/black system:
+Concrete components to design in the new green/paper/ink system:
 
 - **App frame:** left sidebar (expanded + collapsed rail), top bar, mobile bottom tab
   bar.
@@ -597,7 +608,7 @@ Concrete components to design in the new blue/white/black system:
 - **Family access & settings:** access row (account + access-role badge), invite modal,
   settings form (name / description / writing-style).
 - **Account & auth:** account page, "my families" list, login/signup/invite cards.
-- **Primitives:** buttons (primary blue / secondary / ghost / danger), inputs, badges
+- **Primitives:** buttons (primary green pill / secondary / ghost / danger), inputs, badges
   (status + role), avatars, tabs/segmented control, toasts, skeletons, dialogs.
 - **States everywhere:** empty, loading/streaming, error/retry, processing.
 
@@ -611,8 +622,8 @@ Concrete components to design in the new blue/white/black system:
    *Familienwerk*; a "family" is the group, the memoir is its collected stories.
 2. ✅ **Dark mode** — **light only** for v1. Black = text/structure on light surfaces;
    no dark theme in scope.
-3. ✅ **Reading typography** — **fully modern sans** (Inter) everywhere, including the
-   memoir reading view. No serif.
+3. ✅ **Reading typography** — **fully modern sans** (Space Grotesk + Outfit) everywhere,
+   including the memoir reading view. No serif.
 4. ✅ **Chat UI build** — **Mantine-native** components + Vercel AI SDK. One design
    system; `assistant-ui` rejected.
 5. ✅ **Family = sharing circle + tree** — nodes are **people** (incl. non-users),
@@ -643,7 +654,7 @@ Concrete components to design in the new blue/white/black system:
 
 ## 9. Suggested delivery phases
 
-1. **Design system & shell.** New blue/white/black theme (`app/theme.ts`), typography,
+1. **Design system & shell.** New green/paper/ink theme (`app/theme.ts`), typography,
    sidebar + top-bar app frame, family switcher, mobile bottom nav. *(No data changes.)*
 2. **Data model migration.** `families` rename; genealogy layer (`people`,
    `relationships`, `family_members`); access-only `memberships`; `story_families` +

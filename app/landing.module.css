@@ -1,0 +1,891 @@
+/* Familienwerk landing page — mobile-first; the desktop 2-column layouts kick in
+   at 48em (matches the app's `sm` breakpoint). Colors come from the brand tokens
+   in globals.css (--fw-*). Green is the only accent. */
+
+.page {
+  background: var(--fw-paper);
+  color: var(--fw-ink);
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+.wrap {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* ── Nav ─────────────────────────────────────────────────────── */
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 0;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-decoration: none;
+  color: var(--fw-ink);
+}
+
+.logoWord {
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+  color: var(--fw-ink);
+}
+
+.navRight {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.navLinks {
+  display: none;
+  align-items: center;
+  gap: 26px;
+}
+
+.navLink {
+  font-weight: 500;
+  font-size: 14px;
+  color: #4a554f;
+  text-decoration: none;
+}
+.navLink:hover {
+  color: var(--fw-green-deep);
+}
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+.btnPrimary,
+.btnGhost,
+.btnLime {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 600;
+  border-radius: 999px;
+  text-decoration: none;
+  cursor: pointer;
+  border: 0;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+.btnPrimary {
+  background: var(--fw-green);
+  color: #fff;
+}
+.btnPrimary:hover {
+  background: var(--fw-green-deep);
+  color: #fff;
+}
+.btnGhost {
+  background: transparent;
+  color: var(--fw-ink);
+  border: 1.5px solid rgba(0, 0, 0, 0.12);
+}
+.btnGhost:hover {
+  border-color: var(--fw-green);
+  color: var(--fw-green-deep);
+}
+.btnLime {
+  background: var(--fw-lime);
+  color: var(--fw-ink);
+}
+.btnLime:hover {
+  background: #fff;
+  color: var(--fw-ink);
+}
+.btnSm {
+  font-size: 13px;
+  padding: 10px 16px;
+}
+.btnMd {
+  font-size: 15px;
+  padding: 14px 24px;
+}
+
+/* ── Eyebrow / pills ─────────────────────────────────────────── */
+.eyebrow {
+  align-self: flex-start;
+  font-weight: 500;
+  font-size: 12px;
+  padding: 7px 14px;
+  border-radius: 99px;
+  background: var(--fw-green-tint);
+  color: var(--fw-green-deep);
+}
+.eyebrowDark {
+  background: rgba(123, 232, 75, 0.14);
+  color: var(--fw-lime);
+}
+
+.tag {
+  font-weight: 500;
+  font-size: 10.5px;
+  padding: 5px 10px;
+  border-radius: 99px;
+  background: var(--fw-green-tint);
+  color: var(--fw-green-deep);
+}
+.tagNeutral {
+  background: var(--fw-shade);
+  color: #5a655f;
+}
+
+/* ── Section headings ────────────────────────────────────────── */
+.h1 {
+  margin: 0;
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 36px;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+.h2 {
+  margin: 0;
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 26px;
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+.lead {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #4a554f;
+  text-wrap: pretty;
+}
+
+/* ── Hero ────────────────────────────────────────────────────── */
+.hero {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  align-items: center;
+  padding: 28px 0 24px;
+}
+.heroCopy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 20px;
+}
+.heroCtas {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+.trust {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.45);
+}
+.avatars {
+  display: flex;
+}
+.avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 9px;
+}
+.avatar + .avatar {
+  margin-left: -7px;
+}
+
+.heroArt {
+  width: 100%;
+  background: linear-gradient(180deg, #ebf8ea, #f7fbf6);
+  border-radius: 20px;
+  padding: 34px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box;
+}
+
+/* ── Section spacing ─────────────────────────────────────────── */
+.section {
+  padding: 40px 0;
+}
+
+/* ── How it works ────────────────────────────────────────────── */
+.how {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px 22px;
+  margin: 16px 0 40px;
+}
+.howCopy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+.voiceRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+.voiceIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--fw-green);
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.voiceLabel {
+  font-weight: 600;
+  font-size: 12.5px;
+  line-height: 1.3;
+}
+.voiceQuote {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: rgba(0, 0, 0, 0.5);
+}
+.arrowNote {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--fw-green-deep);
+}
+.arrowBadge {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--fw-green-tint);
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+  font-size: 10px;
+}
+.storyCard {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 10px 26px rgba(23, 33, 28, 0.08);
+}
+.storyBanner {
+  height: 110px;
+  background: repeating-linear-gradient(
+    45deg,
+    #f3f6f4,
+    #f3f6f4 8px,
+    #ecf1ee 8px,
+    #ecf1ee 16px
+  );
+  display: grid;
+  place-items: center;
+}
+.storyBannerLabel {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 10.5px;
+  color: rgba(0, 0, 0, 0.4);
+}
+.storyBody {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tagRow {
+  display: flex;
+  gap: 6px;
+}
+.storyTitle {
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 20px;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+}
+.storyText {
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: #4a554f;
+}
+
+/* ── Feature grid ────────────────────────────────────────────── */
+.featureHead {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+  max-width: 560px;
+}
+.featureGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.feature {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 16px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.featureTitle {
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 17px;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.featureText {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #4a554f;
+}
+
+/* ── Showcase (timeline + tree) ──────────────────────────────── */
+.showcase {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 40px 0 0;
+}
+.showCard {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 20px;
+  padding: 26px 22px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px;
+  align-items: center;
+}
+.showCopy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+.showTitle {
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.showText {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: #4a554f;
+  max-width: 420px;
+}
+
+/* timeline viz */
+.timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.timelineRail {
+  position: absolute;
+  left: 6px;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 2px;
+  background: #e3efe4;
+}
+.timelineRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.timelineDot {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--fw-green);
+  border: 3px solid var(--fw-green-tint);
+}
+.timelineDotNow {
+  background: var(--fw-lime);
+}
+.yearChip {
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--fw-green-deep);
+  padding: 9px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.09);
+  border-radius: 10px;
+  background: #fff;
+}
+.bar {
+  height: 8px;
+  max-width: 100%;
+  border-radius: 4px;
+  background: #e3e8e4;
+}
+
+/* tree viz */
+.tree {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.treeRow {
+  display: flex;
+  gap: 40px;
+}
+.treeStem {
+  width: 3px;
+  height: 20px;
+  background: #e3efe4;
+}
+.treeBeam {
+  width: 210px;
+  max-width: 60vw;
+  height: 3px;
+  background: #e3efe4;
+}
+.treeLeaves {
+  display: flex;
+  gap: 24px;
+}
+.treeNode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.treeAvatar {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: #fff;
+  display: grid;
+  place-items: center;
+}
+
+/* ── The book (dark) ─────────────────────────────────────────── */
+.book {
+  margin: 40px 0;
+  background: var(--fw-ink);
+  border-radius: 20px;
+  padding: 34px 26px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  align-items: center;
+}
+.bookCopy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+}
+.bookTitle {
+  margin: 0;
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 28px;
+  line-height: 1.13;
+  letter-spacing: -0.025em;
+  color: #fff;
+  text-wrap: balance;
+}
+.bookText {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.72);
+  max-width: 440px;
+}
+.bookCoverWrap {
+  justify-self: center;
+}
+.bookCover {
+  width: 220px;
+  height: 284px;
+  border-radius: 5px 13px 13px 5px;
+  background: var(--fw-green);
+  box-shadow: 18px 18px 46px rgba(0, 0, 0, 0.4);
+  position: relative;
+  padding: 26px 24px;
+  box-sizing: border-box;
+  border-left: 9px solid var(--fw-green-deep);
+}
+.bookCoverTitle {
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: #fff;
+  margin-top: 18px;
+  text-wrap: balance;
+}
+.bookCoverSub {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.85);
+  margin-top: 7px;
+}
+.bookCoverMeta {
+  position: absolute;
+  bottom: 24px;
+  left: 24px;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* ── Privacy ─────────────────────────────────────────────────── */
+.privacy {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+  padding: 10px 0 20px;
+}
+.privacyItem {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.privacyNum {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 10px;
+  background: var(--fw-green-tint);
+  display: grid;
+  place-items: center;
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--fw-green-deep);
+}
+.privacyTitle {
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.4;
+}
+.privacyText {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: #4a554f;
+}
+
+/* ── Closing CTA ─────────────────────────────────────────────── */
+.closing {
+  margin: 40px 0 0;
+  text-align: center;
+  padding: 44px 24px;
+  background: var(--fw-green-tint);
+  border-radius: 20px;
+}
+.closingTitle {
+  margin: 0 0 12px;
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 26px;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.closingText {
+  margin: 0 0 22px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: #4a554f;
+}
+
+/* ── FAQ ─────────────────────────────────────────────────────── */
+.faq {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 40px 0;
+}
+.faqHead {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.faqList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 760px;
+}
+.faqItem {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 14px;
+  padding: 2px 20px;
+}
+.faqQ {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 0;
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--fw-font-brand);
+  font-weight: 600;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--fw-ink);
+}
+.faqQ::-webkit-details-marker {
+  display: none;
+}
+.faqChevron {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--fw-green-deep);
+  transition: transform 0.2s ease;
+}
+.faqItem[open] .faqChevron {
+  transform: rotate(180deg);
+}
+.faqA {
+  margin: 0;
+  padding: 0 0 16px;
+  font-size: 14.5px;
+  line-height: 1.65;
+  color: #4a554f;
+}
+
+/* ── Footer ──────────────────────────────────────────────────── */
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 30px 0 40px;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.45);
+}
+.footerBrand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.footerLinks {
+  display: flex;
+  gap: 20px;
+}
+.footerLinks a {
+  color: rgba(0, 0, 0, 0.45);
+  text-decoration: none;
+}
+.footerLinks a:hover {
+  color: var(--fw-green-deep);
+}
+
+/* ══ Desktop (≥ 48em) ════════════════════════════════════════ */
+@media (min-width: 48em) {
+  .wrap {
+    padding: 0 40px;
+  }
+  .nav {
+    gap: 32px;
+    padding: 22px 0;
+  }
+  .navLinks {
+    display: flex;
+  }
+  .logoWord {
+    font-size: 18px;
+  }
+
+  .h1 {
+    font-size: 54px;
+    letter-spacing: -0.03em;
+  }
+  .h2 {
+    font-size: 34px;
+  }
+
+  .hero {
+    grid-template-columns: 1.05fr 1fr;
+    gap: 56px;
+    padding: 64px 0 80px;
+  }
+  .heroCopy {
+    gap: 24px;
+  }
+  .heroCtas {
+    flex-direction: row;
+    align-items: center;
+    width: auto;
+  }
+  .btnMd {
+    padding: 15px 26px;
+  }
+  .heroArt {
+    padding: 60px 30px;
+    gap: 14px;
+    border-radius: 24px;
+  }
+
+  .how {
+    display: grid;
+    grid-template-columns: 0.95fr 1.05fr;
+    gap: 52px;
+    padding: 50px 54px;
+    border-radius: 24px;
+    margin: 0 0 70px;
+    align-items: center;
+  }
+  .howCopy {
+    gap: 16px;
+  }
+
+  .featureHead .h2 {
+    font-size: 36px;
+  }
+  .featureGrid {
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  .feature {
+    padding: 26px;
+  }
+
+  .showcase {
+    gap: 24px;
+    margin: 60px 0 0;
+  }
+  .showCard {
+    grid-template-columns: 1fr 1fr;
+    gap: 52px;
+    padding: 46px 52px;
+    border-radius: 24px;
+  }
+  .showTitle {
+    font-size: 30px;
+  }
+  .showText {
+    font-size: 15.5px;
+  }
+  /* Copy sits on the right for the timeline, left for the tree (design). */
+  .showCardReverse .showCopy {
+    order: -1;
+  }
+  .yearChip {
+    padding: 9px 14px;
+  }
+
+  .book {
+    grid-template-columns: 1fr 380px;
+    gap: 56px;
+    padding: 60px 64px;
+    border-radius: 24px;
+    margin: 70px 0;
+  }
+  .bookTitle {
+    font-size: 40px;
+    line-height: 1.12;
+  }
+  .bookText {
+    font-size: 16px;
+  }
+  .bookCover {
+    width: 280px;
+    height: 360px;
+    padding: 34px 30px;
+    border-left-width: 10px;
+    box-shadow: 24px 24px 60px rgba(0, 0, 0, 0.4);
+  }
+  .bookCoverTitle {
+    font-size: 30px;
+    margin-top: 22px;
+  }
+  .bookCoverSub {
+    font-size: 13px;
+  }
+  .bookCoverMeta {
+    bottom: 30px;
+    left: 30px;
+    font-size: 11px;
+  }
+  /* On desktop the book CTA sits inside the copy column, not full-width below. */
+  .bookCtaMobile {
+    display: none;
+  }
+
+  .privacy {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    padding: 10px 0 30px;
+  }
+  .privacyTitle {
+    font-size: 15px;
+  }
+
+  .closing {
+    margin: 60px 0 0;
+    padding: 72px 40px;
+    border-radius: 24px;
+  }
+  .closingTitle {
+    font-size: 38px;
+  }
+  .closingText {
+    font-size: 16px;
+  }
+
+  .footer {
+    flex-direction: row;
+    align-items: center;
+    padding: 36px 0 44px;
+  }
+  .footerLinks {
+    margin-left: auto;
+  }
+}
+
+/* The book CTA that lives in the dark copy column is desktop-only; on mobile a
+   full-width one renders after the cover instead. */
+.bookCtaDesktop {
+  display: none;
+}
+@media (min-width: 48em) {
+  .bookCtaDesktop {
+    display: inline-flex;
+  }
+}
