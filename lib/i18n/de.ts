@@ -71,6 +71,8 @@ export const de: Dictionary = {
       'Eine einzige Erinnerung genügt zum Start. Füge deine hinzu, lade die Familie ein und sieh zu, wie das Buch wächst.',
     closingCta: 'Chronik erstellen',
     footerNote: 'Privat · Sicher · Nur für deine Familie',
+    footerImprint: 'Impressum',
+    footerPrivacy: 'Datenschutz',
   },
   auth: {
     welcomeBack: 'Willkommen zurück',

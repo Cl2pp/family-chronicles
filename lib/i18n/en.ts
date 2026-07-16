@@ -73,6 +73,8 @@ export const en = {
       'It takes one memory to begin. Add yours, invite the family, and watch the book grow.',
     closingCta: 'Create your chronicle',
     footerNote: 'Private · Secure · Just for your family',
+    footerImprint: 'Imprint',
+    footerPrivacy: 'Privacy',
   },
   auth: {
     welcomeBack: 'Welcome back',

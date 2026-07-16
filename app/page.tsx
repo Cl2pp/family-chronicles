@@ -12,6 +12,7 @@ import {
   Badge,
   ThemeIcon,
   Divider,
+  Anchor,
 } from '@mantine/core';
 import { getI18n } from '@/lib/i18n/server';
 import { getSession } from '@/lib/session';
@@ -214,10 +215,18 @@ export default async function Home() {
 
       <Container size="lg" py="xl">
         <Divider mb="md" />
-        <Group justify="space-between" wrap="wrap">
+        <Group justify="space-between" wrap="wrap" gap="sm">
           <Text size="sm" c="slate.5">
             Familienwerk
           </Text>
+          <Group gap="md" wrap="wrap">
+            <Anchor href="/impressum" size="sm" c="slate.5" underline="hover">
+              {h.footerImprint}
+            </Anchor>
+            <Anchor href="/datenschutz" size="sm" c="slate.5" underline="hover">
+              {h.footerPrivacy}
+            </Anchor>
+          </Group>
           <Text size="sm" c="slate.5">
             {h.footerNote}
           </Text>
