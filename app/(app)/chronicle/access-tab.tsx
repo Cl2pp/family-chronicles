@@ -20,6 +20,7 @@ import { notifications } from '@mantine/notifications';
 import { IconCopy, IconMailPlus } from '@tabler/icons-react';
 import type { AccessRole } from '@/lib/permissions';
 import { useI18n } from '@/lib/i18n/client';
+import { personFullName } from '@/lib/person-name';
 import { invite, linkMemberPersonAction, unlinkMemberPersonAction } from './actions';
 import type { InviteRow, MemberRow } from './types';
 import { initials } from './utils';
@@ -27,7 +28,8 @@ import { initials } from './utils';
 /** A person of the active chronicle's tree, for the link pickers. */
 export interface TreePersonOption {
   id: string;
-  displayName: string;
+  firstName: string;
+  familyName: string | null;
   userId: string | null;
 }
 
@@ -60,7 +62,7 @@ export function AccessTab({
 
   // Only tree people without an account can be linked ('' = not in the tree yet).
   const unlinkedPeople = treePeople.filter((p) => !p.userId);
-  const personOptions = unlinkedPeople.map((p) => ({ value: p.id, label: p.displayName }));
+  const personOptions = unlinkedPeople.map((p) => ({ value: p.id, label: personFullName(p) }));
 
   function openInvite() {
     form.reset();

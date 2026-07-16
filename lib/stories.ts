@@ -114,13 +114,13 @@ export async function listStoryPeople(storyId: string) {
   return db
     .select({
       id: people.id,
-      displayName: people.displayName,
+      firstName: people.firstName,
       familyName: people.familyName,
     })
     .from(storyPeople)
     .innerJoin(people, eq(storyPeople.personId, people.id))
     .where(eq(storyPeople.storyId, storyId))
-    .orderBy(asc(people.displayName));
+    .orderBy(asc(people.firstName));
 }
 
 /** Tag people in an existing story. Already-tagged people are skipped. */

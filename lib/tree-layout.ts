@@ -30,7 +30,7 @@
 
 export interface LayoutPerson {
   id: string;
-  displayName: string;
+  firstName: string;
   bornOn?: Date | string | null;
 }
 
@@ -105,7 +105,7 @@ export function layoutFamilyTree<E extends LayoutEdge>(
     const t = d.getTime();
     return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t;
   };
-  const nameOf = (id: string) => byId.get(id)?.displayName ?? '';
+  const nameOf = (id: string) => byId.get(id)?.firstName ?? '';
   const personCmp = (a: string, b: string) =>
     cmpNum(bornTime(a), bornTime(b)) ||
     nameOf(a).localeCompare(nameOf(b)) ||

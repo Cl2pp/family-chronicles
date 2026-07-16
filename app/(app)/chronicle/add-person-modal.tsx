@@ -34,7 +34,7 @@ export function AddPersonModal({
   const [pending, startTransition] = useTransition();
   const form = useForm({
     initialValues: {
-      displayName: '',
+      firstName: '',
       familyName: '',
       birthFamilyName: '',
       gender: null as Gender | null,
@@ -42,7 +42,7 @@ export function AddPersonModal({
       died: EMPTY_DATE,
     },
     validate: {
-      displayName: (v) => (v.trim() ? null : t.person.nameRequired),
+      firstName: (v) => (v.trim() ? null : t.person.nameRequired),
     },
   });
 
@@ -60,7 +60,7 @@ export function AddPersonModal({
       try {
         await addPersonAction({
           chronicleId,
-          displayName: values.displayName,
+          firstName: values.firstName,
           familyName: values.familyName || undefined,
           birthFamilyName: values.birthFamilyName || undefined,
           gender: values.gender,
@@ -89,7 +89,7 @@ export function AddPersonModal({
             label={t.person.name}
             placeholder={t.person.fullNamePlaceholder}
             required
-            {...form.getInputProps('displayName')}
+            {...form.getInputProps('firstName')}
           />
           <TextInput
             label={t.person.familyName}

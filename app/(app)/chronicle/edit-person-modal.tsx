@@ -35,7 +35,7 @@ export function EditPersonModal({
   const [pending, startTransition] = useTransition();
   const form = useForm({
     initialValues: {
-      displayName: '',
+      firstName: '',
       familyName: '',
       birthFamilyName: '',
       gender: null as Gender | null,
@@ -43,14 +43,14 @@ export function EditPersonModal({
       died: EMPTY_DATE,
     },
     validate: {
-      displayName: (v) => (v.trim() ? null : t.person.nameRequired),
+      firstName: (v) => (v.trim() ? null : t.person.nameRequired),
     },
   });
 
   useEffect(() => {
     if (opened && person) {
       form.setValues({
-        displayName: person.displayName,
+        firstName: person.firstName,
         familyName: person.familyName ?? '',
         birthFamilyName: person.birthFamilyName ?? '',
         gender: person.gender,
@@ -72,7 +72,7 @@ export function EditPersonModal({
         await editPersonAction({
           chronicleId,
           personId: person.id,
-          displayName: values.displayName,
+          firstName: values.firstName,
           familyName: values.familyName.trim() || null,
           birthFamilyName: values.birthFamilyName.trim() || null,
           gender: values.gender,
@@ -98,7 +98,7 @@ export function EditPersonModal({
             label={t.person.name}
             placeholder={t.person.fullNamePlaceholder}
             required
-            {...form.getInputProps('displayName')}
+            {...form.getInputProps('firstName')}
           />
           <TextInput
             label={t.person.familyName}

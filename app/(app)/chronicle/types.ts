@@ -43,7 +43,7 @@ export interface InviteRow {
 
 export interface PersonRow {
   id: string;
-  displayName: string;
+  firstName: string;
   familyName: string | null;
   birthFamilyName: string | null;
   userId: string | null;

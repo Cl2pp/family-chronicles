@@ -46,8 +46,7 @@ const IMAGE_DIR = process.env.SEED_IMAGE_DIR ?? path.join(process.cwd(), 'seed-d
 
 interface PersonSpec {
   key: string;
-  displayName: string;
-  givenName: string;
+  firstName: string;
   familyName: string;
   birthFamilyName?: string;
   gender: 'male' | 'female';
@@ -63,8 +62,7 @@ interface PersonSpec {
 const PEOPLE: PersonSpec[] = [
   {
     key: 'heinrich',
-    displayName: 'Heinrich Müller',
-    givenName: 'Heinrich',
+    firstName: 'Heinrich',
     familyName: 'Müller',
     gender: 'male',
     born: [1921, 3, 4],
@@ -76,8 +74,7 @@ const PEOPLE: PersonSpec[] = [
   },
   {
     key: 'kaethe',
-    displayName: 'Käthe Müller',
-    givenName: 'Käthe',
+    firstName: 'Käthe',
     familyName: 'Müller',
     birthFamilyName: 'Vogel',
     gender: 'female',
@@ -89,8 +86,7 @@ const PEOPLE: PersonSpec[] = [
   },
   {
     key: 'otto',
-    displayName: 'Otto Brandt',
-    givenName: 'Otto',
+    firstName: 'Otto',
     familyName: 'Brandt',
     gender: 'male',
     born: 1919,
@@ -101,8 +97,7 @@ const PEOPLE: PersonSpec[] = [
   },
   {
     key: 'elfriede',
-    displayName: 'Elfriede Brandt',
-    givenName: 'Elfriede',
+    firstName: 'Elfriede',
     familyName: 'Brandt',
     birthFamilyName: 'Krüger',
     gender: 'female',
@@ -114,8 +109,7 @@ const PEOPLE: PersonSpec[] = [
   },
   {
     key: 'werner',
-    displayName: 'Werner Müller',
-    givenName: 'Werner',
+    firstName: 'Werner',
     familyName: 'Müller',
     gender: 'male',
     born: [1948, 6, 2],
@@ -126,8 +120,7 @@ const PEOPLE: PersonSpec[] = [
   },
   {
     key: 'ingrid',
-    displayName: 'Ingrid Müller',
-    givenName: 'Ingrid',
+    firstName: 'Ingrid',
     familyName: 'Müller',
     birthFamilyName: 'Brandt',
     gender: 'female',
@@ -138,8 +131,7 @@ const PEOPLE: PersonSpec[] = [
   },
   {
     key: 'martin',
-    displayName: 'Martin Müller',
-    givenName: 'Martin',
+    firstName: 'Martin',
     familyName: 'Müller',
     gender: 'male',
     born: [1978, 5, 11],
@@ -150,8 +142,7 @@ const PEOPLE: PersonSpec[] = [
   },
   {
     key: 'sabine',
-    displayName: 'Sabine Müller',
-    givenName: 'Sabine',
+    firstName: 'Sabine',
     familyName: 'Müller',
     birthFamilyName: 'Weber',
     gender: 'female',
@@ -162,8 +153,7 @@ const PEOPLE: PersonSpec[] = [
   },
   {
     key: 'claudia',
-    displayName: 'Claudia Hoffmann',
-    givenName: 'Claudia',
+    firstName: 'Claudia',
     familyName: 'Hoffmann',
     birthFamilyName: 'Müller',
     gender: 'female',
@@ -174,8 +164,7 @@ const PEOPLE: PersonSpec[] = [
   },
   {
     key: 'lena',
-    displayName: 'Lena Müller',
-    givenName: 'Lena',
+    firstName: 'Lena',
     familyName: 'Müller',
     gender: 'female',
     born: [2010, 8, 30],
@@ -596,7 +585,7 @@ async function getImage(file: string, prompt: string, width: number, height: num
 async function pregenerateImages() {
   const jobs: Array<() => Promise<unknown>> = [];
   for (const p of PEOPLE) {
-    jobs.push(() => getImage(`avatar-${p.key}`, `${p.avatarPrompt} Square head-and-shoulders crop.`, 512, 512, p.displayName));
+    jobs.push(() => getImage(`avatar-${p.key}`, `${p.avatarPrompt} Square head-and-shoulders crop.`, 512, 512, `${p.firstName} ${p.familyName}`));
   }
   for (const s of STORIES) {
     for (const photo of s.photos) {
@@ -667,22 +656,28 @@ async function main() {
   /* People + tree */
   const personIds = new Map<string, string>();
   for (const spec of PEOPLE) {
+    const fullName = `${spec.firstName} ${spec.familyName}`;
     let personId: string;
     if (spec.isSelf) {
-      personId = await ensurePersonForUser({ userId: u.id, name: spec.displayName });
+      personId = await ensurePersonForUser({ userId: u.id, name: spec.firstName });
     } else {
       const [existing] = await db
         .select({ id: people.id })
         .from(people)
-        .where(and(eq(people.displayName, spec.displayName), eq(people.createdBy, u.id)))
+        .where(
+          and(
+            eq(people.firstName, spec.firstName),
+            eq(people.familyName, spec.familyName),
+            eq(people.createdBy, u.id),
+          ),
+        )
         .limit(1);
       personId = existing?.id ?? '';
     }
     const born = toDate(spec.born);
     const died = toDate(spec.died);
     const values = {
-      displayName: spec.displayName,
-      givenName: spec.givenName,
+      firstName: spec.firstName,
       familyName: spec.familyName,
       birthFamilyName: spec.birthFamilyName ?? null,
       gender: spec.gender,
@@ -706,12 +701,12 @@ async function main() {
 
     const [row] = await db.select({ avatar: people.avatarS3Key }).from(people).where(eq(people.id, personId)).limit(1);
     if (!row?.avatar) {
-      const buf = await getImage(`avatar-${spec.key}`, `${spec.avatarPrompt} Square head-and-shoulders crop.`, 512, 512, spec.displayName);
+      const buf = await getImage(`avatar-${spec.key}`, `${spec.avatarPrompt} Square head-and-shoulders crop.`, 512, 512, fullName);
       const key = `avatars/demo-${spec.key}.jpg`;
       await putObjectBuffer(key, buf, 'image/jpeg');
       await db.update(people).set({ avatarS3Key: key, updatedAt: new Date() }).where(eq(people.id, personId));
     }
-    console.log(`person ready: ${spec.displayName}`);
+    console.log(`person ready: ${fullName}`);
   }
 
   for (const edge of EDGES) {

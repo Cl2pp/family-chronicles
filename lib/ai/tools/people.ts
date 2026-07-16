@@ -13,6 +13,7 @@ import {
   type PersonPatch,
 } from '@/lib/people';
 import { parsePartialDate, partsToEventDate } from '@/lib/dates';
+import { personFullName } from '@/lib/person-name';
 import { defineTool } from './types';
 import { ensureContributor, resolvePerson } from './util';
 
@@ -56,7 +57,7 @@ export const addPersonTool = defineTool({
     "Add a person to the active chronicle's tree. Optionally connect them to someone already in the " +
     'tree via relateTo. Check get_family_tree first if unsure who already exists. Contributor access required.',
   schema: z.object({
-    displayName: z
+    firstName: z
       .string()
       .min(1)
       .describe(
@@ -83,11 +84,11 @@ export const addPersonTool = defineTool({
     const gate = await ensureContributor(ctx);
     if ('error' in gate) return { ok: false, error: gate.error };
 
-    const displayName = args.displayName.trim();
-    if (!displayName) return { ok: false, error: 'A name is required.' };
+    const firstName = args.firstName.trim();
+    if (!firstName) return { ok: false, error: 'A first name is required.' };
 
     // Resolve the relative up-front so we fail before creating an orphan on a bad reference.
-    let relative: { id: string; displayName: string } | null = null;
+    let relative: { id: string; firstName: string; familyName: string | null } | null = null;
     if (args.relateTo) {
       const found = await resolvePerson(gate.chronicleId, args.relateTo.name);
       if ('error' in found) return { ok: false, error: found.error };
@@ -100,7 +101,7 @@ export const addPersonTool = defineTool({
     if ('error' in died) return { ok: false, error: died.error };
 
     const person = await createPerson({
-      displayName,
+      firstName,
       familyName: args.familyName?.trim() || null,
       birthFamilyName: args.birthFamilyName?.trim() || null,
       gender: args.gender ?? null,
@@ -119,17 +120,18 @@ export const addPersonTool = defineTool({
         ...edgeForRelation(args.relateTo.relation, person.id, relative.id),
         createdBy: ctx.userId,
       });
-      detail = `${args.relateTo.relation} of ${relative.displayName}`;
+      detail = `${args.relateTo.relation} of ${personFullName(relative)}`;
     }
 
+    const fullName = personFullName(person);
     const bornYear = born.date?.getUTCFullYear();
     const diedYear = died.date?.getUTCFullYear();
     const years = bornYear || diedYear ? ` (${bornYear ?? ''}${diedYear ? `–${diedYear}` : ''})` : '';
     return {
       ok: true,
-      message: `Added ${displayName}${years} to the tree${detail ? `, as ${detail}` : ''}.`,
+      message: `Added ${fullName}${years} to the tree${detail ? `, as ${detail}` : ''}.`,
       receipt: {
-        label: `Added ${displayName}${years}`,
+        label: `Added ${fullName}${years}`,
         detail,
         undo: { kind: 'person', personId: person.id },
       },
@@ -164,12 +166,12 @@ export const relatePeopleTool = defineTool({
     const edge = edgeForRelation(args.relation, subject.person.id, relative.person.id);
     await connectPeople({ ...edge, createdBy: ctx.userId });
 
-    const detail = `${args.relation} of ${relative.person.displayName}`;
+    const detail = `${args.relation} of ${personFullName(relative.person)}`;
     return {
       ok: true,
-      message: `Linked ${subject.person.displayName} as ${detail}.`,
+      message: `Linked ${personFullName(subject.person)} as ${detail}.`,
       receipt: {
-        label: `Linked ${subject.person.displayName}`,
+        label: `Linked ${personFullName(subject.person)}`,
         detail,
         undo: { kind: 'relationship', relType: edge.type, from: edge.personFromId, to: edge.personToId },
       },
@@ -200,11 +202,11 @@ export const unrelatePeopleTool = defineTool({
     const edge = edgeForRelation(args.relation, subject.person.id, relative.person.id);
     await removeRelationship(edge);
 
-    const detail = `${args.relation} of ${relative.person.displayName}`;
+    const detail = `${args.relation} of ${personFullName(relative.person)}`;
     return {
       ok: true,
-      message: `Removed the link: ${subject.person.displayName} is no longer ${detail}.`,
-      receipt: { label: `Unlinked ${subject.person.displayName}`, detail: `no longer ${detail}` },
+      message: `Removed the link: ${personFullName(subject.person)} is no longer ${detail}.`,
+      receipt: { label: `Unlinked ${personFullName(subject.person)}`, detail: `no longer ${detail}` },
     };
   },
 });
@@ -247,8 +249,8 @@ export const editPersonTool = defineTool({
     const patch: PersonPatch = {};
     if (args.newName != null) {
       const trimmed = args.newName.trim();
-      if (!trimmed) return { ok: false, error: 'The new name cannot be empty.' };
-      patch.displayName = trimmed;
+      if (!trimmed) return { ok: false, error: 'The new first name cannot be empty.' };
+      patch.firstName = trimmed;
     }
     if (args.familyName !== undefined) patch.familyName = args.familyName?.trim() || null;
     if (args.birthFamilyName !== undefined) {
@@ -272,11 +274,16 @@ export const editPersonTool = defineTool({
     }
 
     await updatePerson(found.person.id, patch);
-    const label = patch.displayName ?? found.person.displayName;
+    const before = personFullName(found.person);
+    const after = personFullName({
+      firstName: patch.firstName ?? found.person.firstName,
+      familyName: patch.familyName !== undefined ? patch.familyName : found.person.familyName,
+    });
+    const changed = after !== before;
     return {
       ok: true,
-      message: `Updated ${found.person.displayName}${patch.displayName ? ` (now ${patch.displayName})` : ''}.`,
-      receipt: { label: `Updated ${label}` },
+      message: `Updated ${before}${changed ? ` (now ${after})` : ''}.`,
+      receipt: { label: `Updated ${changed ? after : before}` },
     };
   },
 });
@@ -300,18 +307,19 @@ export const deletePersonTool = defineTool({
 
     const person = await getPerson(found.person.id);
     if (!person) return { ok: false, error: `"${args.name}" is not in this chronicle anymore.` };
+    const fullName = personFullName(person);
     if (person.userId) {
-      return { ok: false, error: `${person.displayName} is linked to an app account and cannot be deleted.` };
+      return { ok: false, error: `${fullName} is linked to an app account and cannot be deleted.` };
     }
     if (!(await isPersonInChronicle(gate.chronicleId, person.id))) {
-      return { ok: false, error: `${person.displayName} is not in this chronicle.` };
+      return { ok: false, error: `${fullName} is not in this chronicle.` };
     }
 
     await deletePerson(person.id);
     return {
       ok: true,
-      message: `Removed ${person.displayName} from the tree.`,
-      receipt: { label: `Removed ${person.displayName} from the tree` },
+      message: `Removed ${fullName} from the tree.`,
+      receipt: { label: `Removed ${fullName} from the tree` },
     };
   },
 });
@@ -332,12 +340,13 @@ export const getFamilyTreeTool = defineTool({
       };
     }
     const tree = await getTreeForChronicle(ctx.activeChronicleId);
-    const nameOf = new Map(tree.people.map((p) => [p.id, p.displayName]));
+    const nameOf = new Map(tree.people.map((p) => [p.id, personFullName(p)]));
     return {
       ok: true,
       message: JSON.stringify({
         people: tree.people.map((p) => ({
-          name: p.displayName,
+          name: personFullName(p),
+          firstName: p.firstName,
           familyName: p.familyName,
           birthFamilyName: p.birthFamilyName,
           familyTags: p.familyTags,

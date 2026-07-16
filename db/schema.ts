@@ -96,8 +96,8 @@ export const people = pgTable(
   'people',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    displayName: text('display_name').notNull(),
-    givenName: text('given_name'),
+    /** First name(s) only — the surname lives in familyName. Display = firstName + familyName. */
+    firstName: text('first_name').notNull(),
     /** Surname — the source of derived family tags (see lib/family-tags.ts). */
     familyName: text('family_name'),
     /** Surname at birth, when it differs from familyName (e.g. name taken at marriage). */

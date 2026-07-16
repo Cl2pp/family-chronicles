@@ -3,6 +3,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { db } from '@/db';
 import { chronicleMembers, memberships, people, relationships } from '@/db/schema';
 import { familyTagsByPerson } from '@/lib/family-tags';
+import { personFullName } from '@/lib/person-name';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -37,7 +38,7 @@ export async function ensurePersonForUser(
   const [created] = await tx
     .insert(people)
     .values({
-      displayName: input.name,
+      firstName: input.name,
       userId: input.userId,
       createdBy: input.userId,
     })
@@ -105,7 +106,7 @@ export async function linkUserToPerson(chronicleId: string, userId: string, pers
   }
   const existing = await db.query.people.findFirst({ where: eq(people.userId, userId) });
   if (existing) {
-    throw new Error(`This account is already linked to ${existing.displayName}.`);
+    throw new Error(`This account is already linked to ${personFullName(existing)}.`);
   }
   const linked = await linkUserToPersonIfFree(personId, userId);
   if (!linked) {
@@ -128,8 +129,7 @@ export async function unlinkUserPerson(chronicleId: string, userId: string) {
 }
 
 export interface NewPerson {
-  displayName: string;
-  givenName?: string | null;
+  firstName: string;
   familyName?: string | null;
   birthFamilyName?: string | null;
   gender?: Gender | null;
@@ -148,8 +148,7 @@ export async function createPerson(
     const [person] = await tx
       .insert(people)
       .values({
-        displayName: input.displayName,
-        givenName: input.givenName ?? null,
+        firstName: input.firstName,
         familyName: input.familyName ?? null,
         birthFamilyName: input.birthFamilyName ?? null,
         gender: input.gender ?? null,
@@ -184,7 +183,7 @@ export async function getPerson(id: string) {
 }
 
 export interface PersonPatch {
-  displayName?: string;
+  firstName?: string;
   familyName?: string | null;
   birthFamilyName?: string | null;
   gender?: Gender | null;
@@ -284,7 +283,7 @@ export async function connectPeople(input: {
       if (parents.length >= 2) {
         const child = await tx.query.people.findFirst({ where: eq(people.id, personToId) });
         throw new Error(
-          `${child?.displayName ?? 'This person'} already has two parents — remove one of the existing parent links first.`,
+          `${child ? personFullName(child) : 'This person'} already has two parents — remove one of the existing parent links first.`,
         );
       }
     }
@@ -303,7 +302,7 @@ export async function connectPeople(input: {
 
 export interface TreePerson {
   id: string;
-  displayName: string;
+  firstName: string;
   familyName: string | null;
   birthFamilyName: string | null;
   userId: string | null;
@@ -354,7 +353,7 @@ async function getTreeForChronicles(chronicleIds: string[]): Promise<FamilyTree>
   const personRows = await db
     .select({
       id: people.id,
-      displayName: people.displayName,
+      firstName: people.firstName,
       familyName: people.familyName,
       birthFamilyName: people.birthFamilyName,
       userId: people.userId,
@@ -406,7 +405,7 @@ export async function listChroniclePeople(chronicleId: string) {
   return db
     .select({
       id: people.id,
-      displayName: people.displayName,
+      firstName: people.firstName,
       familyName: people.familyName,
       birthFamilyName: people.birthFamilyName,
       userId: people.userId,
@@ -417,6 +416,6 @@ export async function listChroniclePeople(chronicleId: string) {
     .from(chronicleMembers)
     .innerJoin(people, eq(chronicleMembers.personId, people.id))
     .where(eq(chronicleMembers.chronicleId, chronicleId))
-    .orderBy(people.displayName);
+    .orderBy(people.firstName);
 }
 

@@ -1,6 +1,7 @@
 import { getMembership } from '@/lib/chronicles';
 import { listChroniclePeople } from '@/lib/people';
 import { findPersonByName } from '@/lib/person-match';
+import { personFullName } from '@/lib/person-name';
 import { canContribute, canManage, type AccessRole } from '@/lib/permissions';
 import type { ToolContext } from './types';
 
@@ -49,7 +50,7 @@ export async function resolvePerson(
   const result = findPersonByName(people, name);
   if ('person' in result) return { person: result.person };
   if (result.error === 'ambiguous') {
-    const names = result.candidates.map((c) => c.displayName).join(', ');
+    const names = result.candidates.map((c) => personFullName(c)).join(', ');
     return { error: `"${name}" could mean several people (${names}) — ask which one is meant.` };
   }
   return { error: `No one named "${name}" is in this chronicle's tree yet.` };
