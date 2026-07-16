@@ -54,13 +54,14 @@ MinIO console: http://localhost:9001 (minioadmin / minioadmin).
 
 Deploy **two apps from this one repo/image**:
 
-- **web** — default command (`npm run start`), exposed on the domain.
-- **worker** — command overridden to `npm run worker`.
+- **web** — default role (`npm run start`), exposed on the domain.
+- **worker** — same image with `ROLE=worker` set, which switches `docker-entrypoint.sh` to
+  `npm run worker` (Coolify has no start-command field for Dockerfile apps, so the role is an env var).
 
 Both share the same environment variables (`DATABASE_URL`, `OPENROUTER_API_KEY`,
 `STYLING_MODEL`, `GROQ_API_KEY`, S3 credentials, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`).
-Run `npm run db:migrate` once on deploy to apply migrations. Coolify's reverse proxy handles
-the domain + TLS.
+The web container runs `npm run db:migrate` on startup to apply migrations. Coolify's reverse
+proxy handles the domain + TLS. See `INFRASTRUCTURE.md` for the full ops/deploy detail.
 
 **Object storage CORS.** Voice/photo uploads go straight from the browser to S3 via presigned
 URLs, so the bucket must allow cross-origin `PUT` (and `GET`) from your app's domain. Configure
