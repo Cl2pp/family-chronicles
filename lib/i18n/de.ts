@@ -207,6 +207,15 @@ export const de: Dictionary = {
     storyLanguageDescription:
       'Die Sprache, in der Geschichten für diese Chronik nacherzählt werden.',
     storyLanguageAuto: 'Wie erzählt (keine Übersetzung)',
+    storyAccess: 'Sichtbarkeit der Geschichten',
+    storyAccessDescription:
+      'Wer die Geschichten dieser Chronik lesen kann. Im Familien-Modus sehen Mitglieder nur Geschichten über sich selbst oder ihre enge Familie — plus alles, was sie selbst erzählt haben; Eigentümer sehen immer alles.',
+    storyAccessOpen: 'Alle in der Chronik',
+    storyAccessFamily: 'Nur enge Familie',
+    storyAccessUnlinkedWarning: (n: number) =>
+      n === 1
+        ? '1 Mitgliedskonto ist mit keiner Person im Stammbaum verknüpft — dieses Mitglied sieht dann nur seine eigenen Geschichten. Verknüpfe es zuerst auf der Stammbaum-Seite.'
+        : `${n} Mitgliedskonten sind mit keiner Person im Stammbaum verknüpft — diese Mitglieder sehen dann nur ihre eigenen Geschichten. Verknüpfe sie zuerst auf der Stammbaum-Seite.`,
     settingsSaved: 'Einstellungen gespeichert',
     couldNotSaveSettings: 'Einstellungen konnten nicht gespeichert werden',
     aboutTitle: 'Über',
@@ -418,6 +427,10 @@ export const de: Dictionary = {
     storyCount: (n: number) => (n === 1 ? '1 Geschichte' : `${n} Geschichten`),
     by: (name: string) => `Von ${name}`,
     addStory: 'Geschichte hinzufügen',
+    unlinkedTitle: 'Du bist noch nicht im Stammbaum',
+    unlinkedBody:
+      'Mindestens eine deiner Chroniken zeigt Geschichten nur der engen Familie. Bis dich ein Eigentümer im Stammbaum einträgt, siehst du nur die Geschichten, die du selbst erzählt hast.',
+    unlinkedDismiss: 'Ausblenden',
   },
   story: {
     backToStories: 'Zurück zu den Geschichten',
@@ -496,6 +509,10 @@ export const de: Dictionary = {
       backToBooks: 'Alle Bücher',
       chapters: 'Kapitel',
       chaptersHint: 'Die Geschichten in diesem Buch, in Lesereihenfolge.',
+      hiddenChapters: (n: number) =>
+        n === 1
+          ? 'Ein Kapitel dieses Buches ist eine Geschichte, auf die du keinen Zugriff hast. Nur wer alle Geschichten lesen kann, kann die Kapitel ändern oder das Buch bestellen.'
+          : `${n} Kapitel dieses Buches sind Geschichten, auf die du keinen Zugriff hast. Nur wer alle Geschichten lesen kann, kann die Kapitel ändern oder das Buch bestellen.`,
       moveUp: 'Nach oben',
       moveDown: 'Nach unten',
       removeStory: 'Aus dem Buch entfernen',
@@ -582,6 +599,9 @@ export const de: Dictionary = {
       preparing: 'Die Druckvorlage wird erstellt — das dauert ein bis zwei Minuten…',
       prepareFailedHint: 'Die Druckvorlage konnte nicht erstellt werden.',
       retry: 'Erneut versuchen',
+      hiddenChaptersTitle: 'Dieses Buch enthält Geschichten, die du nicht sehen kannst',
+      hiddenChaptersBody:
+        'Das gedruckte Buch enthält immer alle Kapitel — vorbereiten oder bestellen kann es daher nur, wer Zugriff auf alle seine Geschichten hat.',
     },
   },
   invite: {
@@ -593,6 +613,8 @@ export const de: Dictionary = {
     acceptedTitle: 'Willkommen!',
     acceptedLinkedText:
       'Du hast jetzt Zugriff auf die Chronik, und dein Platz im Stammbaum ist mit deinem Konto verknüpft.',
+    acceptedLinkFailedText:
+      'Du hast jetzt Zugriff auf die Chronik — aber dein Platz im Stammbaum konnte nicht automatisch verknüpft werden. Bitte einen Eigentümer, dein Konto im Zugriff-Tab zu verknüpfen.',
   },
   offline: {
     title: 'Du bist offline',

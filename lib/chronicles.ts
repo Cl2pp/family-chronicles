@@ -14,6 +14,9 @@ export function normalizeStoryLanguage(value: string | null | undefined): Locale
   return isLocale(value) ? value : null;
 }
 
+/** Who may read a chronicle's stories: every member, or close family only (lib/story-access.ts). */
+export type StoryAccessMode = 'open' | 'family';
+
 /** Chronicles the user belongs to (access), with their role. */
 export async function listChroniclesForUser(userId: string) {
   return db
@@ -23,6 +26,7 @@ export async function listChroniclesForUser(userId: string) {
       description: chronicles.description,
       styleGuide: chronicles.styleGuide,
       storyLanguage: chronicles.storyLanguage,
+      storyAccess: chronicles.storyAccess,
       role: memberships.accessRole,
       createdAt: chronicles.createdAt,
     })
@@ -125,6 +129,7 @@ export async function updateChronicle(
     description?: string | null;
     styleGuide?: string | null;
     storyLanguage?: string | null;
+    storyAccess?: StoryAccessMode;
   },
 ) {
   await db

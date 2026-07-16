@@ -30,7 +30,7 @@ export async function saveProposalAsStory(input: {
   const p = input.proposal;
   const title = p.title || 'Untitled story';
 
-  const existing = await listChronicleStoryTexts(input.chronicleId);
+  const existing = await listChronicleStoryTexts(input.chronicleId, input.userId);
   const duplicate = existing.find(
     (s) =>
       s.submittedBy === input.userId &&

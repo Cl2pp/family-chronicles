@@ -20,6 +20,7 @@ import {
 import { IconChevronDown, IconPlus } from '@tabler/icons-react';
 import { canManage, type AccessRole } from '@/lib/permissions';
 import { useI18n } from '@/lib/i18n/client';
+import type { StoryAccessMode } from '@/lib/chronicles';
 import { ChronicleSettingsForm } from './chronicle-settings-form';
 
 export interface ChronicleRow {
@@ -28,6 +29,9 @@ export interface ChronicleRow {
   description: string | null;
   styleGuide: string | null;
   storyLanguage: string | null;
+  storyAccess: StoryAccessMode;
+  /** Member accounts without a tree person (drives the 'family'-mode warning). */
+  unlinkedMemberCount: number;
   role: AccessRole;
   createdLabel: string;
 }
@@ -155,6 +159,8 @@ export function ChroniclesCard({
                       description={chronicle.description ?? ''}
                       styleGuide={chronicle.styleGuide ?? ''}
                       storyLanguage={chronicle.storyLanguage}
+                      storyAccess={chronicle.storyAccess}
+                      unlinkedMemberCount={chronicle.unlinkedMemberCount}
                       canManage={canManage(chronicle.role)}
                     />
                   </Box>
