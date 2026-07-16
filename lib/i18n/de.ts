@@ -152,6 +152,15 @@ export const de: Dictionary = {
     alreadyHaveAccount: 'Schon ein Konto?',
     continueWithGoogle: 'Mit Google fortfahren',
     or: 'oder',
+    checkInboxAfterSignup:
+      'Willkommen! Wir haben dir einen Link zur Bestätigung deiner E-Mail-Adresse geschickt.',
+    verifyEmailTitle: 'Bestätige deine E-Mail-Adresse',
+    verifyEmailBody:
+      'Deine E-Mail-Adresse ist noch nicht bestätigt. Sieh in deinem Postfach nach dem Bestätigungslink oder fordere einen neuen an. Mit bestätigter Adresse kannst du dich auch mit Google anmelden.',
+    resendVerification: 'Link erneut senden',
+    verificationSent: 'Bestätigungs-E-Mail gesendet',
+    accountNotLinked:
+      'Es gibt bereits ein Konto mit dieser E-Mail-Adresse, aber sie ist noch nicht bestätigt. Melde dich mit deinem Passwort an und bestätige zuerst deine E-Mail – danach funktioniert die Google-Anmeldung.',
   },
   account: {
     title: 'Konto',

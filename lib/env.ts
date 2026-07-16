@@ -57,7 +57,10 @@ const schema = z.object({
   BOOK_MARGIN_EUR: z.coerce.number().default(15),
   /** Shown on the order screen — users email this address to request a printed book. */
   BOOK_ORDER_CONTACT_EMAIL: z.string().email().default('clemens@mtx.studio'),
-  /** smtp(s)://user:pass@host:port — used by lib/email.ts (dormant until a flow sends mail). */
+  /**
+   * smtp(s)://user:pass@host:port — used by lib/email.ts (verification emails;
+   * unset = emails are logged, not sent). Resend: smtps://resend:API_KEY@smtp.resend.com:465
+   */
   SMTP_URL: z.string().optional(),
   SMTP_FROM: z.string().default('Familienwerk <no-reply@familienwerk.co>'),
   /** System Chromium for the book renderer (set in Docker; empty = puppeteer's own). */

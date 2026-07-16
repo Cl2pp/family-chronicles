@@ -3,6 +3,7 @@
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
+  Alert,
   Anchor,
   Button,
   Paper,
@@ -23,6 +24,9 @@ function LoginForm() {
   const { t } = useI18n();
   const params = useSearchParams();
   const next = params.get('next') || '/chat';
+  // OAuth callback failures redirect here with ?error=… (see onAPIError in
+  // lib/auth.ts). account_not_linked is the one users can act on themselves.
+  const oauthError = params.get('error');
   const [loading, setLoading] = useState(false);
 
   const form = useForm({
@@ -53,6 +57,13 @@ function LoginForm() {
       <Title order={2} mb="lg">
         {t.auth.welcomeBack}
       </Title>
+      {oauthError && (
+        <Alert color="yellow" mb="md">
+          {oauthError === 'account_not_linked'
+            ? t.auth.accountNotLinked
+            : t.auth.signInFailed}
+        </Alert>
+      )}
       <form onSubmit={form.onSubmit(handleSubmit)}>
         <Stack>
           <TextInput
