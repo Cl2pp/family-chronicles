@@ -134,6 +134,13 @@ New-user registration is **disabled** in Coolify settings.
   so Traefik issues the Let's Encrypt cert.
 - **TLS** is a real Let's Encrypt cert, auto-provisioned and renewed by Coolify/Traefik (HTTP-01
   over port 80). HTTP redirects to HTTPS.
+- **Cloudflare proxy (orange cloud): leave it OFF (DNS-only).** Traefik gets its cert via
+  Let's Encrypt HTTP-01 on port 80, and an enabled proxy terminates TLS at Cloudflare's edge and
+  can intercept the ACME challenge, breaking issuance. If you later want Cloudflare's WAF/CDN,
+  enable the proxy **only after** HTTPS is confirmed working, and set **SSL/TLS mode to
+  "Full (strict)"** (never "Flexible" — it makes Cloudflare talk HTTP to the origin while the app
+  forces HTTPS, causing a redirect loop). Don't cache authenticated HTML, the service worker, or
+  the manifest. (R2 storage + its CORS origin are independent of the app-domain proxy setting.)
 - **Do not use `*.sslip.io` for HTTPS** — Let's Encrypt rate-limits that shared suffix, so cert
   issuance fails. (sslip.io works over plain HTTP only; we used a real domain instead.)
 
@@ -148,6 +155,8 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 | `DATABASE_URL` | Postgres connection | Coolify Postgres resource → internal URL |
 | `BETTER_AUTH_SECRET` | auth signing secret | `openssl rand -base64 32` |
 | `BETTER_AUTH_URL` | app's public origin | must equal the live domain: `https://familienwerk.co` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in (optional) | Google Cloud → OAuth 2.0 Web client. Redirect URI = `<BETTER_AUTH_URL>/api/auth/callback/google` → in prod `https://familienwerk.co/api/auth/callback/google` (and `http://localhost:3000/api/auth/callback/google` for dev). Both must be set to enable the provider server-side |
+| `NEXT_PUBLIC_GOOGLE_AUTH_ENABLED` | show the Google button | `true` to render "Continue with Google" on login/signup. Set together with the two `GOOGLE_*` secrets (it's build-time inlined, so a redeploy is needed to toggle) |
 | `OPENROUTER_API_KEY` | story styling | OpenRouter |
 | `STYLING_MODEL` | which LLM to style with | e.g. `anthropic/claude-opus-4-8` (swap for cost) |
 | `GROQ_API_KEY` | voice transcription | Groq (optional — voice only) |

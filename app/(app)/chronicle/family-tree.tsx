@@ -40,6 +40,7 @@ import {
 } from '@tabler/icons-react';
 import type { Gender, PersonRelation, TreeEdge, TreePerson } from '@/lib/people';
 import { layoutFamilyTree } from '@/lib/tree-layout';
+import { routeParentConnectors, type ParentBus } from '@/lib/tree-routing';
 import { birthSurname, personFullName } from '@/lib/person-name';
 import { formatEventDate } from '@/lib/dates';
 import type { DatePrecision } from '@/lib/stories';
@@ -132,7 +133,7 @@ interface Pos {
 interface Connectors {
   width: number;
   height: number;
-  parents: string[]; // svg path `d` strings
+  parents: ParentBus[];
   spouses: { x1: number; x2: number; y: number }[];
 }
 
@@ -165,9 +166,14 @@ export function FamilyTree({
   // Current pan/zoom, applied imperatively to `worldRef` so gestures never
   // trigger a React re-render. `didFit` guards the one-time initial fit;
   // `moved` suppresses the card-select click at the end of a drag/pinch.
+  // `interacted` tracks whether the user has panned/zoomed since the last fit:
+  // until they do, container/content resizes (fonts and flex settling after
+  // mount, window resizes) keep re-fitting the view instead of leaving the
+  // tree at a stale — possibly MIN_ZOOM-clamped — initial fit.
   const view = useRef({ scale: 1, x: 0, y: 0 });
   const didFitRef = useRef(false);
   const movedRef = useRef(false);
+  const interactedRef = useRef(false);
   const [connectors, setConnectors] = useState<Connectors | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [linkRelation, setLinkRelation] = useState<PersonRelation>('parent');
@@ -186,6 +192,11 @@ export function FamilyTree({
     () => layoutFamilyTree(people, edges, { cardWidth: CARD_WIDTH, hGap: 24 }),
     [people, edges],
   );
+  const rowIndexOf = useMemo(() => {
+    const m = new Map<string, number>();
+    rows.forEach((row, r) => row.ids.forEach((id) => m.set(id, r)));
+    return m;
+  }, [rows]);
 
   const measure = useCallback(() => {
     const world = worldRef.current;
@@ -212,48 +223,24 @@ export function FamilyTree({
       });
     }
 
-    const parents: string[] = [];
     const spouses: { x1: number; x2: number; y: number }[] = [];
-    const parentPosOfChild = new Map<string, Pos[]>();
     for (const e of validEdges) {
+      if (e.type !== 'spouse') continue;
       const a = pos.get(e.from);
       const b = pos.get(e.to);
       if (!a || !b) continue;
-      if (e.type === 'parent') {
-        const arr = parentPosOfChild.get(e.to) ?? [];
-        arr.push(a);
-        parentPosOfChild.set(e.to, arr);
-      } else {
-        const [l, r] = a.cx <= b.cx ? [a, b] : [b, a];
-        const y = (l.midY + r.midY) / 2;
-        spouses.push({ x1: l.right, x2: r.left, y });
-      }
+      const [l, r] = a.cx <= b.cx ? [a, b] : [b, a];
+      spouses.push({ x1: l.right, x2: r.left, y: (l.midY + r.midY) / 2 });
     }
 
-    // Parent connectors. When both parents sit side by side, drop ONE line from
-    // the middle of the couple (the spouse bar) — two separate elbows read as if
-    // the child descended from several couples at once.
-    for (const [childId, pps] of parentPosOfChild) {
-      const child = pos.get(childId);
-      if (!child) continue;
-      // Rows are top-aligned, so compare tops: cards in the same row can have
-      // different heights (born-surname line, life span), which shifts midY.
-      const sideBySide =
-        pps.length === 2 &&
-        Math.abs(pps[0].top - pps[1].top) < 4 &&
-        Math.abs(pps[0].cx - pps[1].cx) < CARD_WIDTH * 2;
-      if (sideBySide) {
-        const x = (pps[0].cx + pps[1].cx) / 2;
-        const startY = (pps[0].midY + pps[1].midY) / 2;
-        const busY = (Math.max(pps[0].bottom, pps[1].bottom) + child.top) / 2;
-        parents.push(`M ${x} ${startY} V ${busY} H ${child.cx} V ${child.top}`);
-      } else {
-        for (const p of pps) {
-          const busY = (p.bottom + child.top) / 2;
-          parents.push(`M ${p.cx} ${p.bottom} V ${busY} H ${child.cx} V ${child.top}`);
-        }
-      }
-    }
+    // Parent connectors: one sibling bus per couple (or lone parent), with
+    // overlapping rails pushed onto separate lanes — see lib/tree-routing.ts.
+    const parents = routeParentConnectors({
+      positions: pos,
+      edges: validEdges,
+      rowIndexOf,
+      cardWidth: CARD_WIDTH,
+    });
 
     setConnectors({
       width: world.offsetWidth,
@@ -261,7 +248,7 @@ export function FamilyTree({
       parents,
       spouses,
     });
-  }, [validEdges]);
+  }, [validEdges, rowIndexOf]);
 
   // Push the current pan/zoom onto the world element. Called imperatively from
   // gesture handlers (no state update) and re-asserted after every React commit
@@ -282,6 +269,7 @@ export function FamilyTree({
   // pinned under the cursor / pinch midpoint.
   const zoomAt = useCallback(
     (px: number, py: number, factor: number) => {
+      interactedRef.current = true;
       const t = view.current;
       const next = clampZoom(t.scale * factor);
       const k = next / t.scale;
@@ -309,6 +297,8 @@ export function FamilyTree({
       x: (cw - ww * scale) / 2,
       y: (ch - wh * scale) / 2,
     };
+    // Fitting (initial, on resize, or via the fit button) re-arms auto-fit.
+    interactedRef.current = false;
     applyTransform();
   }, [applyTransform]);
 
@@ -336,14 +326,22 @@ export function FamilyTree({
     window.addEventListener('resize', measure);
     let ro: ResizeObserver | undefined;
     if (container && typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(() => measure());
+      ro = new ResizeObserver(() => {
+        measure();
+        // The initial fit can run before fonts/flex settle the container (or
+        // the cards), storing a badly clamped scale. Until the user pans or
+        // zooms themselves, follow size changes by re-fitting. Transforms
+        // don't affect the observed layout sizes, so this can't loop.
+        if (!interactedRef.current) fitView();
+      });
       ro.observe(container);
+      if (worldRef.current) ro.observe(worldRef.current);
     }
     return () => {
       window.removeEventListener('resize', measure);
       ro?.disconnect();
     };
-  }, [measure]);
+  }, [measure, fitView]);
 
   // Google-Maps-style navigation: drag to pan, wheel/pinch to zoom. Handlers are
   // native (not React props) so the wheel listener can be non-passive and call
@@ -392,6 +390,7 @@ export function FamilyTree({
       } else {
         view.current.x += e.clientX - prev.x;
         view.current.y += e.clientY - prev.y;
+        interactedRef.current = true;
         applyTransform();
         if (Math.hypot(e.clientX - startX, e.clientY - startY) > 4) movedRef.current = true;
       }
@@ -422,6 +421,30 @@ export function FamilyTree({
       vp.removeEventListener('wheel', onWheel);
     };
   }, [applyTransform, zoomAt, people.length]);
+
+  // Tint each bus with its family's tag color (muted) so parallel rails from
+  // different families stay tellable apart. The family a bus "produces" is
+  // the children's shared birth surname (falling back to the parents').
+  const busColor = useCallback(
+    (bus: ParentBus): string | null => {
+      const surnameOf = (id: string): string | null => {
+        const p = peopleById.get(id);
+        const s = (p?.birthFamilyName ?? p?.familyName)?.trim();
+        return s && colorByTag[s] ? s : null;
+      };
+      const counts = new Map<string, number>();
+      for (const id of bus.childIds) {
+        const s = surnameOf(id);
+        if (s) counts.set(s, (counts.get(s) ?? 0) + 1);
+      }
+      const majority = [...counts.entries()].sort(
+        (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+      )[0]?.[0];
+      const tag = majority ?? bus.parentIds.map(surnameOf).find(Boolean);
+      return tag ? colorByTag[tag] : null;
+    },
+    [peopleById, colorByTag],
+  );
 
   const selected = selectedId ? peopleById.get(selectedId) : undefined;
   const [unlinking, startUnlink] = useTransition();
@@ -576,15 +599,19 @@ export function FamilyTree({
                   zIndex: 0,
                 }}
               >
-                {connectors.parents.map((d, i) => (
-                  <path
-                    key={`p-${i}`}
-                    d={d}
-                    fill="none"
-                    stroke="var(--mantine-color-slate-3)"
-                    strokeWidth={1.5}
-                  />
-                ))}
+                {connectors.parents.map((bus, i) => {
+                  const color = busColor(bus);
+                  return (
+                    <path
+                      key={`p-${i}`}
+                      d={bus.d}
+                      fill="none"
+                      stroke={color ?? 'var(--mantine-color-slate-3)'}
+                      strokeOpacity={color ? 0.45 : 1}
+                      strokeWidth={1.5}
+                    />
+                  );
+                })}
                 {connectors.spouses.map((s, i) => (
                   <g key={`s-${i}`} stroke="var(--mantine-color-slate-4)" strokeWidth={1.5}>
                     <line x1={s.x1} y1={s.y - 2} x2={s.x2} y2={s.y - 2} />

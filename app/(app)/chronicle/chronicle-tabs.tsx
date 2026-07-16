@@ -2,8 +2,21 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Box, Group, Paper, Select, Stack, Tabs, Text, Title } from '@mantine/core';
-import { IconBinaryTree2, IconUsers } from '@tabler/icons-react';
+import {
+  ActionIcon,
+  Badge,
+  Box,
+  Collapse,
+  Group,
+  Paper,
+  Select,
+  Stack,
+  Tabs,
+  Text,
+  Title,
+  UnstyledButton,
+} from '@mantine/core';
+import { IconBinaryTree2, IconChevronDown, IconUsers } from '@tabler/icons-react';
 import type { FamilyTree as MergedTree, TreePerson } from '@/lib/people';
 import { canContribute, canManage, type AccessRole } from '@/lib/permissions';
 import { useI18n } from '@/lib/i18n/client';
@@ -43,6 +56,7 @@ export function ChronicleTabs({
     opened: false,
     person: null,
   });
+  const [familiesOpen, setFamiliesOpen] = useState(true);
 
   function switchChronicle(id: string) {
     document.cookie = `activeChronicleId=${id}; path=/; max-age=31536000; samesite=lax`;
@@ -101,32 +115,55 @@ export function ChronicleTabs({
           <Stack gap="md">
             {familyTags.length > 0 && (
               <Paper withBorder radius="md" p="md">
-                <Group justify="space-between" align="baseline" mb="xs">
-                  <Text size="sm" fw={600}>
-                    {t.tree.familiesTitle}
-                  </Text>
-                  <Text size="xs" c="dimmed">
+                <UnstyledButton
+                  onClick={() => setFamiliesOpen((o) => !o)}
+                  aria-label={t.tree.familiesToggleAria}
+                  aria-expanded={familiesOpen}
+                  w="100%"
+                >
+                  <Group justify="space-between" align="center" wrap="nowrap">
+                    <Group gap="xs" align="center" wrap="nowrap">
+                      <Text size="sm" fw={600}>
+                        {t.tree.familiesTitle}
+                      </Text>
+                      <Badge size="sm" variant="light" color="gray" radius="sm">
+                        {familyTags.length}
+                      </Badge>
+                    </Group>
+                    <ActionIcon component="div" variant="subtle" color="gray">
+                      <IconChevronDown
+                        size={16}
+                        style={{
+                          transform: familiesOpen ? 'rotate(180deg)' : undefined,
+                          transition: 'transform 150ms ease',
+                        }}
+                      />
+                    </ActionIcon>
+                  </Group>
+                </UnstyledButton>
+                <Collapse expanded={familiesOpen}>
+                  <Text size="xs" c="dimmed" mt="xs">
                     {t.tree.familiesHint}
                   </Text>
-                </Group>
-                <Group gap="lg">
-                  {familyTags.map(({ tag, count }) => (
-                    <Group key={tag} gap={8} wrap="nowrap">
-                      <Box
-                        w={12}
-                        h={12}
-                        style={{ borderRadius: '50%', background: colorByTag[tag] }}
-                      />
-                      <Text size="sm">
-                        {tag}
-                        <Text span c="dimmed" size="sm">
-                          {' '}
-                          · {count}
+                  <Group gap="lg" mt="sm">
+                    {familyTags.map(({ tag, count }) => (
+                      <Group key={tag} gap={8} wrap="nowrap">
+                        <Box
+                          w={12}
+                          h={12}
+                          style={{ borderRadius: '50%', background: colorByTag[tag] }}
+                        />
+                        <Text size="sm">
+                          {tag}
+                          <Text span c="dimmed" size="sm">
+                            {' '}
+                            · {count}
+                          </Text>
                         </Text>
-                      </Text>
-                    </Group>
-                  ))}
-                </Group>
+                      </Group>
+                    ))}
+                  </Group>
+                </Collapse>
               </Paper>
             )}
 
