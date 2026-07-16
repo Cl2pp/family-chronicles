@@ -1,0 +1,1 @@
+ALTER TABLE "chronicles" ALTER COLUMN "story_access" SET DEFAULT 'family';

@@ -209,9 +209,9 @@ export const de: Dictionary = {
     storyLanguageAuto: 'Wie erzählt (keine Übersetzung)',
     storyAccess: 'Sichtbarkeit der Geschichten',
     storyAccessDescription:
-      'Wer die Geschichten dieses Familienwerks lesen kann. Im Familien-Modus sehen Mitglieder nur Geschichten über sich selbst oder ihre enge Familie — plus alles, was sie selbst erzählt haben; Eigentümer sehen immer alles.',
+      'Wer die Geschichten dieses Familienwerks lesen kann. Bei „Nahe Familie“ sehen Mitglieder nur Geschichten über sich selbst oder ihre nahe Familie — plus alles, was sie selbst erzählt haben; Eigentümer sehen immer alles.',
     storyAccessOpen: 'Alle im Familienwerk',
-    storyAccessFamily: 'Nur enge Familie',
+    storyAccessFamily: 'Nahe Familie',
     storyAccessUnlinkedWarning: (n: number) =>
       n === 1
         ? '1 Mitgliedskonto ist mit keiner Person im Stammbaum verknüpft — dieses Mitglied sieht dann nur seine eigenen Geschichten. Verknüpfe es zuerst im Zugriff-Tab.'
@@ -429,7 +429,7 @@ export const de: Dictionary = {
     addStory: 'Geschichte hinzufügen',
     unlinkedTitle: 'Du bist noch nicht im Stammbaum',
     unlinkedBody:
-      'Mindestens eines deiner Familienwerke zeigt Geschichten nur der engen Familie. Bis dich ein Eigentümer im Stammbaum einträgt, siehst du nur die Geschichten, die du selbst erzählt hast.',
+      'Mindestens eines deiner Familienwerke zeigt Geschichten nur der nahen Familie. Bis dich ein Eigentümer im Stammbaum einträgt, siehst du nur die Geschichten, die du selbst erzählt hast.',
     unlinkedDismiss: 'Ausblenden',
   },
   story: {

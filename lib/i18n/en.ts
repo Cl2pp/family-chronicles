@@ -209,9 +209,9 @@ export const en = {
     storyLanguageAuto: 'Same as told (no translation)',
     storyAccess: 'Story visibility',
     storyAccessDescription:
-      'Who can read the stories in this chronicle. In family mode, members only see stories about themselves or their close family — plus everything they wrote; owners always see everything.',
+      'Who can read the stories in this chronicle. With "Close family", members only see stories about themselves or their close family — plus everything they wrote; owners always see everything.',
     storyAccessOpen: 'Everyone in the chronicle',
-    storyAccessFamily: 'Close family only',
+    storyAccessFamily: 'Close family',
     storyAccessUnlinkedWarning: (n: number) =>
       n === 1
         ? '1 member account is not linked to a person in the family tree — that member will only see their own stories. Link them on the Access tab first.'

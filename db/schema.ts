@@ -155,8 +155,12 @@ export const chronicles = pgTable('chronicles', {
   styleGuide: text('style_guide'),
   /** Language stories are retold in ('en' | 'de'); null = keep the submission's language. */
   storyLanguage: text('story_language'),
-  /** Story read-access mode; `family` gates reads by kinship (docs/STORY_ACCESS_PLAN.md). */
-  storyAccess: storyAccessMode('story_access').notNull().default('open'),
+  /**
+   * Story read-access mode; `family` ("close family") gates reads by kinship
+   * (docs/STORY_ACCESS_PLAN.md). New chronicles default to `family`; rows that
+   * existed before migration 0015 keep `open` until their owner flips them.
+   */
+  storyAccess: storyAccessMode('story_access').notNull().default('family'),
   createdBy: text('created_by')
     .notNull()
     .references(() => user.id, { onDelete: 'restrict' }),

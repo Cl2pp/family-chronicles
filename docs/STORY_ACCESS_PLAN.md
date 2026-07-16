@@ -76,7 +76,7 @@ These rows become the unit-test fixtures for `lib/story-access.ts`.
 | Spouses of blood relatives / step-relations | excluded (revisit as toggle if needed) |
 | Books | **per-viewer** filtering (see below) |
 | Users not linked to a person | see only stories they wrote, plus a banner asking an owner to place them in the tree |
-| Rollout | per-chronicle setting `story_access: 'open' \| 'family'`, default `open` (opt-in; prod must not hide stories overnight) |
+| Rollout | per-chronicle setting `story_access: 'open' \| 'family'` — labeled "Everyone in the chronicle" vs. "Close family" / "Nahe Familie". NEW chronicles default to `family` (migration 0015); chronicles existing before it keep `open` until their owner flips them, so prod stories never vanish before member accounts are linked |
 
 The zero-tagged-people decision makes people-tagging an **access-control act**:
 the save/edit UI must say so, and saving a story with no tagged people should
