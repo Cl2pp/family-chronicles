@@ -306,6 +306,70 @@ describe('layoutFamilyTree', () => {
     expect(rowIndexOf(rows, 'C')).toBe(rowIndexOf(rows, 'Q'));
   });
 
+  it('keeps sibling groups together instead of interleaving families (Martina bug)', () => {
+    // Full production shape: four root couples, three sibling groups in the
+    // middle row. Crossing count alone tolerated Martina (a Strauß daughter)
+    // parked beyond the whole Hartwig sibling run; the span objective plus
+    // reflow-aware relocation must pull each sibling group into one run,
+    // with only spouses allowed between siblings.
+    const people = [
+      person('ErnstO', '1919-01-01'), person('GiselaK', '1920-01-01'),
+      person('ChristianS', '1935-01-01'), person('IngeburgS', '1936-01-01'),
+      person('AnnemarieH', '1938-01-01'), person('WernerH', '1936-01-01'),
+      person('GiselaSch', '1940-01-01'), person('HansSch', '1938-01-01'),
+      person('KarstenO', '1957-01-01'), person('KathrinO', '1966-01-01'),
+      person('GeraldS', '1963-01-01'), person('PetraS', '1964-01-01'),
+      person('ImkeH', '1961-01-01'), person('UlfH', '1962-01-01'),
+      person('BjoernH', '1960-01-01'), person('SilkeH', '1964-01-01'),
+      person('MartinaSch', '1965-01-01'), person('MatthiasSch', '1963-01-01'),
+      person('AntjeG', '1966-01-01'), person('HeikeM', '1967-01-01'),
+      person('NagoreN', '1990-01-01'), person('ChristophO', '1989-01-01'),
+      person('ClemensO', '1994-01-01'), person('ChiraH', '1995-01-01'),
+      person('NicoleS', '1992-01-01'), person('SebastianS', '1994-01-01'),
+      person('LauraN', '1993-01-01'), person('GerritN', '1991-01-01'),
+      person('CarolaSch', '1992-01-01'), person('MarioSch', '1990-01-01'),
+      person('ElenaG', '1995-01-01'), person('LeonardG', '1997-01-01'),
+      person('TheresaM', '1996-01-01'), person('VincentM', '1998-01-01'),
+      person('BrunoO', '2024-01-01'), person('AvaO', '2026-01-01'),
+      person('XaverN', '2021-01-01'), person('JasperN', '2023-01-01'),
+    ];
+    const edges = [
+      ...couple('ErnstO', 'GiselaK', ['KarstenO']),
+      ...couple('ChristianS', 'IngeburgS', ['KathrinO', 'GeraldS', 'MartinaSch']),
+      ...couple('AnnemarieH', 'WernerH', ['ImkeH', 'UlfH', 'BjoernH', 'AntjeG', 'HeikeM']),
+      ...couple('GiselaSch', 'HansSch', ['SilkeH']),
+      ...couple('KarstenO', 'KathrinO', ['ChristophO', 'ClemensO']),
+      ...couple('GeraldS', 'PetraS', ['NicoleS', 'SebastianS']),
+      ...couple('BjoernH', 'SilkeH', ['LauraN', 'ChiraH']),
+      ...couple('MartinaSch', 'MatthiasSch', ['CarolaSch', 'MarioSch']),
+      parent('AntjeG', 'ElenaG'), parent('AntjeG', 'LeonardG'),
+      parent('HeikeM', 'TheresaM'), parent('HeikeM', 'VincentM'),
+      ...couple('ChristophO', 'NagoreN', ['BrunoO']),
+      ...couple('ClemensO', 'ChiraH', ['AvaO']),
+      ...couple('LauraN', 'GerritN', ['XaverN', 'JasperN']),
+    ];
+    const { rows, crossings } = layoutFamilyTree(people, edges);
+
+    expect(crossings).toBe(0);
+
+    const spouseOf: Record<string, string> = {
+      KathrinO: 'KarstenO', GeraldS: 'PetraS', MartinaSch: 'MatthiasSch',
+      BjoernH: 'SilkeH', ImkeH: '', UlfH: '', AntjeG: '', HeikeM: '',
+    };
+    for (const siblings of [
+      ['KathrinO', 'GeraldS', 'MartinaSch'],
+      ['ImkeH', 'UlfH', 'BjoernH', 'AntjeG', 'HeikeM'],
+    ]) {
+      const row = rows.find((r) => r.ids.includes(siblings[0]))!;
+      const idxs = siblings.map((id) => row.ids.indexOf(id));
+      const span = row.ids.slice(Math.min(...idxs), Math.max(...idxs) + 1);
+      const allowed = new Set(
+        siblings.flatMap((id) => [id, spouseOf[id]]).filter(Boolean),
+      );
+      for (const id of span) expect(allowed).toContain(id);
+    }
+  });
+
   it('places a disconnected person on the row matching their birth year', () => {
     const people = [
       person('Mom', '1960-01-01'),
