@@ -30,6 +30,9 @@ interface OrderBook {
   storyCount: number;
   status: BookStatus;
   errorMessage: string | null;
+  /** True when the viewer can't read every story in the book — the all-chapters
+   *  print/order flow is off limits; the view explains why instead. */
+  accessBlocked: boolean;
 }
 
 const eur = (n: number) =>
@@ -53,7 +56,7 @@ export function OrderView({
   // this app that still needs server-side polling: the builder's preview is live
   // HTML now, but the exact page count + price need a real print PDF.
   useEffect(() => {
-    if (book.status !== 'rendering') return;
+    if (book.accessBlocked || book.status !== 'rendering') return;
     const timer = setInterval(async () => {
       try {
         const res = await fetch(`/api/books/${book.id}/status`);
@@ -65,7 +68,7 @@ export function OrderView({
       }
     }, 4000);
     return () => clearInterval(timer);
-  }, [book.status, book.id, router]);
+  }, [book.accessBlocked, book.status, book.id, router]);
 
   const preparing = book.status !== 'preview_ready' && book.status !== 'ordered';
   const priced = quote?.priced ?? false;
@@ -101,6 +104,14 @@ export function OrderView({
       </Anchor>
       <Title order={1}>{to.title}</Title>
 
+      {book.accessBlocked ? (
+        <Alert color="yellow" icon={<IconInfoCircle size={16} />}>
+          <Text fw={600} mb={2}>
+            {to.hiddenChaptersTitle}
+          </Text>
+          <Text fz={13}>{to.hiddenChaptersBody}</Text>
+        </Alert>
+      ) : (
       <Card withBorder radius="md" p="lg">
         <Title order={3} mb="sm">
           {book.title}
@@ -193,8 +204,9 @@ export function OrderView({
           </Alert>
         )}
       </Card>
+      )}
 
-      {!preparing && (
+      {!book.accessBlocked && !preparing && (
         <>
           <Alert color="blue" icon={<IconInfoCircle size={16} />}>
             <Text fw={600} mb={2}>

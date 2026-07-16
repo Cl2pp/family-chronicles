@@ -56,7 +56,7 @@ export default async function ChroniclePage() {
           id: i.id,
           email: i.email,
           role: i.accessRole as AccessRole,
-          token: i.token,
+          personName: i.personName,
         }))}
         currentUserId={user.id}
       />

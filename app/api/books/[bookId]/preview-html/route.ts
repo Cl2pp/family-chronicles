@@ -38,7 +38,16 @@ export async function GET(
 
   const loaded = await loadBook(bookId);
   await backfillDimensionsFromThumbnails(loaded.allPhotosById);
+  // The plan is always resolved (and, when missing, built + persisted) from the FULL
+  // content — per-viewer filtering happens on the rendered output only, so a partial
+  // view can never overwrite the shared stored plan or the worker's PDF render.
   const plan = await loadOrBuildPlan(bookId, loaded);
+
+  // Per-viewer story access (docs/STORY_ACCESS_PLAN.md, Books): chapters the viewer
+  // can't read are dropped from the rendered HTML — `getBookForUser` already filtered
+  // `book.chapters`, and Paged.js repaginates the partial content client-side.
+  const hasHidden = book.hiddenChapterCount > 0;
+  const visibleStories = new Set(book.chapters.map((c) => c.storyId));
 
   // Presign only the photos the plan actually places. Thumbnail first (same
   // resolution budget as the PDF's `preview` variant); falls back to the
@@ -61,11 +70,16 @@ export async function GET(
   for (const id of needed) {
     const photo = loaded.allPhotosById.get(id);
     if (!photo) continue;
+    // Never presign a photo of a hidden chapter — not even as the cover hero.
+    if (hasHidden && !visibleStories.has(photo.storyId)) continue;
     const img = await resolveImage(photo);
     if (img) resolved.set(id, img);
   }
 
-  const chapters: LayoutChapterContent[] = loaded.chapters.map((c) => ({
+  const visibleChapters = hasHidden
+    ? loaded.chapters.filter((c) => visibleStories.has(c.storyId))
+    : loaded.chapters;
+  const chapters: LayoutChapterContent[] = visibleChapters.map((c) => ({
     storyId: c.storyId,
     title: c.title,
     eventLabel: c.eventLabel,

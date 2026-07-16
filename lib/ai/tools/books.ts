@@ -17,6 +17,7 @@ import {
 } from '@/lib/books';
 import { COVER_STYLES, FIGURE_SIZES, LAYOUT_THEMES } from '@/lib/book-layout-plan';
 import { FORMAT_LABELS } from '@/lib/gelato';
+import { loadStoryAccessContext, type StoryAccessContext } from '@/lib/story-access';
 import { defineTool, type ToolContext } from './types';
 import { ensureContributor } from './util';
 
@@ -30,13 +31,14 @@ import { ensureContributor } from './util';
 async function resolveBook(
   ctx: ToolContext,
   ref: string,
+  access?: StoryAccessContext,
 ): Promise<{ book: BookDetail } | { error: string }> {
   const all = await listBooksForUser(ctx.userId);
   const wanted = ref.trim().toLowerCase();
   const matches = all.filter((b) => b.id === ref.trim() || b.title.toLowerCase() === wanted);
   if (matches.length === 0) return { error: `No book titled "${ref}" was found.` };
   if (matches.length > 1) return { error: `Several books match "${ref}" — be more specific.` };
-  const book = await getBookForUser(matches[0].id, ctx.userId);
+  const book = await getBookForUser(matches[0].id, ctx.userId, access);
   if (!book) return { error: `No book titled "${ref}" was found.` };
   return { book };
 }
@@ -48,8 +50,8 @@ async function resolveBook(
  * builder's Layout card shows a human. Layout is fetched separately (it needs its own
  * DB round trip) and merged in by storyId; omitted (not an error) if it fails to load.
  */
-async function bookSummary(book: BookDetail, userId: string) {
-  const layout = await getBookLayoutSummary(book.id, userId);
+async function bookSummary(book: BookDetail, userId: string, access?: StoryAccessContext) {
+  const layout = await getBookLayoutSummary(book.id, userId, access);
   const imagesByStory = new Map(
     layout.ok ? layout.value.chapters.map((c) => [c.storyId, c.images]) : [],
   );
@@ -65,6 +67,9 @@ async function bookSummary(book: BookDetail, userId: string) {
     pageCount: book.pageCount ?? `~${estimatePageCount(book)} (estimated)`,
     chronicle: book.chronicleName,
     layoutSource: book.layoutSource,
+    // Chapters the acting user can't read (story access). When > 0, chapter
+    // changes and the print/order flow are rejected for this user.
+    hiddenChapterCount: book.hiddenChapterCount > 0 ? book.hiddenChapterCount : undefined,
     theme: layout.ok ? layout.value.theme : undefined,
     coverStyle: layout.ok ? layout.value.coverStyle : undefined,
     coverHeroAssetId: layout.ok ? layout.value.coverHeroAssetId : undefined,
@@ -121,9 +126,11 @@ export const getBookTool = defineTool({
     book: z.string().min(1).describe('The book title (or id) to read.'),
   }),
   async execute(args, ctx) {
-    const found = await resolveBook(ctx, args.book);
+    // One story-access context for both the book read and the layout summary.
+    const access = await loadStoryAccessContext(ctx.userId);
+    const found = await resolveBook(ctx, args.book, access);
     if ('error' in found) return { ok: false, error: found.error };
-    return { ok: true, message: JSON.stringify(await bookSummary(found.book, ctx.userId)) };
+    return { ok: true, message: JSON.stringify(await bookSummary(found.book, ctx.userId, access)) };
   },
 });
 

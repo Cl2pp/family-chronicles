@@ -1,7 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { db } from '@/db';
-import { chronicles, chronicleMembers, memberships, user } from '@/db/schema';
+import { chronicles, chronicleMembers, memberships, people, user } from '@/db/schema';
 import { type AccessRole, canContribute, canManage } from '@/lib/permissions';
 import { ensurePersonForUser } from '@/lib/people';
 import { isLocale, type Locale } from '@/lib/i18n/config';
@@ -14,6 +14,9 @@ export function normalizeStoryLanguage(value: string | null | undefined): Locale
   return isLocale(value) ? value : null;
 }
 
+/** Who may read a chronicle's stories: every member, or close family only (lib/story-access.ts). */
+export type StoryAccessMode = 'open' | 'family';
+
 /** Chronicles the user belongs to (access), with their role. */
 export async function listChroniclesForUser(userId: string) {
   return db
@@ -23,6 +26,7 @@ export async function listChroniclesForUser(userId: string) {
       description: chronicles.description,
       styleGuide: chronicles.styleGuide,
       storyLanguage: chronicles.storyLanguage,
+      storyAccess: chronicles.storyAccess,
       role: memberships.accessRole,
       createdAt: chronicles.createdAt,
     })
@@ -99,7 +103,7 @@ export async function requireOwner(chronicleId: string, userId: string) {
   return m;
 }
 
-/** Access members of a chronicle (user accounts + their access role). */
+/** Access members of a chronicle (user accounts + role + their linked tree person). */
 export async function listMembers(chronicleId: string) {
   return db
     .select({
@@ -108,9 +112,12 @@ export async function listMembers(chronicleId: string) {
       email: user.email,
       role: memberships.accessRole,
       joinedAt: memberships.createdAt,
+      personId: people.id,
+      personName: people.displayName,
     })
     .from(memberships)
     .innerJoin(user, eq(memberships.userId, user.id))
+    .leftJoin(people, eq(people.userId, user.id))
     .where(eq(memberships.chronicleId, chronicleId))
     .orderBy(memberships.createdAt);
 }
@@ -122,6 +129,7 @@ export async function updateChronicle(
     description?: string | null;
     styleGuide?: string | null;
     storyLanguage?: string | null;
+    storyAccess?: StoryAccessMode;
   },
 ) {
   await db

@@ -1,20 +1,24 @@
 'use client';
 
 import { useTransition } from 'react';
-import { Button, Group, Select, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { Alert, Button, Group, Select, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { IconUserQuestion } from '@tabler/icons-react';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
 import { isLocale, LOCALE_NAMES, LOCALES, type Locale } from '@/lib/i18n/config';
+import type { StoryAccessMode } from '@/lib/chronicles';
 import { saveChronicleSettings } from './actions';
 
-/** Settings form of one chronicle: name, description, writing style, story language. */
+/** Settings form of one chronicle: name, description, writing style, story language, story access. */
 export function ChronicleSettingsForm({
   chronicleId,
   name,
   description,
   styleGuide,
   storyLanguage,
+  storyAccess,
+  unlinkedMemberCount,
   canManage: manage,
 }: {
   chronicleId: string;
@@ -22,6 +26,9 @@ export function ChronicleSettingsForm({
   description: string;
   styleGuide: string;
   storyLanguage: string | null;
+  storyAccess: StoryAccessMode;
+  /** Member accounts with no person in the tree — they'd only see their own stories in 'family' mode. */
+  unlinkedMemberCount: number;
   canManage: boolean;
 }) {
   const { t } = useI18n();
@@ -32,6 +39,7 @@ export function ChronicleSettingsForm({
       description,
       styleGuide,
       storyLanguage: (isLocale(storyLanguage) ? storyLanguage : 'auto') as Locale | 'auto',
+      storyAccess,
     },
     validate: { name: (v) => (v.trim() ? null : t.settings.chronicleNameRequired) },
   });
@@ -92,6 +100,23 @@ export function ChronicleSettingsForm({
           maw={280}
           {...form.getInputProps('storyLanguage')}
         />
+        <Select
+          label={t.settings.storyAccess}
+          description={t.settings.storyAccessDescription}
+          data={[
+            { value: 'open', label: t.settings.storyAccessOpen },
+            { value: 'family', label: t.settings.storyAccessFamily },
+          ]}
+          allowDeselect={false}
+          disabled={!manage}
+          maw={280}
+          {...form.getInputProps('storyAccess')}
+        />
+        {manage && form.values.storyAccess === 'family' && unlinkedMemberCount > 0 && (
+          <Alert icon={<IconUserQuestion size={18} />} color="yellow">
+            {t.settings.storyAccessUnlinkedWarning(unlinkedMemberCount)}
+          </Alert>
+        )}
         {manage && (
           <Group justify="flex-end">
             <Button type="submit" loading={pending}>

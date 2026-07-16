@@ -207,6 +207,15 @@ export const de: Dictionary = {
     storyLanguageDescription:
       'Die Sprache, in der Geschichten für dieses Familienwerk nacherzählt werden.',
     storyLanguageAuto: 'Wie erzählt (keine Übersetzung)',
+    storyAccess: 'Sichtbarkeit der Geschichten',
+    storyAccessDescription:
+      'Wer die Geschichten dieses Familienwerks lesen kann. Bei „Nahe Familie“ sehen Mitglieder nur Geschichten über sich selbst oder ihre nahe Familie — plus alles, was sie selbst erzählt haben; Eigentümer sehen immer alles.',
+    storyAccessOpen: 'Alle im Familienwerk',
+    storyAccessFamily: 'Nahe Familie',
+    storyAccessUnlinkedWarning: (n: number) =>
+      n === 1
+        ? '1 Mitgliedskonto ist mit keiner Person im Stammbaum verknüpft — dieses Mitglied sieht dann nur seine eigenen Geschichten. Verknüpfe es zuerst im Zugriff-Tab.'
+        : `${n} Mitgliedskonten sind mit keiner Person im Stammbaum verknüpft — diese Mitglieder sehen dann nur ihre eigenen Geschichten. Verknüpfe sie zuerst im Zugriff-Tab.`,
     settingsSaved: 'Einstellungen gespeichert',
     couldNotSaveSettings: 'Einstellungen konnten nicht gespeichert werden',
     aboutTitle: 'Über',
@@ -331,6 +340,23 @@ export const de: Dictionary = {
     createInvitation: 'Einladung erstellen',
     invitationCreated: 'Einladung erstellt',
     couldNotCreateInvitation: 'Einladung konnte nicht erstellt werden',
+    treePersonLabel: 'Wer ist das im Stammbaum?',
+    treePersonPlaceholder: 'Person auswählen',
+    notInTreeYet: 'Noch nicht im Stammbaum',
+    inTreeAs: (name: string) => `Im Stammbaum als ${name}`,
+    notLinkedToTree: 'Nicht mit dem Stammbaum verknüpft',
+    willJoinAs: (name: string) => `Tritt dem Stammbaum bei als ${name}`,
+    linkToTree: 'Mit Stammbaum verknüpfen',
+    unlink: 'Verknüpfung lösen',
+    link: 'Verknüpfen',
+    linkModalTitle: 'Konto mit dem Stammbaum verknüpfen',
+    linkModalText: (name: string) => `Welche Person im Stammbaum ist ${name}?`,
+    noUnlinkedPeople:
+      'Alle Personen im Stammbaum sind bereits mit einem Konto verknüpft — füge die Person zuerst dem Stammbaum hinzu.',
+    memberLinked: 'Konto mit dem Stammbaum verknüpft',
+    memberUnlinked: 'Verknüpfung mit dem Stammbaum gelöst',
+    couldNotLink: 'Konto konnte nicht verknüpft werden',
+    couldNotUnlink: 'Verknüpfung konnte nicht gelöst werden',
   },
   roles: {
     owner: 'Eigentümer',
@@ -401,6 +427,10 @@ export const de: Dictionary = {
     storyCount: (n: number) => (n === 1 ? '1 Geschichte' : `${n} Geschichten`),
     by: (name: string) => `Von ${name}`,
     addStory: 'Geschichte hinzufügen',
+    unlinkedTitle: 'Du bist noch nicht im Stammbaum',
+    unlinkedBody:
+      'Mindestens eines deiner Familienwerke zeigt Geschichten nur der nahen Familie. Bis dich ein Eigentümer im Stammbaum einträgt, siehst du nur die Geschichten, die du selbst erzählt hast.',
+    unlinkedDismiss: 'Ausblenden',
   },
   story: {
     backToStories: 'Zurück zu den Geschichten',
@@ -479,6 +509,10 @@ export const de: Dictionary = {
       backToBooks: 'Alle Bücher',
       chapters: 'Kapitel',
       chaptersHint: 'Die Geschichten in diesem Buch, in Lesereihenfolge.',
+      hiddenChapters: (n: number) =>
+        n === 1
+          ? 'Ein Kapitel dieses Buches ist eine Geschichte, auf die du keinen Zugriff hast. Nur wer alle Geschichten lesen kann, kann die Kapitel ändern oder das Buch bestellen.'
+          : `${n} Kapitel dieses Buches sind Geschichten, auf die du keinen Zugriff hast. Nur wer alle Geschichten lesen kann, kann die Kapitel ändern oder das Buch bestellen.`,
       moveUp: 'Nach oben',
       moveDown: 'Nach unten',
       removeStory: 'Aus dem Buch entfernen',
@@ -565,6 +599,9 @@ export const de: Dictionary = {
       preparing: 'Die Druckvorlage wird erstellt — das dauert ein bis zwei Minuten…',
       prepareFailedHint: 'Die Druckvorlage konnte nicht erstellt werden.',
       retry: 'Erneut versuchen',
+      hiddenChaptersTitle: 'Dieses Buch enthält Geschichten, die du nicht sehen kannst',
+      hiddenChaptersBody:
+        'Das gedruckte Buch enthält immer alle Kapitel — vorbereiten oder bestellen kann es daher nur, wer Zugriff auf alle seine Geschichten hat.',
     },
   },
   invite: {
@@ -573,6 +610,15 @@ export const de: Dictionary = {
     expired: 'Diese Einladung ist abgelaufen. Bitte um eine neue Einladung.',
     used: 'Diese Einladung wurde bereits verwendet.',
     goToChronicles: 'Zu deinen Familienwerken',
+    confirmText: (chronicle: string) => `Du wurdest eingeladen, „${chronicle}“ beizutreten.`,
+    confirmPerson: (name: string) =>
+      `Dein Konto wird im Stammbaum mit ${name} verknüpft.`,
+    confirmAccept: 'Einladung annehmen',
+    acceptedTitle: 'Willkommen!',
+    acceptedLinkedText:
+      'Du hast jetzt Zugriff auf das Familienwerk, und dein Platz im Stammbaum ist mit deinem Konto verknüpft.',
+    acceptedLinkFailedText:
+      'Du hast jetzt Zugriff auf das Familienwerk — aber dein Platz im Stammbaum konnte nicht automatisch verknüpft werden. Bitte einen Eigentümer, dein Konto im Zugriff-Tab zu verknüpfen.',
   },
   offline: {
     title: 'Du bist offline',

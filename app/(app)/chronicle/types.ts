@@ -28,13 +28,17 @@ export interface MemberRow {
   name: string;
   email: string;
   role: AccessRole;
+  /** The tree person this account is linked to (people.user_id), if any. */
+  personId: string | null;
+  personName: string | null;
 }
 
 export interface InviteRow {
   id: string;
   email: string;
   role: AccessRole;
-  token: string;
+  /** The tree person the invitee will be linked to on accept, if chosen. */
+  personName: string | null;
 }
 
 export interface PersonRow {

@@ -14,7 +14,9 @@ import {
   edgeForRelation,
   getPerson,
   isPersonInChronicle,
+  linkUserToPerson,
   removeRelationship,
+  unlinkUserPerson,
   updatePerson,
   type Gender,
   type PersonRelation,
@@ -212,6 +214,8 @@ export async function invite(input: {
   chronicleId: string;
   email: string;
   role: AccessRole;
+  /** The tree person the invitee is — accepting links their account to it. */
+  personId?: string | null;
 }) {
   const user = await requireUser();
   await requireOwner(input.chronicleId, user.id);
@@ -226,8 +230,34 @@ export async function invite(input: {
     email,
     role: input.role,
     invitedBy: user.id,
+    personId: input.personId ?? null,
   });
 
   revalidatePath('/chronicle');
   return { token: created.token };
+}
+
+/** Link a member's account to an unlinked tree person. Owner only. */
+export async function linkMemberPersonAction(input: {
+  chronicleId: string;
+  userId: string;
+  personId: string;
+}) {
+  const user = await requireUser();
+  await requireOwner(input.chronicleId, user.id);
+
+  await linkUserToPerson(input.chronicleId, input.userId, input.personId);
+  revalidatePath('/chronicle');
+}
+
+/** Unlink a member's account from its tree person. Owner only. */
+export async function unlinkMemberPersonAction(input: {
+  chronicleId: string;
+  userId: string;
+}) {
+  const user = await requireUser();
+  await requireOwner(input.chronicleId, user.id);
+
+  await unlinkUserPerson(input.chronicleId, input.userId);
+  revalidatePath('/chronicle');
 }

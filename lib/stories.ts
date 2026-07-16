@@ -14,6 +14,12 @@ import {
   user,
 } from '@/db/schema';
 import { familyTagsByStory } from '@/lib/family-tags';
+import {
+  canReadStory,
+  loadStoryAccessContext,
+  type StoryAccessContext,
+  type StoryAccessInput,
+} from '@/lib/story-access';
 import { eventDateToParts, partsToEventDate } from '@/lib/dates';
 import { deleteObject, presignGet } from '@/lib/s3';
 import { enqueueThumbnail } from '@/lib/queue';
@@ -362,28 +368,88 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
   }));
 }
 
-/** Stories across every chronicle the user belongs to (deduped). */
-export async function listStoriesForUser(userId: string): Promise<StoryListItem[]> {
-  const fams = await db
-    .select({ chronicleId: memberships.chronicleId })
-    .from(memberships)
-    .where(eq(memberships.userId, userId));
-  const chronicleIds = fams.map((f) => f.chronicleId);
+/**
+ * True when every chronicle the user belongs to is 'open' — the legacy behavior,
+ * where membership alone grants reads and the kinship rule never has to run.
+ */
+function allChroniclesOpen(ctx: StoryAccessContext): boolean {
+  return ctx.openChronicleIds.size === ctx.memberChronicleIds.size;
+}
+
+/**
+ * The per-story facts `canReadStory` consumes (submitter, shared chronicles,
+ * tagged people), batched for a candidate set. Only loaded on the family-mode
+ * path — 'open'-only users never pay for it.
+ */
+async function storyAccessFacts(storyIds: string[]): Promise<Map<string, StoryAccessInput>> {
+  if (storyIds.length === 0) return new Map();
+  const [submitters, shares, tags] = await Promise.all([
+    db
+      .select({ id: stories.id, submittedBy: stories.submittedBy })
+      .from(stories)
+      .where(inArray(stories.id, storyIds)),
+    db
+      .select({ storyId: storyChronicles.storyId, chronicleId: storyChronicles.chronicleId })
+      .from(storyChronicles)
+      .where(inArray(storyChronicles.storyId, storyIds)),
+    db
+      .select({ storyId: storyPeople.storyId, personId: storyPeople.personId })
+      .from(storyPeople)
+      .where(inArray(storyPeople.storyId, storyIds)),
+  ]);
+  const facts = new Map<string, { submittedBy: string; chronicleIds: string[]; personIds: string[] }>(
+    submitters.map((s) => [s.id, { submittedBy: s.submittedBy, chronicleIds: [], personIds: [] }]),
+  );
+  for (const s of shares) facts.get(s.storyId)?.chronicleIds.push(s.chronicleId);
+  for (const t of tags) facts.get(t.storyId)?.personIds.push(t.personId);
+  return facts;
+}
+
+/** Keep only the rows the viewer may read under the kinship rule (family-mode path). */
+async function filterRowsByAccess<T extends { id: string }>(
+  ctx: StoryAccessContext,
+  rows: T[],
+): Promise<T[]> {
+  const facts = await storyAccessFacts(rows.map((r) => r.id));
+  return rows.filter((r) => {
+    const fact = facts.get(r.id);
+    return fact !== undefined && canReadStory(ctx, fact);
+  });
+}
+
+/**
+ * Stories across every chronicle the user belongs to (deduped), restricted to
+ * what the user may read (lib/story-access.ts). Pass a pre-loaded `accessCtx`
+ * when the caller already has one, so it is loaded at most once per request.
+ */
+export async function listStoriesForUser(
+  userId: string,
+  accessCtx?: StoryAccessContext,
+): Promise<StoryListItem[]> {
+  const ctx = accessCtx ?? (await loadStoryAccessContext(userId));
+  const chronicleIds = [...ctx.memberChronicleIds];
   if (chronicleIds.length === 0) return [];
 
-  const rows = (await db
+  let rows = (await db
     .selectDistinct(storyListColumns)
     .from(storyChronicles)
     .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
     .innerJoin(user, eq(stories.submittedBy, user.id))
     .where(inArray(storyChronicles.chronicleId, chronicleIds))
     .orderBy(desc(stories.createdAt))) as StoryRow[];
+  if (!allChroniclesOpen(ctx)) {
+    rows = await filterRowsByAccess(ctx, rows);
+  }
   return decorateStories(rows);
 }
 
-/** Lightweight text of every story shared into a chronicle, for duplicate checks. */
-export async function listChronicleStoryTexts(chronicleId: string) {
-  return db
+/**
+ * Lightweight text of every story shared into a chronicle, for duplicate checks.
+ * Restricted to stories the acting user may read — the duplicate guard must not
+ * echo titles or text of stories that are hidden from them.
+ */
+export async function listChronicleStoryTexts(chronicleId: string, userId: string) {
+  const rows = await db
     .select({
       id: stories.id,
       title: stories.title,
@@ -396,6 +462,13 @@ export async function listChronicleStoryTexts(chronicleId: string) {
     .from(storyChronicles)
     .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
     .where(eq(storyChronicles.chronicleId, chronicleId));
+  const ctx = await loadStoryAccessContext(userId);
+  // Fast path: a member of this chronicle in 'open' mode (or its owner) reads
+  // everything shared into it — no per-story facts needed.
+  if (ctx.openChronicleIds.has(chronicleId) || ctx.ownerChronicleIds.has(chronicleId)) {
+    return rows;
+  }
+  return filterRowsByAccess(ctx, rows);
 }
 
 /** Chronicles a story is shared into (id + name), for chips. */
@@ -407,7 +480,10 @@ export async function chroniclesForStory(storyId: string) {
     .where(eq(storyChronicles.storyId, storyId));
 }
 
-/** A story with submitter, gated to users who can access ≥1 of its chronicles. */
+/**
+ * A story with submitter, gated to users who can access ≥1 of its chronicles
+ * and (for family-mode chronicles) may read it under the kinship rule.
+ */
 export async function getStoryForUser(storyId: string, userId: string) {
   const rows = await db
     .select({
@@ -430,6 +506,14 @@ export async function getStoryForUser(storyId: string, userId: string) {
     .where(and(eq(storyChronicles.storyId, storyId), eq(memberships.userId, userId)))
     .limit(1);
   if (access.length === 0) return null;
+
+  // Membership alone is enough only while every chronicle of the user is 'open';
+  // otherwise the kinship rule decides (denied reads look like a missing story).
+  const ctx = await loadStoryAccessContext(userId);
+  if (!allChroniclesOpen(ctx)) {
+    const fact = (await storyAccessFacts([storyId])).get(storyId);
+    if (fact === undefined || !canReadStory(ctx, fact)) return null;
+  }
 
   return story;
 }
@@ -594,7 +678,13 @@ export async function resetStoryForRetry(storyId: string) {
     .where(eq(stories.id, storyId));
 }
 
-/** Styling context (style guide + story language) from the first chronicle a story is shared into. */
+/**
+ * Styling context (style guide + story language) from the first chronicle a story
+ * is shared into. Deliberately carries NO other stories' text: if example passages
+ * are ever added to the styling prompt, they must be filtered to stories the
+ * SUBMITTER can read (`loadStoryAccessContext(story.submittedBy)` + `canReadStory`),
+ * or family-mode chronicles would leak hidden stories through the prompt.
+ */
 export async function styleContextForStory(
   storyId: string,
 ): Promise<{ styleGuide: string | null; storyLanguage: string | null }> {

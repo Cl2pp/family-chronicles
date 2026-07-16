@@ -8,9 +8,16 @@ import {
   memberships,
   stories,
   storyChronicles,
+  storyPeople,
   user,
 } from '@/db/schema';
 import { getMembership } from '@/lib/chronicles';
+import {
+  canReadStory,
+  loadStoryAccessContext,
+  type StoryAccessContext,
+  type StoryAccessInput,
+} from '@/lib/story-access';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { deleteObject } from '@/lib/s3';
 import { enqueueDesignBook, enqueueRenderBook } from '@/lib/queue';
@@ -57,6 +64,97 @@ async function ensureBookAccess(
   if (!m) return err('You are not a member of this chronicle.');
   if (!canContribute(m.accessRole as AccessRole)) {
     return err('You need contributor access in this chronicle to work on books.');
+  }
+  return { ok: true };
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Story read access for books (docs/STORY_ACCESS_PLAN.md, Books section).
+ * Every story in a book is shared into the book's chronicle, so when the
+ * acting user OWNS that chronicle or it's in 'open' mode, membership alone
+ * grants every chapter — the fast path that skips loading per-story
+ * people/chronicle facts (and, inside loadStoryAccessContext, the kinship
+ * graph) entirely. Everything behaves exactly as before when all chronicles
+ * are 'open' (the default).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Fast path: the user reads every story of this chronicle regardless of tagging. */
+function readsWholeChronicle(ctx: StoryAccessContext, chronicleId: string): boolean {
+  return ctx.ownerChronicleIds.has(chronicleId) || ctx.openChronicleIds.has(chronicleId);
+}
+
+/** The ids among `storyRows` the user may read, per the full three-clause rule
+ *  (loads each story's chronicles + tagged people; no fast path — callers check that). */
+async function readableStoryIds(
+  ctx: StoryAccessContext,
+  storyRows: Array<{ id: string; submittedBy: string }>,
+): Promise<Set<string>> {
+  const ids = storyRows.map((s) => s.id);
+  if (ids.length === 0) return new Set();
+  const [chronicleRows, personRows] = await Promise.all([
+    db
+      .select({ storyId: storyChronicles.storyId, chronicleId: storyChronicles.chronicleId })
+      .from(storyChronicles)
+      .where(inArray(storyChronicles.storyId, ids)),
+    db
+      .select({ storyId: storyPeople.storyId, personId: storyPeople.personId })
+      .from(storyPeople)
+      .where(inArray(storyPeople.storyId, ids)),
+  ]);
+  const facts = new Map<string, StoryAccessInput>(
+    storyRows.map((s) => [s.id, { submittedBy: s.submittedBy, chronicleIds: [], personIds: [] }]),
+  );
+  for (const r of chronicleRows) facts.get(r.storyId)?.chronicleIds.push(r.chronicleId);
+  for (const r of personRows) facts.get(r.storyId)?.personIds.push(r.personId);
+
+  const out = new Set<string>();
+  for (const row of storyRows) {
+    const f = facts.get(row.id);
+    if (f && canReadStory(ctx, f)) out.add(row.id);
+  }
+  return out;
+}
+
+/**
+ * Shared validation for every path that puts stories into a book (create, replace —
+ * the UI actions and the agent's tools all funnel here): each story must be ready,
+ * shared into the book's chronicle, and readable by the ACTING user, so nobody can
+ * put a story they can't read into a book (and thereby leak it via preview/PDF).
+ */
+async function ensureUsableBookStories(
+  chronicleId: string,
+  storyIds: string[],
+  ctx: StoryAccessContext,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const unique = [...new Set(storyIds)];
+  const valid = await db
+    .select({ id: stories.id, title: stories.title, submittedBy: stories.submittedBy })
+    .from(storyChronicles)
+    .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
+    .where(
+      and(
+        eq(storyChronicles.chronicleId, chronicleId),
+        inArray(stories.id, unique),
+        eq(stories.status, 'ready'),
+      ),
+    );
+  const validIds = new Set(valid.map((v) => v.id));
+  const missing = unique.filter((id) => !validIds.has(id));
+  if (missing.length) {
+    return err(`Not ready stories of this chronicle: ${missing.join(', ')}`);
+  }
+  if (!readsWholeChronicle(ctx, chronicleId)) {
+    const readable = await readableStoryIds(ctx, valid);
+    const offending = valid.filter((v) => !readable.has(v.id));
+    if (offending.length) {
+      // Ids, not titles: the actor can't read these stories, so even a title
+      // in an error message would be a small oracle.
+      return err(
+        `You don't have access to these stories, so they can't go into your book: ${offending
+          .map((v) => v.id)
+          .join(', ')}`,
+      );
+    }
   }
   return { ok: true };
 }
@@ -145,11 +243,25 @@ export interface BookDetail {
    *  fallback). Drives the builder's "Design my book" working state. */
   designRequestedAt: Date | null;
   updatedAt: Date;
+  /** Only the chapters the VIEWING user can read (docs/STORY_ACCESS_PLAN.md). */
   chapters: BookChapter[];
+  /** How many of the book's chapters are hidden from this viewer. 0 for owners and
+   *  in 'open'-mode chronicles; > 0 blocks chapter mutations, PDFs, and ordering. */
+  hiddenChapterCount: number;
 }
 
-/** A book with its ordered chapters, gated to chronicle members. */
-export async function getBookForUser(bookId: string, userId: string): Promise<BookDetail | null> {
+/**
+ * A book with its ordered chapters, gated to chronicle members. The chapter list is
+ * per-viewer: stories the viewer can't read are filtered out (their count lands in
+ * `hiddenChapterCount`), so every consumer — builder page, agent tools, routes —
+ * only ever sees readable content. Pass `accessCtx` when the caller already loaded
+ * the viewer's story-access context (one load per request).
+ */
+export async function getBookForUser(
+  bookId: string,
+  userId: string,
+  accessCtx?: StoryAccessContext,
+): Promise<BookDetail | null> {
   const rows = await db
     .select({
       book: books,
@@ -173,13 +285,28 @@ export async function getBookForUser(bookId: string, userId: string): Promise<Bo
       summary: stories.summary,
       eventDate: stories.eventDate,
       status: stories.status,
+      submittedBy: stories.submittedBy,
     })
     .from(bookStories)
     .innerJoin(stories, eq(bookStories.storyId, stories.id))
     .where(eq(bookStories.bookId, bookId))
     .orderBy(asc(bookStories.position));
 
-  const storyIds = chapterRows.map((c) => c.storyId);
+  // Per-viewer read model: hide chapters the viewer can't read. Fast path when the
+  // viewer owns the chronicle or it's 'open' — every book story is shared into the
+  // book's chronicle, so membership alone grants everything (no extra queries).
+  const ctx = accessCtx ?? (await loadStoryAccessContext(userId));
+  let visibleChapters = chapterRows;
+  if (!readsWholeChronicle(ctx, row.book.chronicleId)) {
+    const readable = await readableStoryIds(
+      ctx,
+      chapterRows.map((c) => ({ id: c.storyId, submittedBy: c.submittedBy })),
+    );
+    visibleChapters = chapterRows.filter((c) => readable.has(c.storyId));
+  }
+  const hiddenChapterCount = chapterRows.length - visibleChapters.length;
+
+  const storyIds = visibleChapters.map((c) => c.storyId);
   const photoRows = storyIds.length
     ? await db
         .select({ storyId: assets.storyId })
@@ -189,6 +316,19 @@ export async function getBookForUser(bookId: string, userId: string): Promise<Bo
   const photosByStory = new Map<string, number>();
   for (const p of photoRows) photosByStory.set(p.storyId, (photosByStory.get(p.storyId) ?? 0) + 1);
 
+  // Same boundary for the cover photo: if it belongs to a hidden chapter, the
+  // viewer gets `null` rather than an asset id they couldn't otherwise see.
+  let coverAssetId = row.book.coverAssetId;
+  if (coverAssetId && hiddenChapterCount > 0) {
+    const [cover] = await db
+      .select({ storyId: assets.storyId })
+      .from(assets)
+      .where(eq(assets.id, coverAssetId))
+      .limit(1);
+    const visibleStoryIds = new Set(storyIds);
+    if (cover && !visibleStoryIds.has(cover.storyId)) coverAssetId = null;
+  }
+
   return {
     id: row.book.id,
     chronicleId: row.book.chronicleId,
@@ -197,7 +337,7 @@ export async function getBookForUser(bookId: string, userId: string): Promise<Bo
     title: row.book.title,
     subtitle: row.book.subtitle,
     dedication: row.book.dedication,
-    coverAssetId: row.book.coverAssetId,
+    coverAssetId,
     format: row.book.format as BookFormat,
     status: row.book.status as BookStatus,
     errorMessage: row.book.errorMessage,
@@ -207,17 +347,32 @@ export async function getBookForUser(bookId: string, userId: string): Promise<Bo
     layoutSource: row.book.layoutSource as 'auto' | 'ai' | 'edited',
     designRequestedAt: row.book.designRequestedAt,
     updatedAt: row.book.updatedAt,
-    chapters: chapterRows.map((c, i) => ({
-      ...c,
+    chapters: visibleChapters.map((c, i) => ({
+      storyId: c.storyId,
       position: c.position ?? i,
+      includePhotos: c.includePhotos,
+      title: c.title,
+      summary: c.summary,
+      eventDate: c.eventDate,
+      status: c.status,
       photoCount: photosByStory.get(c.storyId) ?? 0,
     })),
+    hiddenChapterCount,
   };
 }
 
-/** Ready stories of a chronicle, in book order (event date, then created). */
-export async function readyStoriesForChronicle(chronicleId: string) {
-  return db
+/**
+ * Ready stories of a chronicle, in book order (event date, then created) —
+ * restricted to what the ACTING user can read, so the story picker (and the
+ * default all-stories selection of `createBook`) never offers a story that
+ * couldn't legitimately go into the user's book.
+ */
+export async function readyStoriesForChronicle(
+  chronicleId: string,
+  userId: string,
+  accessCtx?: StoryAccessContext,
+) {
+  const rows = await db
     .select({
       id: stories.id,
       title: stories.title,
@@ -225,12 +380,27 @@ export async function readyStoriesForChronicle(chronicleId: string) {
       eventDate: stories.eventDate,
       createdAt: stories.createdAt,
       submitterName: user.name,
+      submittedBy: stories.submittedBy,
     })
     .from(storyChronicles)
     .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
     .innerJoin(user, eq(stories.submittedBy, user.id))
     .where(and(eq(storyChronicles.chronicleId, chronicleId), eq(stories.status, 'ready')))
     .orderBy(asc(stories.eventDate), asc(stories.createdAt));
+
+  const ctx = accessCtx ?? (await loadStoryAccessContext(userId));
+  const visible = readsWholeChronicle(ctx, chronicleId)
+    ? rows
+    : await readableStoryIds(ctx, rows).then((readable) => rows.filter((r) => readable.has(r.id)));
+  // `submittedBy` was only fetched for the access check — don't hand it out.
+  return visible.map((r) => ({
+    id: r.id,
+    title: r.title,
+    summary: r.summary,
+    eventDate: r.eventDate,
+    createdAt: r.createdAt,
+    submitterName: r.submitterName,
+  }));
 }
 
 /**
@@ -245,10 +415,16 @@ export async function createBook(input: {
 }): Promise<Result<{ bookId: string }>> {
   const gate = await ensureBookAccess(input.chronicleId, input.userId);
   if (!gate.ok) return gate;
+  const ctx = await loadStoryAccessContext(input.userId);
 
   let storyIds = input.storyIds;
   if (!storyIds) {
-    storyIds = (await readyStoriesForChronicle(input.chronicleId)).map((s) => s.id);
+    storyIds = (await readyStoriesForChronicle(input.chronicleId, input.userId, ctx)).map(
+      (s) => s.id,
+    );
+  } else {
+    const usable = await ensureUsableBookStories(input.chronicleId, storyIds, ctx);
+    if (!usable.ok) return usable;
   }
   if (storyIds.length === 0) {
     return err('This chronicle has no ready stories yet — a book needs at least one.');
@@ -271,19 +447,36 @@ export async function createBook(input: {
   return { ok: true, value: { bookId } };
 }
 
-/** Guard shared by every mutation: member, contributor, and the book not locked. */
+/** Guard shared by every mutation: member, contributor, and the book not locked.
+ *  Also hands back the acting user's story-access context so mutations that need
+ *  per-story checks don't load it a second time. */
 async function editableBook(
   bookId: string,
   userId: string,
-): Promise<{ ok: true; book: BookDetail } | { ok: false; error: string }> {
-  const book = await getBookForUser(bookId, userId);
+): Promise<
+  { ok: true; book: BookDetail; ctx: StoryAccessContext } | { ok: false; error: string }
+> {
+  const ctx = await loadStoryAccessContext(userId);
+  const book = await getBookForUser(bookId, userId, ctx);
   if (!book) return err('Book not found.');
   const gate = await ensureBookAccess(book.chronicleId, userId);
   if (!gate.ok) return gate;
   if (book.status === 'ordered') {
     return err('This book has been ordered and is locked. Create a new book to make changes.');
   }
-  return { ok: true, book };
+  return { ok: true, book, ctx };
+}
+
+/**
+ * Guard for mutations that operate on the FULL layout plan (targeted ops, AI
+ * design, reset): a viewer with hidden chapters would restyle — or rebuild —
+ * chapters they can't read. Owners see everything, so this never blocks them.
+ */
+function hiddenChaptersError(book: BookDetail): Result | null {
+  if (book.hiddenChapterCount === 0) return null;
+  return err(
+    "Some of this book's chapters are stories you don't have access to — only someone who can read every story can change the book's layout.",
+  );
 }
 
 /**
@@ -379,26 +572,21 @@ export async function setBookStories(input: {
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+  // A viewer with hidden chapters only sees part of the chapter list — a full
+  // replace from their view would silently drop the chapters they can't see.
+  // Owners always see everything, so this never blocks them.
+  if (gate.book.hiddenChapterCount > 0) {
+    return err(
+      "Some of this book's chapters are stories you don't have access to — only someone who can read every story can change the book's chapters.",
+    );
+  }
   const unique = [...new Set(input.storyIds)];
   if (unique.length === 0) return err('A book needs at least one story.');
 
-  // Every story must be ready and shared into the book's chronicle.
-  const valid = await db
-    .select({ id: stories.id })
-    .from(storyChronicles)
-    .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
-    .where(
-      and(
-        eq(storyChronicles.chronicleId, gate.book.chronicleId),
-        inArray(stories.id, unique),
-        eq(stories.status, 'ready'),
-      ),
-    );
-  const validIds = new Set(valid.map((v) => v.id));
-  const missing = unique.filter((id) => !validIds.has(id));
-  if (missing.length) {
-    return err(`Not ready stories of this chronicle: ${missing.join(', ')}`);
-  }
+  // Every story must be ready, shared into the book's chronicle, and readable
+  // by the acting user.
+  const usable = await ensureUsableBookStories(gate.book.chronicleId, unique, gate.ctx);
+  if (!usable.ok) return usable;
 
   await db.transaction(async (tx) => {
     await tx.delete(bookStories).where(eq(bookStories.bookId, input.bookId));
@@ -434,6 +622,13 @@ export async function requestPreview(input: {
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+  // The rendered PDF physically contains EVERY chapter — all-or-nothing: only
+  // someone who can read all of the book's stories may trigger (and later fetch) it.
+  if (gate.book.hiddenChapterCount > 0) {
+    return err(
+      "Some of this book's chapters are stories you don't have access to — the print PDF contains every chapter, so only someone who can read all of them can render or order it.",
+    );
+  }
   if (gate.book.chapters.length === 0) return err('Add at least one story before rendering.');
   if (gate.book.status === 'rendering') return err('A preview is already being rendered.');
 
@@ -466,6 +661,8 @@ export async function requestAiDesign(input: {
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+  const hidden = hiddenChaptersError(gate.book);
+  if (hidden) return hidden;
   if (gate.book.chapters.length === 0) return err('Add at least one story before designing.');
   if (gate.book.designRequestedAt) return err('An AI design pass is already running for this book.');
   if (gate.book.layoutSource === 'edited' && !input.overwriteEdits) {
@@ -492,6 +689,8 @@ export async function resetBookLayout(input: {
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+  const hidden = hiddenChaptersError(gate.book);
+  if (hidden) return hidden;
   if (gate.book.chapters.length === 0) return err('Add at least one story before resetting the layout.');
   if (gate.book.layoutSource === 'edited' && !input.overwriteEdits) {
     return err(
@@ -705,6 +904,8 @@ export async function updateBookLayout(input: {
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+  const hidden = hiddenChaptersError(gate.book);
+  if (hidden) return hidden;
   if (input.ops.length === 0) return { ok: true };
 
   const loaded = await loadBook(input.bookId);
@@ -785,13 +986,26 @@ export interface BookLayoutSummary {
  * preview route — a book with no stored plan yet gets a fresh auto plan, same as opening
  * the preview would.
  */
-export async function getBookLayoutSummary(bookId: string, userId: string): Promise<Result<BookLayoutSummary>> {
-  const book = await getBookForUser(bookId, userId);
+export async function getBookLayoutSummary(
+  bookId: string,
+  userId: string,
+  accessCtx?: StoryAccessContext,
+): Promise<Result<BookLayoutSummary>> {
+  const book = await getBookForUser(bookId, userId, accessCtx);
   if (!book) return err('Book not found.');
   const loaded = await loadBook(bookId);
   const plan = await loadOrBuildPlan(bookId, loaded);
 
-  const chapters: LayoutChapterSummary[] = plan.chapters.map((chapterPlan) => {
+  // Per-viewer: chapters hidden from `book.chapters` are dropped here too, so the
+  // summary never leaks a hidden chapter's photos or captions (builder Layout card
+  // and the agent's get_book both read this).
+  const visibleStories = new Set(book.chapters.map((c) => c.storyId));
+  const visiblePlanChapters =
+    book.hiddenChapterCount > 0
+      ? plan.chapters.filter((c) => visibleStories.has(c.storyId))
+      : plan.chapters;
+
+  const chapters: LayoutChapterSummary[] = visiblePlanChapters.map((chapterPlan) => {
     const images: LayoutImageBlockSummary[] = [];
     chapterPlan.blocks.forEach((block, blockIndex) => {
       if (block.type === 'figure') {
@@ -824,12 +1038,20 @@ export async function getBookLayoutSummary(bookId: string, userId: string): Prom
     return { storyId: chapterPlan.storyId, images };
   });
 
+  // The hero photo may belong to a hidden chapter — don't hand its asset id
+  // to a viewer who can't see that chapter (it would let targeted layout ops
+  // address it, and ids should not leak across the access boundary at all).
+  const heroAssetId = plan.cover.heroAssetId ?? null;
+  const heroStoryId = heroAssetId ? loaded.allPhotosById.get(heroAssetId)?.storyId : null;
+  const heroHidden =
+    book.hiddenChapterCount > 0 && heroStoryId != null && !visibleStories.has(heroStoryId);
+
   return {
     ok: true,
     value: {
       theme: plan.theme,
       coverStyle: plan.cover.style,
-      coverHeroAssetId: plan.cover.heroAssetId ?? null,
+      coverHeroAssetId: heroHidden ? null : heroAssetId,
       chapters,
     },
   };
@@ -842,6 +1064,12 @@ export async function quoteBook(input: {
 }): Promise<Result<{ quote: BookQuote }>> {
   const book = await getBookForUser(input.bookId, input.userId);
   if (!book) return err('Book not found.');
+  // Quoting is part of the order flow, which needs the all-chapters print PDF.
+  if (book.hiddenChapterCount > 0) {
+    return err(
+      "Some of this book's chapters are stories you don't have access to — the printed book contains every chapter, so only someone who can read all of them can price or order it.",
+    );
+  }
   const pageCount = book.pageCount ?? estimatePageCount(book);
   const quote = await quoteBookPrice({ format: book.format, pageCount });
   return { ok: true, value: { quote } };

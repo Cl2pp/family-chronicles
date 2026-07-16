@@ -234,6 +234,9 @@ export function ChronicleTabs({
             members={members}
             invites={invites}
             canManage={canManage(role)}
+            treePeople={(tree.people as TreePerson[])
+              .filter((p) => p.chronicleIds.includes(active.id))
+              .map((p) => ({ id: p.id, displayName: p.displayName, userId: p.userId }))}
           />
         </Tabs.Panel>
       </Tabs>

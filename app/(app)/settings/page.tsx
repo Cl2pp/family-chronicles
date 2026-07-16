@@ -6,8 +6,8 @@ import { account } from '@/db/schema';
 import { requireUser } from '@/lib/session';
 import { presignGet } from '@/lib/s3';
 import { imageTypeForKey } from '@/lib/uploads';
-import { resolveActiveChronicle } from '@/lib/chronicles';
-import { type AccessRole } from '@/lib/permissions';
+import { listMembers, resolveActiveChronicle } from '@/lib/chronicles';
+import { canManage, type AccessRole } from '@/lib/permissions';
 import { getI18n } from '@/lib/i18n/server';
 import { LOCALE_BCP47 } from '@/lib/i18n/config';
 import { BooksLinkCard } from './books-link-card';
@@ -33,12 +33,31 @@ export default async function SettingsPage() {
     }),
   ]);
 
+  // For owners, the 'family'-mode warning needs to know how many member accounts
+  // have no person in the tree (they would only see their own stories).
+  const unlinkedCounts = new Map<string, number>();
+  await Promise.all(
+    chronicles
+      .filter((f) => canManage(f.role as AccessRole))
+      .map(async (f) => {
+        const members = await listMembers(f.id);
+        // Unlinked owners aren't affected (owners read everything), so they
+        // don't belong in the "will only see their own stories" warning.
+        unlinkedCounts.set(
+          f.id,
+          members.filter((m) => m.personId === null && m.role !== 'owner').length,
+        );
+      }),
+  );
+
   const rows = chronicles.map((f) => ({
     id: f.id,
     name: f.name,
     description: f.description,
     styleGuide: f.styleGuide,
     storyLanguage: f.storyLanguage,
+    storyAccess: f.storyAccess,
+    unlinkedMemberCount: unlinkedCounts.get(f.id) ?? 0,
     role: f.role as AccessRole,
     createdLabel: f.createdAt.toLocaleDateString(LOCALE_BCP47[locale], {
       day: 'numeric',

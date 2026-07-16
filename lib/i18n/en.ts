@@ -207,6 +207,15 @@ export const en = {
     storyLanguageDescription:
       'The language stories are written in when they are retold for this chronicle.',
     storyLanguageAuto: 'Same as told (no translation)',
+    storyAccess: 'Story visibility',
+    storyAccessDescription:
+      'Who can read the stories in this chronicle. With "Close family", members only see stories about themselves or their close family — plus everything they wrote; owners always see everything.',
+    storyAccessOpen: 'Everyone in the chronicle',
+    storyAccessFamily: 'Close family',
+    storyAccessUnlinkedWarning: (n: number) =>
+      n === 1
+        ? '1 member account is not linked to a person in the family tree — that member will only see their own stories. Link them on the Access tab first.'
+        : `${n} member accounts are not linked to a person in the family tree — those members will only see their own stories. Link them on the Access tab first.`,
     settingsSaved: 'Settings saved',
     couldNotSaveSettings: 'Could not save settings',
     aboutTitle: 'About',
@@ -329,6 +338,23 @@ export const en = {
     createInvitation: 'Create invitation',
     invitationCreated: 'Invitation created',
     couldNotCreateInvitation: 'Could not create invitation',
+    treePersonLabel: 'Who is this in the family tree?',
+    treePersonPlaceholder: 'Pick a person',
+    notInTreeYet: 'Not in the tree yet',
+    inTreeAs: (name: string) => `In the tree as ${name}`,
+    notLinkedToTree: 'Not linked to the family tree',
+    willJoinAs: (name: string) => `Will join the tree as ${name}`,
+    linkToTree: 'Link to tree',
+    unlink: 'Unlink',
+    link: 'Link',
+    linkModalTitle: 'Link account to the family tree',
+    linkModalText: (name: string) => `Which person in the family tree is ${name}?`,
+    noUnlinkedPeople:
+      'Everyone in the tree is already linked to an account — add the person to the tree first.',
+    memberLinked: 'Account linked to the family tree',
+    memberUnlinked: 'Account unlinked from the family tree',
+    couldNotLink: 'Could not link the account',
+    couldNotUnlink: 'Could not unlink the account',
   },
   roles: {
     owner: 'Owner',
@@ -390,6 +416,10 @@ export const en = {
     storyCount: (n: number) => (n === 1 ? '1 story' : `${n} stories`),
     by: (name: string) => `By ${name}`,
     addStory: 'Add story',
+    unlinkedTitle: 'You are not in the family tree yet',
+    unlinkedBody:
+      'At least one of your chronicles shows stories to close family only. Until an owner places you in the family tree, you only see the stories you added yourself.',
+    unlinkedDismiss: 'Dismiss',
   },
   story: {
     backToStories: 'Back to stories',
@@ -465,6 +495,10 @@ export const en = {
       backToBooks: 'All books',
       chapters: 'Chapters',
       chaptersHint: 'The stories in this book, in reading order.',
+      hiddenChapters: (n: number) =>
+        n === 1
+          ? "1 chapter of this book is a story you don't have access to. Only someone who can read every story can change the chapters or order the book."
+          : `${n} chapters of this book are stories you don't have access to. Only someone who can read every story can change the chapters or order the book.`,
       moveUp: 'Move up',
       moveDown: 'Move down',
       removeStory: 'Remove from book',
@@ -551,6 +585,9 @@ export const en = {
       preparing: 'Creating the print proof — this can take a minute or two…',
       prepareFailedHint: 'Creating the print proof failed.',
       retry: 'Try again',
+      hiddenChaptersTitle: "This book contains stories you can't see",
+      hiddenChaptersBody:
+        'The printed book always contains every chapter, so only someone with access to all of its stories can prepare or order it.',
     },
   },
   invite: {
@@ -559,6 +596,15 @@ export const en = {
     expired: 'This invitation has expired. Ask for a new invite.',
     used: 'This invitation has already been used.',
     goToChronicles: 'Go to your chronicles',
+    confirmText: (chronicle: string) => `You've been invited to join “${chronicle}”.`,
+    confirmPerson: (name: string) =>
+      `Your account will be linked to ${name} in the family tree.`,
+    confirmAccept: 'Accept invitation',
+    acceptedTitle: 'Welcome!',
+    acceptedLinkedText:
+      'You now have access to the chronicle, and your place in the family tree is linked to your account.',
+    acceptedLinkFailedText:
+      'You now have access to the chronicle — but your place in the family tree could not be linked automatically. Ask an owner to link your account on the Access tab.',
   },
   offline: {
     title: 'You’re offline',

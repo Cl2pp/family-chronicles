@@ -83,6 +83,9 @@ interface BuilderBook {
   theme: LayoutTheme;
   coverStyle: CoverStyle;
   chronicleName: string;
+  /** Chapters of the book the viewer can NOT read (story access) — > 0 disables
+   *  chapter editing, the PDF proof, and ordering for this viewer. */
+  hiddenChapterCount: number;
   chapters: Chapter[];
 }
 
@@ -107,6 +110,11 @@ export function BookBuilder({
   const router = useRouter();
 
   const locked = book.status === 'ordered';
+  // A viewer with hidden chapters sees only part of the book: chapter edits would
+  // clobber the chapters they can't see (the server rejects them too), and the
+  // all-chapters PDF/order flow is off limits.
+  const hasHidden = book.hiddenChapterCount > 0;
+  const chaptersLocked = locked || hasHidden;
   const isEdited = book.layoutSource === 'edited';
   const included = new Set(book.chapters.map((c) => c.storyId));
   const notIncluded = chronicleStories.filter((s) => !included.has(s.id));
@@ -252,7 +260,7 @@ export function BookBuilder({
             component={Link}
             href={`/books/${book.id}/order`}
             leftSection={<IconShoppingCart size={16} />}
-            disabled={book.status !== 'preview_ready'}
+            disabled={book.status !== 'preview_ready' || hasHidden}
           >
             {tb.orderCta}
           </Button>
@@ -275,6 +283,12 @@ export function BookBuilder({
             <Text fz={13} c="dimmed" mb="sm">
               {tb.chaptersHint}
             </Text>
+            {hasHidden && (
+              <Text fz={12} c="dimmed" mb="sm">
+                <IconInfoCircle size={12} style={{ verticalAlign: -2 }} />{' '}
+                {tb.hiddenChapters(book.hiddenChapterCount)}
+              </Text>
+            )}
             <Stack gap={6}>
               {book.chapters.map((c, i) => (
                 <Group key={c.storyId} justify="space-between" wrap="nowrap" gap={8}>
@@ -293,7 +307,7 @@ export function BookBuilder({
                       </Text>
                     )}
                   </Text>
-                  {!locked && (
+                  {!chaptersLocked && (
                     <Group gap={2} wrap="nowrap">
                       <ActionIcon
                         variant="subtle"
@@ -329,7 +343,7 @@ export function BookBuilder({
               ))}
             </Stack>
 
-            {!locked && notIncluded.length > 0 && (
+            {!chaptersLocked && notIncluded.length > 0 && (
               <>
                 <Title order={6} mt="md" mb={2} c="dimmed">
                   {tb.moreStories}
@@ -513,7 +527,7 @@ export function BookBuilder({
                   {tb.openInNewTab}
                 </Group>
               </Anchor>
-              {book.hasPreview && (
+              {book.hasPreview && !hasHidden && (
                 <Anchor href={`/api/books/${book.id}/preview`} target="_blank" fz={13}>
                   <Group gap={4}>
                     <IconFileTypePdf size={14} />

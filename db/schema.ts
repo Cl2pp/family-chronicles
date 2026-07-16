@@ -72,6 +72,12 @@ export const verification = pgTable('verification', {
 
 /** Per-chronicle access level (authz). */
 export const accessRole = pgEnum('access_role', ['owner', 'contributor', 'viewer']);
+/**
+ * Per-chronicle story read-access mode. `open` = every member reads every story
+ * (legacy behavior). `family` = reads are gated by the kinship graph — see
+ * docs/STORY_ACCESS_PLAN.md and lib/story-access.ts.
+ */
+export const storyAccessMode = pgEnum('story_access_mode', ['open', 'family']);
 /** Global kinship edge types between people. */
 export const relationshipType = pgEnum('relationship_type', ['parent', 'spouse']);
 export const inputType = pgEnum('input_type', ['text', 'voice', 'chat']);
@@ -149,6 +155,12 @@ export const chronicles = pgTable('chronicles', {
   styleGuide: text('style_guide'),
   /** Language stories are retold in ('en' | 'de'); null = keep the submission's language. */
   storyLanguage: text('story_language'),
+  /**
+   * Story read-access mode; `family` ("close family") gates reads by kinship
+   * (docs/STORY_ACCESS_PLAN.md). New chronicles default to `family`; rows that
+   * existed before migration 0015 keep `open` until their owner flips them.
+   */
+  storyAccess: storyAccessMode('story_access').notNull().default('family'),
   createdBy: text('created_by')
     .notNull()
     .references(() => user.id, { onDelete: 'restrict' }),
@@ -204,6 +216,11 @@ export const invitations = pgTable(
       .references(() => chronicles.id, { onDelete: 'cascade' }),
     email: text('email').notNull(),
     accessRole: accessRole('access_role').notNull().default('contributor'),
+    /**
+     * The tree node the invitee IS. Accepting the invite sets `people.user_id`
+     * on this person, which anchors kinship-based story access for their account.
+     */
+    personId: uuid('person_id').references(() => people.id, { onDelete: 'set null' }),
     token: text('token').notNull().unique(),
     invitedBy: text('invited_by')
       .notNull()

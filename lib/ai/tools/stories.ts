@@ -50,15 +50,17 @@ async function resolveStory(
 
 /**
  * Duplicate-memory guard shared by draft_story and save_story: compare against every
- * story already in the chronicle; an actionable error message when a likely match
- * exists, else null. `toolName` names the tool to re-call with confirmedNew: true.
+ * story already in the chronicle that `userId` may read; an actionable error message
+ * when a likely match exists, else null. `toolName` names the tool to re-call with
+ * confirmedNew: true.
  */
 async function likelyDuplicateError(
   chronicleId: string,
+  userId: string,
   args: { title: string; summary?: string | null; body: string; eventYear?: number | null },
   toolName: string,
 ): Promise<string | null> {
-  const existing = await listChronicleStoryTexts(chronicleId);
+  const existing = await listChronicleStoryTexts(chronicleId, userId);
   const duplicates = findLikelyDuplicates(
     { title: args.title, body: `${args.summary ?? ''} ${args.body}`, eventYear: args.eventYear ?? null },
     existing.map((s) => ({
@@ -139,7 +141,7 @@ export const draftStoryTool = defineTool({
     // Guard against recording the same memory twice: compare against every story
     // already in this chronicle before showing a new draft card.
     if (!args.confirmedNew) {
-      const duplicateError = await likelyDuplicateError(gate.chronicleId, args, 'draft_story');
+      const duplicateError = await likelyDuplicateError(gate.chronicleId, ctx.userId, args, 'draft_story');
       if (duplicateError) return { ok: false, error: duplicateError };
     }
 
@@ -435,7 +437,7 @@ export const saveStoryTool = defineTool({
     }
 
     if (!args.confirmedNew) {
-      const duplicateError = await likelyDuplicateError(gate.chronicleId, args, 'save_story');
+      const duplicateError = await likelyDuplicateError(gate.chronicleId, ctx.userId, args, 'save_story');
       if (duplicateError) return { ok: false, error: duplicateError };
     }
 
