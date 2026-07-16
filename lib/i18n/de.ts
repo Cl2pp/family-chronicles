@@ -34,7 +34,7 @@ export const de: Dictionary = {
     eyebrow: 'Privat · Sicher · Nur auf Einladung',
     heroTitle: 'Eure Familie schreibt ihr eigenes Buch.',
     heroSubtitle:
-      'Erzählt Erinnerungen — getippt oder einfach gesprochen. Familienwerk verwandelt sie in ein fortlaufendes Familienwerk, das sich liest wie ein echtes Memoir. Und wird am Ende ein gedrucktes Buch.',
+      'Erzählt Erinnerungen — getippt oder einfach gesprochen. Familienwerk verwandelt sie in eine fortlaufende Familiengeschichte, die sich liest wie ein echtes Memoir. Und wird am Ende ein gedrucktes Buch.',
     ctaPrimary: 'Familienwerk starten',
     ctaSecondary: 'So funktioniert’s',
     heroTrust: 'Von Oma bis Enkel — alle schreiben mit.',
@@ -107,7 +107,7 @@ export const de: Dictionary = {
     faqItems: [
       {
         q: 'Was ist Familienwerk?',
-        a: 'Ein privater Ort nur auf Einladung, an dem eure Familie ihre Geschichten sammelt — getippt oder gesprochen. Familienwerk macht daraus ein fortlaufendes Familienwerk auf einer Zeitleiste und am Ende ein gedrucktes Hardcover.',
+        a: 'Ein privater Ort nur auf Einladung, an dem eure Familie ihre Geschichten sammelt — getippt oder gesprochen. Familienwerk macht daraus eine fortlaufende Familiengeschichte auf einer Zeitleiste und am Ende ein gedrucktes Hardcover.',
       },
       {
         q: 'Wie erzähle ich eine Geschichte?',
