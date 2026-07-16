@@ -125,11 +125,13 @@ export async function listStoryPeople(storyId: string) {
 }
 
 /**
- * People who may be tagged in a story: everyone in the tree of any chronicle the story
- * is shared into. This is the candidate list the story page's "who's in this story"
- * picker offers; the currently tagged subset comes from {@link listStoryPeople}.
+ * People a given user may tag in a story: the tree members of the chronicles the story
+ * is shared into AND that the user is a member of. Scoping to the user's own chronicles
+ * keeps the picker from exposing (or letting an editor tag) people who live only in a
+ * chronicle the actor can't access — a story can be co-shared into chronicles the actor
+ * has no part in. The currently tagged subset comes from {@link listStoryPeople}.
  */
-export async function listStoryPeopleCandidates(storyId: string) {
+export async function listStoryPeopleCandidates(storyId: string, userId: string) {
   const rows = await db
     .selectDistinct({
       id: people.id,
@@ -137,8 +139,15 @@ export async function listStoryPeopleCandidates(storyId: string) {
       familyName: people.familyName,
     })
     .from(storyChronicles)
-    .innerJoin(chronicleMembers, eq(storyChronicles.chronicleId, chronicleMembers.chronicleId))
-    .innerJoin(people, eq(chronicleMembers.personId, people.id))
+    .innerJoin(
+      memberships,
+      and(
+        eq(memberships.chronicleId, storyChronicles.chronicleId),
+        eq(memberships.userId, userId),
+      ),
+    )
+    .innerJoin(chronicleMembers, eq(chronicleMembers.chronicleId, storyChronicles.chronicleId))
+    .innerJoin(people, eq(people.id, chronicleMembers.personId))
     .where(eq(storyChronicles.storyId, storyId))
     .orderBy(asc(people.displayName));
   return rows;

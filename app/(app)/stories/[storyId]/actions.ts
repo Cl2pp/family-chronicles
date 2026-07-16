@@ -152,7 +152,7 @@ export async function setStoryPeople(input: {
   const current = (await listStoryPeople(input.storyId)).map((p) => p.id);
   // A new tag must be someone in one of the story's chronicles; already-tagged people
   // are always allowed to stay, even if they have since left the chronicle.
-  const candidates = await listStoryPeopleCandidates(input.storyId);
+  const candidates = await listStoryPeopleCandidates(input.storyId, user.id);
   const allowed = new Set([...candidates.map((c) => c.id), ...current]);
   const desired = [...new Set(input.personIds)].filter((id) => allowed.has(id));
 

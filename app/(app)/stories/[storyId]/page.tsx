@@ -61,7 +61,7 @@ export default async function StoryDetailPage({
     familyTagsByStory([storyId]),
     listContributions(storyId),
     listStoryPeople(storyId),
-    listStoryPeopleCandidates(storyId),
+    listStoryPeopleCandidates(storyId, user.id),
   ]);
   const familyTags = tagsByStory.get(storyId) ?? [];
 
@@ -197,7 +197,9 @@ export default async function StoryDetailPage({
           {(canEdit || storyPeople.length > 0) && (
             <StoryPeopleControl
               storyId={story.id}
-              candidates={peopleCandidates}
+              // Only editors use the picker; viewers just see the tagged badges, so
+              // don't ship them the candidate list.
+              candidates={canEdit ? peopleCandidates : []}
               tagged={storyPeople}
               canEdit={canEdit}
             />
