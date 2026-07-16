@@ -1,4 +1,4 @@
-# Family Chronicle
+# Familienwerk
 
 A private, multi-user **Progressive Web App** where families collect their stories — typed or
 spoken — and have them transcribed and gently rewritten into a shared, third-person

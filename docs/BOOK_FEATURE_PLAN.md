@@ -134,7 +134,7 @@ One job, two outputs from the same layout:
 Layout v1 (keep it beautiful but boring): cover page (title, subtitle, cover photo) → title
 page → table of contents → one chapter per story (title, formatted `event_date`, `bodyStyled`,
 photos as full-width or half-width figures with captions) → colophon page ("Created with
-Family Chronicle", date). Chapters start on a right-hand page. Pad final blanks to Gelato's
+Familienwerk", date). Chapters start on a right-hand page. Pad final blanks to Gelato's
 page-count rules (photo books: 30–200 pages; exact multiples to be confirmed against the API
 in implementation).
 

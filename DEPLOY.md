@@ -1,6 +1,6 @@
 # Deployment — Hetzner + Coolify
 
-Family Chronicle deploys as **two apps from one repo** (web + worker) onto a single Hetzner
+Familienwerk deploys as **two apps from one repo** (web + worker) onto a single Hetzner
 VPS running **Coolify**. After the one-time setup, the day-to-day loop is just `git push`.
 
 ## The day-to-day loop (after setup)

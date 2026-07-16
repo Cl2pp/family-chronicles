@@ -467,12 +467,12 @@ export const de: Dictionary = {
   },
   offline: {
     title: 'Du bist offline',
-    text: 'Family Chronicle braucht für diese Seite eine Verbindung. Prüfe dein Netzwerk und versuch es noch einmal — deine Geschichten sind sicher und warten auf dich.',
+    text: 'Familienwerk braucht für diese Seite eine Verbindung. Prüfe dein Netzwerk und versuch es noch einmal — deine Geschichten sind sicher und warten auf dich.',
   },
   pwa: {
     bannerTitle: 'Füg das hier als App zu deinem Home-Bildschirm hinzu',
     bannerBody:
-      'Family Chronicle liegt dann wie eine normale App auf deinem Home-Bildschirm — ein Tipp und du bist bei deinen Geschichten.',
+      'Familienwerk liegt dann wie eine normale App auf deinem Home-Bildschirm — ein Tipp und du bist bei deinen Geschichten.',
     showMeHow: 'So geht’s',
     install: 'Installieren',
     notNow: 'Später',
@@ -480,17 +480,17 @@ export const de: Dictionary = {
     iosStep1: 'Tippe auf das Teilen-Symbol in der Browserleiste.',
     iosStep2: 'Scrolle nach unten und tippe auf „Zum Home-Bildschirm“.',
     iosStep3:
-      'Tippe auf „Hinzufügen“ — Family Chronicle liegt jetzt wie eine App auf deinem Home-Bildschirm.',
+      'Tippe auf „Hinzufügen“ — Familienwerk liegt jetzt wie eine App auf deinem Home-Bildschirm.',
     iosSafariHint:
-      'Du siehst „Zum Home-Bildschirm“ nicht? Öffne family.clepp.de in Safari und versuch es dort.',
+      'Du siehst „Zum Home-Bildschirm“ nicht? Öffne familienwerk.co in Safari und versuch es dort.',
     androidStep1: 'Tippe auf das ⋮-Menü in der Browserleiste.',
     androidStep2: 'Tippe auf „App installieren“ oder „Zum Startbildschirm zufügen“.',
     androidStep3:
-      'Bestätige — Family Chronicle liegt jetzt wie eine App auf deinem Home-Bildschirm.',
+      'Bestätige — Familienwerk liegt jetzt wie eine App auf deinem Home-Bildschirm.',
     androidHint:
-      'Du siehst die Option nicht? Öffne family.clepp.de in Chrome und versuch es dort.',
+      'Du siehst die Option nicht? Öffne familienwerk.co in Chrome und versuch es dort.',
     alreadyInstalled:
-      'Du nutzt Family Chronicle als App — sie liegt schon auf deinem Home-Bildschirm.',
+      'Du nutzt Familienwerk als App — sie liegt schon auf deinem Home-Bildschirm.',
     done: 'Alles klar',
   },
   dates: {

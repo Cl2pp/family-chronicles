@@ -15,7 +15,7 @@ export default async function Home() {
       <Stack gap="xl" align="center" ta="center">
         <Stack gap="sm">
           <Title order={1} fz={48}>
-            Family Chronicle
+            Familienwerk
           </Title>
           <Text c="dimmed" fz="lg" maw={520}>
             {t.home.tagline}
