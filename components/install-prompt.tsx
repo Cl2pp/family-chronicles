@@ -2,23 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { Button, CloseButton, Group, Paper, Stack, Text, ThemeIcon } from '@mantine/core';
-import { usePathname } from 'next/navigation';
 import { IconDeviceMobilePlus } from '@tabler/icons-react';
 import { MOBILE_TABBAR_OFFSET } from '@/components/app-shell';
 import { InstallGuideSteps, isIos, isStandalone } from '@/components/install-guide';
 import { useI18n } from '@/lib/i18n/client';
-
-/** Chromium fires this before showing its own install UI; not in the TS DOM lib yet. */
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-}
+import { onPwaInstallPrompt, type BeforeInstallPromptEvent } from '@/lib/pwa-install';
 
 /** sessionStorage key set on dismissal — hides the card for this visit only. */
 const DISMISSED_KEY = 'fc-install-prompt-dismissed';
 
-/** Routes that show the mobile bottom tab bar; the card floats above it there. */
-const TAB_BAR_ROUTES = ['/chat', '/stories', '/chronicle', '/settings', '/account'];
+/** Keys of the retired localStorage snooze/settle scheme, cleaned up on sight. */
+const LEGACY_KEYS = ['fc-install-prompt-dismissed-at', 'fc-install-prompt-settled'];
 
 function isDismissed() {
   return sessionStorage.getItem(DISMISSED_KEY) === '1';
@@ -41,12 +35,12 @@ function isDismissed() {
  */
 export function InstallPrompt() {
   const { t } = useI18n();
-  const pathname = usePathname();
   const [platform, setPlatform] = useState<'ios' | 'android' | null>(null);
   const [installEvent, setInstallEvent] = useState<BeforeInstallPromptEvent | null>(null);
   const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => {
+    LEGACY_KEYS.forEach((key) => localStorage.removeItem(key));
     if (isStandalone() || isDismissed()) return;
 
     // Let the page settle before nudging; the check runs at fire time.
@@ -54,17 +48,17 @@ export function InstallPrompt() {
       if (isIos()) setPlatform('ios');
     }, 1500);
 
-    const onPrompt = (e: Event) => {
-      e.preventDefault();
-      setInstallEvent(e as BeforeInstallPromptEvent);
+    // The browser event usually fired long before this mounts (on the login
+    // page's document) — the global capture in `lib/pwa-install.ts` replays it.
+    const unsubscribe = onPwaInstallPrompt((e) => {
+      setInstallEvent(e);
       setPlatform('android');
-    };
+    });
     const onInstalled = () => dismiss();
-    window.addEventListener('beforeinstallprompt', onPrompt);
     window.addEventListener('appinstalled', onInstalled);
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('beforeinstallprompt', onPrompt);
+      unsubscribe();
       window.removeEventListener('appinstalled', onInstalled);
     };
   }, []);
@@ -84,8 +78,6 @@ export function InstallPrompt() {
 
   if (!platform) return null;
 
-  const aboveTabBar = TAB_BAR_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
-
   return (
     <Paper
       hiddenFrom="sm"
@@ -95,7 +87,8 @@ export function InstallPrompt() {
       withBorder
       style={{
         position: 'fixed',
-        bottom: aboveTabBar ? MOBILE_TABBAR_OFFSET : 16,
+        // Every logged-in route shows the mobile tab bar; float above it.
+        bottom: MOBILE_TABBAR_OFFSET,
         left: 12,
         right: 12,
         zIndex: 300,
