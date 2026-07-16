@@ -216,7 +216,7 @@ export default async function Home() {
         <Divider mb="md" />
         <Group justify="space-between" wrap="wrap">
           <Text size="sm" c="slate.5">
-            Family Chronicle
+            Familienwerk
           </Text>
           <Text size="sm" c="slate.5">
             {h.footerNote}

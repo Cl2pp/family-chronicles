@@ -137,7 +137,7 @@ export async function loadBook(bookId: string): Promise<LoadedBook> {
 
   return {
     row,
-    chronicleName: chron?.name ?? 'Family Chronicle',
+    chronicleName: chron?.name ?? 'Familienwerk',
     chapters: chapterRows.map((c) => ({
       storyId: c.storyId,
       title: c.title,

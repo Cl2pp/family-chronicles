@@ -17,11 +17,11 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'Family Chronicle',
+  title: 'Familienwerk',
   description: 'A private vault where your family stories live.',
   manifest: '/manifest.webmanifest',
   // `title` is the iOS home-screen label when the PWA is added via Safari.
-  appleWebApp: { capable: true, title: 'Chronicles', statusBarStyle: 'default' },
+  appleWebApp: { capable: true, title: 'Familienwerk', statusBarStyle: 'default' },
   icons: {
     icon: [
       { url: '/icon.svg', type: 'image/svg+xml' },

@@ -2,9 +2,9 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Family Chronicle',
+    name: 'Familienwerk',
     // Home-screen label on Android; keep it to one word so it never truncates.
-    short_name: 'Chronicles',
+    short_name: 'Familienwerk',
     description: 'A private vault where your family stories live.',
     start_url: '/',
     scope: '/',

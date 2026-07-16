@@ -12,6 +12,6 @@ export const openrouter = new OpenAI({
   baseURL: env.OPENROUTER_BASE_URL,
   defaultHeaders: {
     'HTTP-Referer': env.BETTER_AUTH_URL,
-    'X-Title': 'Family Chronicle',
+    'X-Title': 'Familienwerk',
   },
 });

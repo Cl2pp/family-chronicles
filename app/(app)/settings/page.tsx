@@ -92,7 +92,7 @@ export default async function SettingsPage() {
               <Card withBorder radius="md" p="lg">
                 <Group justify="space-between" align="flex-start">
                   <Stack gap={2}>
-                    <Text fw={600}>Family Chronicle</Text>
+                    <Text fw={600}>Familienwerk</Text>
                     <Text size="sm" c="dimmed">
                       {t.settings.aboutDescription}
                     </Text>

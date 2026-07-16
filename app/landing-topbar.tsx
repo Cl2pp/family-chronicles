@@ -52,7 +52,7 @@ function BrandMark() {
         <path d="M13 12h6M13 15h6M13 18h4" stroke="var(--mantine-color-brand-6)" strokeWidth="1.4" strokeLinecap="round" />
       </svg>
       <span style={{ fontWeight: 600, fontSize: 17, color: 'var(--mantine-color-slate-8)' }}>
-        Family Chronicle
+        Familienwerk
       </span>
     </Group>
   );

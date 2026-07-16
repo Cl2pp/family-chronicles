@@ -260,7 +260,7 @@ export async function createBook(input: {
       .values({
         chronicleId: input.chronicleId,
         createdBy: input.userId,
-        title: input.title.trim() || 'Family Chronicle',
+        title: input.title.trim() || 'Familienwerk',
       })
       .returning();
     await tx

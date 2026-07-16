@@ -117,7 +117,7 @@ A <block> is one of:
 necessarily this chapter's) to use as the book's cover image. Omit it only if no photo in the
 whole book is a good cover.`;
 
-const SYSTEM_PROMPT = `You are an experienced photo-book designer working for "Family Chronicle", a private family memoir app. You are given one family's book: its chapters (each one story, already written in third-person memoir prose) with their paragraphs, and the chapter's photos — both as metadata (id, pixel size, caption) and, for the more important ones, as actual images you can see. Your job is to propose a JSON "layout plan" that says exactly how the book should be typeset: which paragraphs go where, and where each photo appears and at what size.
+const SYSTEM_PROMPT = `You are an experienced photo-book designer working for "Familienwerk", a private family memoir app. You are given one family's book: its chapters (each one story, already written in third-person memoir prose) with their paragraphs, and the chapter's photos — both as metadata (id, pixel size, caption) and, for the more important ones, as actual images you can see. Your job is to propose a JSON "layout plan" that says exactly how the book should be typeset: which paragraphs go where, and where each photo appears and at what size.
 
 ${BLOCK_SCHEMA_TEXT}
 
