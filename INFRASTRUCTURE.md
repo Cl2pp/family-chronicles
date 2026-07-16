@@ -170,28 +170,39 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 ## 9. The deploy loop (every change)
 
 1. `git push` to `main`.
-2. **A GitHub webhook auto-deploys on push.** "Auto deploy on push" is configured on **both**
-   apps (repo `Cl2pp/family-chronicles`, branch `main`, empty `watch_paths` = all paths), so a
-   single push fires the webhook and Coolify triggers **both the web and the worker build —
-   concurrently**. (The webhook secret lives in `applications.manual_webhook_secret_github`.)
-3. Each app builds the **same Dockerfile separately**; the web container then **runs migrations
-   on startup** (`docker-entrypoint.sh` — there is **no** Coolify pre/post-deploy command; the
-   pre-deploy hook proved unreliable) and serves; Traefik swaps it in.
+2. **A push auto-deploys the web app** via Coolify's **GitHub App** integration (account-level,
+   not a repo webhook — there is nothing in the repo's GitHub → Settings → Webhooks). Only web
+   auto-deploys: the **worker's `is_auto_deploy_enabled` is `false`** (see the chain below).
+3. Web builds from the `Dockerfile` and **runs migrations on startup** (`docker-entrypoint.sh` —
+   there is a `post_deployment_command` but **no** pre-deploy command; the pre-deploy hook proved
+   unreliable), then serves; Traefik swaps it in.
+4. **When web finishes, it deploys the worker.** Web's `post_deployment_command` runs *inside the
+   web container* and calls the Coolify deploy API for the worker:
+   `curl "http://coolify:8080/api/v1/deploy?uuid=<worker>" -H "Authorization: Bearer $COOLIFY_DEPLOY_TOKEN" || true`.
+   The worker then builds the same commit. So one push = **web, then worker — sequentially, never
+   concurrently** (this is deliberate; see §11 for why concurrency was breaking deploys).
 
 Builds take ~2–4 min each on this box (swap covers the Next build's memory spike).
 
-> **⚠️ Those two concurrent auto-builds are the main deploy-failure cause (see §11).** Two
-> simultaneous Next.js builds on this 2-core / 4 GB box double the RAM and disk-write spike and
-> tend to fail *together*. To deploy **sequentially** (web first, worker only after web finishes)
-> instead of the concurrent webhook fan-out, run the on-box helper:
-> ```bash
-> ssh -i ~/.ssh/family_chronicle_ed25519 root@157.90.165.169 /root/deploy-sequential.sh
-> ```
-> It triggers web via the Coolify deploy API, polls `application_deployment_queues` by
-> `deployment_uuid` until web finishes, then triggers worker. Accepts `web` | `worker` | `both`
-> (default `both`). **Caveat:** this only sequences a *manual* run — a plain `git push` still
-> fans out to both apps via the webhook. Making push-deploys sequential (disable the worker
-> webhook + chain it off web) is tracked in §12.
+**How the chain is wired (so you can change/rollback it):**
+- Worker auto-deploy off: `application_settings.is_auto_deploy_enabled = false` for the worker.
+- Web triggers worker: `applications.post_deployment_command` on the web app (above). It runs in
+  the web container, which is on the `coolify` docker network and can reach the API at
+  `http://coolify:8080` (host port 8000). `|| true` ⇒ a failed worker-trigger never fails web.
+- Token: **not** hard-coded — it's the web app's encrypted Coolify env var `COOLIFY_DEPLOY_TOKEN`
+  (a deploy-scoped API token; the same value also lives at `/root/.coolify-deploy-token` for
+  host-side scripts — **rotate both** if it ever changes, then force-redeploy web so the container
+  picks up the new value). The `post_deployment_command` only references `$COOLIFY_DEPLOY_TOKEN`,
+  so the token never appears in deploy logs.
+- **Rollback** to the old behavior: set the worker's `is_auto_deploy_enabled = true` and clear
+  web's `post_deployment_command`.
+- **Manual override**, if a push's chain misfires or you want to force order by hand: run the
+  on-box helper `ssh … root@157.90.165.169 /root/deploy-sequential.sh` (web → then worker; polls
+  `application_deployment_queues` by `deployment_uuid`; accepts `web` | `worker` | `both`).
+
+> **⚠️ Why the chain exists:** before it, both apps auto-deployed on push and their two Next.js
+> builds ran *concurrently* on this 2-core / 4 GB box — doubling the RAM and disk-write spike, so
+> they tended to fail *together* (see §11). The web→worker chain above serialises them.
 
 **Version skew after deploys**: each Docker build writes `.deployment-id` (from Coolify's
 `SOURCE_COMMIT` build arg, or a build timestamp) and `next.config.ts` uses it as Next's
@@ -270,12 +281,9 @@ done (the creds never leave the box).
 - **Voice transcription** needs a real `GROQ_API_KEY` (still a placeholder unless set).
 - **Backups**: enable Coolify scheduled Postgres dumps to R2 (and optionally Hetzner snapshots).
   Media already lives durably in R2.
-- **Push-to-deploy** already works (GitHub webhook on both apps, §9) — but it fans out to web and
-  worker **concurrently**, which is the main deploy-failure cause (§11). **Open:** make push-deploys
-  sequential — disable the worker's GitHub webhook so a push deploys only web, then set web's
-  `post_deployment_command` to trigger the worker deploy via the Coolify API once web finishes.
-  That gives automatic *and* sequential deploys with no manual step. (Both `pre_/post_deployment_command`
-  fields are currently empty.)
+- **Sequential push-to-deploy — done** (2026-07-16, see §9): a push auto-deploys web only, and
+  web's `post_deployment_command` chains the worker afterwards, so builds no longer run
+  concurrently. Set up via `/root/setup-worker-chain.sh` on the box.
 - **Scale the box**: the 40 GB disk / 4 GB RAM is the underlying ceiling — layers creep back toward
   full and concurrent builds starve each other for RAM. A one-step `hcloud server resize` to **cx33**
   (4 vCPU / 8 GB / 80 GB, ~€10/mo) gives durable headroom and faster builds. Requires a brief reboot.
