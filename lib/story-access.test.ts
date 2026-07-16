@@ -109,6 +109,40 @@ describe('computeVisiblePersonIds', () => {
     expect(top.has(`p${MAX_GENERATIONS + 1}`)).toBe(false);
   });
 
+  // FAMILY plus Ben's earlier marriage: Ben ⚭ Rita (father Rudi), son Paul —
+  // Paul is Clara & Max's half-brother and Anna's stepchild.
+  const REMARRIED: KinshipEdge[] = [
+    ...FAMILY,
+    ...couple('ben', 'rita', ['paul']),
+    parent('rudi', 'rita'),
+  ];
+
+  it('includes stepchildren via the spouse, but not the spouse’s other spouse', () => {
+    const anna = computeVisiblePersonIds('anna', REMARRIED);
+    expect(anna.has('paul')).toBe(true); // Ben's son from the earlier marriage
+    expect(anna.has('rita')).toBe(false); // Ben's other spouse
+    expect(anna.has('rudi')).toBe(false); // ...and her side stays invisible
+  });
+
+  it('keeps sequential marriages isolated from each other', () => {
+    // Rita sees Ben's blood (incl. her stepchildren Clara & Max) but nothing
+    // of Anna or Anna's side — and vice versa.
+    const rita = computeVisiblePersonIds('rita', REMARRIED);
+    expect(rita.has('clara')).toBe(true);
+    expect(rita.has('max')).toBe(true);
+    expect(rita.has('anna')).toBe(false);
+    expect(rita.has('otto')).toBe(false);
+  });
+
+  it('grants half-siblings access, but not the half-sibling’s other parent', () => {
+    const paul = computeVisiblePersonIds('paul', REMARRIED);
+    expect(paul.has('clara')).toBe(true); // shared ancestor Ben
+    expect(paul.has('max')).toBe(true);
+    expect(paul.has('anna')).toBe(false); // stepmother: no common ancestor, no spouse edge
+    expect(paul.has('otto')).toBe(false);
+    expect(computeVisiblePersonIds('clara', REMARRIED).has('paul')).toBe(true);
+  });
+
   it('terminates on parent and spouse cycles', () => {
     const cyclic: KinshipEdge[] = [
       parent('a', 'b'),

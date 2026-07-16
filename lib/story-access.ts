@@ -39,7 +39,13 @@ export interface StoryAccessContext {
   userId: string;
   /** The viewer's person node (`people.user_id`), or null if unlinked. */
   personId: string | null;
-  /** People whose stories the viewer may read under rule 3 (see module docs). */
+  /**
+   * People whose stories the viewer may read under rule 3 (see module docs).
+   * CAUTION: on the fast path (no family-mode membership, or unlinked viewer)
+   * this is an under-approximation holding just the viewer's own person —
+   * `canReadStory` never consults it in that state, but any new consumer must
+   * replicate its open/owner branching or it will wrongly deny in open mode.
+   */
   visiblePersonIds: Set<string>;
   /** Chronicles where the viewer holds an `owner` membership. */
   ownerChronicleIds: Set<string>;
