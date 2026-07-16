@@ -2,7 +2,7 @@
 export const LOCALES = ['en', 'de'] as const;
 export type Locale = (typeof LOCALES)[number];
 
-export const DEFAULT_LOCALE: Locale = 'en';
+export const DEFAULT_LOCALE: Locale = 'de';
 
 /** Cookie that pins the UI language; absent → negotiate from Accept-Language. */
 export const LOCALE_COOKIE = 'locale';

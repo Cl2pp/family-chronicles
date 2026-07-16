@@ -30,6 +30,47 @@ export const de: Dictionary = {
       'Trage schriftlich oder per Sprachnachricht bei. Geschichten werden transkribiert und behutsam in einer einheitlichen Memoiren-Stimme nacherzählt — mit Fotos, Daten und voller Nennung, wer sie geteilt hat.',
     signIn: 'Anmelden',
     createAccount: 'Konto erstellen',
+    eyebrow: 'Die private Chronik deiner Familie',
+    heroTitle: 'Die Geschichten deiner Familie — für immer bewahrt.',
+    heroSubtitle:
+      'Sprich eine Erinnerung ein oder tippe sie. Daraus wird ein schön geschriebenes Kapitel — auf einer gemeinsamen Zeitleiste, im Stammbaum, bereit als echtes Buch gedruckt zu werden.',
+    ctaPrimary: 'Kostenlos loslegen',
+    ctaSecondary: 'Anmelden',
+    stepsTitle: 'Von der gesprochenen Erinnerung zum Familienbuch',
+    stepsSubtitle: 'Drei Schritte. Ganz ohne Schreibtalent.',
+    step1Title: 'Erzählen',
+    step1Text:
+      'Sprich einfach los oder tippe ein paar Zeilen. Die Sprachnachricht der Großeltern funktioniert genauso gut wie ein fertiger Absatz.',
+    step2Title: 'Wir formen es',
+    step2Text:
+      'Deine Aufnahme wird transkribiert und behutsam in einer warmen, einheitlichen Memoiren-Stimme nacherzählt — Daten und Fotos bleiben erhalten.',
+    step3Title: 'Bewahren',
+    step3Text:
+      'Jede Geschichte landet auf einer gemeinsamen Zeitleiste und im Stammbaum — und lässt sich als gedrucktes Hardcover-Buch setzen.',
+    featuresTitle: 'Alles, was eine Familienchronik braucht',
+    featureVoiceTitle: 'Sprechen oder schreiben',
+    featureVoiceText:
+      'Nimm eine Sprachnachricht auf oder tippe. Perfekt für ältere Verwandte, die lieber erzählen als schreiben.',
+    featureTimelineTitle: 'Eine lebendige Zeitleiste',
+    featureTimelineText:
+      'Geschichten werden datiert und geordnet — so liest sich eure Familiengeschichte als ein durchgehender Faden.',
+    featureTreeTitle: 'Stammbaum & Familien-Tags',
+    featureTreeText:
+      'Leg deinen Stammbaum einmal an. Geschichten ordnen sich automatisch den richtigen Personen und Zweigen zu.',
+    featureBookTitle: 'Ein echtes gedrucktes Buch',
+    featureBookText:
+      'Mach aus Kapiteln und Fotos ein gesetztes Hardcover, das du in Händen hältst, verschenkst und weitergibst.',
+    featurePrivateTitle: 'Privat von Anfang an',
+    featurePrivateText:
+      'Nur mit Einladung. Eure Erinnerungen bleiben in der Familie — keine öffentlichen Feeds, keine Werbung, keine Fremden.',
+    featureMemoirTitle: 'Eine warme Stimme',
+    featureMemoirText:
+      'Viele Beitragende, ein einheitlicher Memoiren-Stil — und jede Quelle und jedes Foto wird genannt und aufbewahrt.',
+    closingTitle: 'Beginne heute die Chronik deiner Familie',
+    closingText:
+      'Eine einzige Erinnerung genügt zum Start. Füge deine hinzu, lade die Familie ein und sieh zu, wie das Buch wächst.',
+    closingCta: 'Chronik erstellen',
+    footerNote: 'Privat · Sicher · Nur für deine Familie',
   },
   auth: {
     welcomeBack: 'Willkommen zurück',
