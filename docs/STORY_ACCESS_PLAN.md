@@ -134,6 +134,13 @@ predicate lands there and covers most surfaces transitively.
 Not affected: presigned-URL minting (`presignGet`) stays gated by the page that
 mints it; `canUserEditStory` unchanged; write paths already role-gated.
 
+**Sharing semantics:** sharing a story into another chronicle requires being
+able to READ it (otherwise a known story id could be shared into one's own
+open chronicle to bypass the family gate). A legitimate reader sharing a story
+into a chronicle they contribute to DOES widen its audience to that chronicle's
+members — that is by design, the digital equivalent of retelling a story you
+were told; the family gate controls who can read, not what readers may retell.
+
 ### Books (decided: per-viewer)
 
 - **Assembly:** the story picker (`readyStoriesForChronicle`) shows only stories

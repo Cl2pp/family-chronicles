@@ -214,8 +214,8 @@ export const en = {
     storyAccessFamily: 'Close family only',
     storyAccessUnlinkedWarning: (n: number) =>
       n === 1
-        ? '1 member account is not linked to a person in the family tree — that member will only see their own stories. Link them on the tree page first.'
-        : `${n} member accounts are not linked to a person in the family tree — those members will only see their own stories. Link them on the tree page first.`,
+        ? '1 member account is not linked to a person in the family tree — that member will only see their own stories. Link them on the Access tab first.'
+        : `${n} member accounts are not linked to a person in the family tree — those members will only see their own stories. Link them on the Access tab first.`,
     settingsSaved: 'Settings saved',
     couldNotSaveSettings: 'Could not save settings',
     aboutTitle: 'About',

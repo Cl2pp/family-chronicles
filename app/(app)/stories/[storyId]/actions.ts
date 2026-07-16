@@ -6,6 +6,7 @@ import {
   applyStoryEdit,
   canUserEditStory,
   deleteStoryForUser,
+  getStoryForUser,
   resetStoryForRetry,
   setAssetCaption,
   shareStoryToChronicle,
@@ -19,6 +20,10 @@ import { validateUpload } from '@/lib/uploads';
 
 /** Re-queue a failed story for styling and refresh its detail page. */
 export async function retryStory(storyId: string) {
+  const user = await requireUser();
+  if (!(await canUserEditStory(storyId, user.id))) {
+    throw new Error('You cannot retry this story.');
+  }
   await resetStoryForRetry(storyId);
   await enqueueStyle({ storyId });
   revalidatePath(`/stories/${storyId}`);
@@ -127,6 +132,11 @@ export async function updatePhotoCaption(input: {
 /** Share an existing story into another chronicle (requires contributor+ in the target). */
 export async function shareStory(storyId: string, chronicleId: string) {
   const user = await requireUser();
+  // The actor must be able to READ the story — otherwise a known story id could
+  // be shared into one's own open chronicle to bypass the family read gate.
+  if (!(await getStoryForUser(storyId, user.id))) {
+    throw new Error('You cannot share this story.');
+  }
   const membership = await getMembership(chronicleId, user.id);
   if (!membership || !canContribute(membership.accessRole as AccessRole)) {
     throw new Error('You cannot share into that chronicle.');

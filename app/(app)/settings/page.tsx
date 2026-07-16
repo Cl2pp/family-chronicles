@@ -41,7 +41,12 @@ export default async function SettingsPage() {
       .filter((f) => canManage(f.role as AccessRole))
       .map(async (f) => {
         const members = await listMembers(f.id);
-        unlinkedCounts.set(f.id, members.filter((m) => m.personId === null).length);
+        // Unlinked owners aren't affected (owners read everything), so they
+        // don't belong in the "will only see their own stories" warning.
+        unlinkedCounts.set(
+          f.id,
+          members.filter((m) => m.personId === null && m.role !== 'owner').length,
+        );
       }),
   );
 

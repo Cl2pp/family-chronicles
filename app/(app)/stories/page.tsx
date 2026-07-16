@@ -18,7 +18,11 @@ export default async function StoriesPage() {
   // sees its own stories — tell the user why (an owner has to place them).
   const showUnlinkedBanner =
     accessCtx.personId === null &&
-    accessCtx.openChronicleIds.size < accessCtx.memberChronicleIds.size;
+    // ...in some family-mode chronicle where they aren't the owner (owners
+    // read everything regardless of linking).
+    [...accessCtx.memberChronicleIds].some(
+      (id) => !accessCtx.openChronicleIds.has(id) && !accessCtx.ownerChronicleIds.has(id),
+    );
 
   return (
     <Box p="lg" maw={960} mx="auto">

@@ -147,9 +147,11 @@ async function ensureUsableBookStories(
     const readable = await readableStoryIds(ctx, valid);
     const offending = valid.filter((v) => !readable.has(v.id));
     if (offending.length) {
+      // Ids, not titles: the actor can't read these stories, so even a title
+      // in an error message would be a small oracle.
       return err(
         `You don't have access to these stories, so they can't go into your book: ${offending
-          .map((v) => `"${v.title}"`)
+          .map((v) => v.id)
           .join(', ')}`,
       );
     }
@@ -314,6 +316,19 @@ export async function getBookForUser(
   const photosByStory = new Map<string, number>();
   for (const p of photoRows) photosByStory.set(p.storyId, (photosByStory.get(p.storyId) ?? 0) + 1);
 
+  // Same boundary for the cover photo: if it belongs to a hidden chapter, the
+  // viewer gets `null` rather than an asset id they couldn't otherwise see.
+  let coverAssetId = row.book.coverAssetId;
+  if (coverAssetId && hiddenChapterCount > 0) {
+    const [cover] = await db
+      .select({ storyId: assets.storyId })
+      .from(assets)
+      .where(eq(assets.id, coverAssetId))
+      .limit(1);
+    const visibleStoryIds = new Set(storyIds);
+    if (cover && !visibleStoryIds.has(cover.storyId)) coverAssetId = null;
+  }
+
   return {
     id: row.book.id,
     chronicleId: row.book.chronicleId,
@@ -322,7 +337,7 @@ export async function getBookForUser(
     title: row.book.title,
     subtitle: row.book.subtitle,
     dedication: row.book.dedication,
-    coverAssetId: row.book.coverAssetId,
+    coverAssetId,
     format: row.book.format as BookFormat,
     status: row.book.status as BookStatus,
     errorMessage: row.book.errorMessage,
@@ -450,6 +465,18 @@ async function editableBook(
     return err('This book has been ordered and is locked. Create a new book to make changes.');
   }
   return { ok: true, book, ctx };
+}
+
+/**
+ * Guard for mutations that operate on the FULL layout plan (targeted ops, AI
+ * design, reset): a viewer with hidden chapters would restyle — or rebuild —
+ * chapters they can't read. Owners see everything, so this never blocks them.
+ */
+function hiddenChaptersError(book: BookDetail): Result | null {
+  if (book.hiddenChapterCount === 0) return null;
+  return err(
+    "Some of this book's chapters are stories you don't have access to — only someone who can read every story can change the book's layout.",
+  );
 }
 
 /**
@@ -634,6 +661,8 @@ export async function requestAiDesign(input: {
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+  const hidden = hiddenChaptersError(gate.book);
+  if (hidden) return hidden;
   if (gate.book.chapters.length === 0) return err('Add at least one story before designing.');
   if (gate.book.designRequestedAt) return err('An AI design pass is already running for this book.');
   if (gate.book.layoutSource === 'edited' && !input.overwriteEdits) {
@@ -660,6 +689,8 @@ export async function resetBookLayout(input: {
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+  const hidden = hiddenChaptersError(gate.book);
+  if (hidden) return hidden;
   if (gate.book.chapters.length === 0) return err('Add at least one story before resetting the layout.');
   if (gate.book.layoutSource === 'edited' && !input.overwriteEdits) {
     return err(
@@ -873,6 +904,8 @@ export async function updateBookLayout(input: {
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+  const hidden = hiddenChaptersError(gate.book);
+  if (hidden) return hidden;
   if (input.ops.length === 0) return { ok: true };
 
   const loaded = await loadBook(input.bookId);
@@ -1005,12 +1038,20 @@ export async function getBookLayoutSummary(
     return { storyId: chapterPlan.storyId, images };
   });
 
+  // The hero photo may belong to a hidden chapter — don't hand its asset id
+  // to a viewer who can't see that chapter (it would let targeted layout ops
+  // address it, and ids should not leak across the access boundary at all).
+  const heroAssetId = plan.cover.heroAssetId ?? null;
+  const heroStoryId = heroAssetId ? loaded.allPhotosById.get(heroAssetId)?.storyId : null;
+  const heroHidden =
+    book.hiddenChapterCount > 0 && heroStoryId != null && !visibleStories.has(heroStoryId);
+
   return {
     ok: true,
     value: {
       theme: plan.theme,
       coverStyle: plan.cover.style,
-      coverHeroAssetId: plan.cover.heroAssetId ?? null,
+      coverHeroAssetId: heroHidden ? null : heroAssetId,
       chapters,
     },
   };

@@ -214,8 +214,8 @@ export const de: Dictionary = {
     storyAccessFamily: 'Nur enge Familie',
     storyAccessUnlinkedWarning: (n: number) =>
       n === 1
-        ? '1 Mitgliedskonto ist mit keiner Person im Stammbaum verknüpft — dieses Mitglied sieht dann nur seine eigenen Geschichten. Verknüpfe es zuerst auf der Stammbaum-Seite.'
-        : `${n} Mitgliedskonten sind mit keiner Person im Stammbaum verknüpft — diese Mitglieder sehen dann nur ihre eigenen Geschichten. Verknüpfe sie zuerst auf der Stammbaum-Seite.`,
+        ? '1 Mitgliedskonto ist mit keiner Person im Stammbaum verknüpft — dieses Mitglied sieht dann nur seine eigenen Geschichten. Verknüpfe es zuerst im Zugriff-Tab.'
+        : `${n} Mitgliedskonten sind mit keiner Person im Stammbaum verknüpft — diese Mitglieder sehen dann nur ihre eigenen Geschichten. Verknüpfe sie zuerst im Zugriff-Tab.`,
     settingsSaved: 'Einstellungen gespeichert',
     couldNotSaveSettings: 'Einstellungen konnten nicht gespeichert werden',
     aboutTitle: 'Über',
