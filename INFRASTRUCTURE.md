@@ -160,6 +160,8 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 | `OPENROUTER_API_KEY` | story styling | OpenRouter |
 | `STYLING_MODEL` | which LLM to style with | e.g. `anthropic/claude-opus-4-8` (swap for cost) |
 | `GROQ_API_KEY` | voice transcription | Groq (optional — voice only) |
+| `SMTP_URL` | verification emails (optional) | Resend: `smtp://resend:<API_KEY>@smtp.resend.com:587`. **Must be port 587 (STARTTLS)** — Hetzner Cloud blocks outbound 25/465 by default, and a blocked port doesn't error, it **hangs silently** (symptom: signup/resend just spins, no log line). Unset = emails are logged instead of sent |
+| `SMTP_FROM` | sender address | defaults to `Familienwerk <no-reply@familienwerk.co>` |
 | `S3_ENDPOINT` | R2 endpoint | **EU** form: `https://<acct>.eu.r2.cloudflarestorage.com` |
 | `S3_REGION` | `auto` | R2 |
 | `S3_BUCKET` | `family-chronicle` | exact name |
@@ -280,8 +282,8 @@ done (the creds never leave the box).
 ## 12. Outstanding / future work
 
 - **Magic-link email**: removed for now (the link was only logged to the server console, so the
-  login button silently did nothing in production). Re-add the better-auth `magicLink` plugin once
-  a real email provider (Resend/SMTP) is wired.
+  login button silently did nothing in production). Resend SMTP is now wired (`SMTP_URL`, §8 —
+  port 587 only, Hetzner blocks 25/465), so the better-auth `magicLink` plugin could be re-added.
 - **Voice transcription** needs a real `GROQ_API_KEY` (still a placeholder unless set).
 - **Backups**: enable Coolify scheduled Postgres dumps to R2 (and optionally Hetzner snapshots).
   Media already lives durably in R2.

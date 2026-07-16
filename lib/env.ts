@@ -59,7 +59,9 @@ const schema = z.object({
   BOOK_ORDER_CONTACT_EMAIL: z.string().email().default('clemens@mtx.studio'),
   /**
    * smtp(s)://user:pass@host:port — used by lib/email.ts (verification emails;
-   * unset = emails are logged, not sent). Resend: smtps://resend:API_KEY@smtp.resend.com:465
+   * unset = emails are logged, not sent). Resend: smtp://resend:API_KEY@smtp.resend.com:587
+   * (STARTTLS). Avoid ports 25/465: Hetzner Cloud blocks them outbound by default and the
+   * connection hangs silently instead of erroring.
    */
   SMTP_URL: z.string().optional(),
   SMTP_FROM: z.string().default('Familienwerk <no-reply@familienwerk.co>'),
