@@ -6,18 +6,19 @@ VPS running **Coolify**. After the one-time setup, the day-to-day loop is just `
 ## The day-to-day loop (after setup)
 
 1. Commit & push to `main`.
-2. Coolify's GitHub webhook fires → it rebuilds **both** apps (web + worker) from the `Dockerfile`,
-   **concurrently**.
+2. Coolify's GitHub App auto-deploys the **web** app from the `Dockerfile` (the worker's
+   auto-deploy is off).
 3. The **web** container runs `npm run db:migrate` **on startup** (inside `docker-entrypoint.sh` —
    not a Coolify pre-deploy hook, which proved unreliable), then serves.
-4. New containers go live behind Traefik (domain + automatic TLS).
+4. When web finishes, its `post_deployment_command` triggers the **worker** deploy, which builds
+   the same commit. So one push ships **web, then worker — sequentially** (never concurrent).
+5. New containers go live behind Traefik (domain + automatic TLS).
 
 That's it — every change ships the same way.
 
-> ⚠️ Those two **concurrent** builds are the main deploy-failure cause on this small VPS
-> (disk/RAM exhaustion — see `INFRASTRUCTURE.md` §9 and §11). To deploy **sequentially** instead
-> (web first, worker only after web finishes), run the on-box helper
-> `/root/deploy-sequential.sh` rather than relying on the concurrent webhook fan-out.
+> This web→worker chain is deliberate: two **concurrent** builds on this small VPS exhaust
+> disk/RAM and fail together (see `INFRASTRUCTURE.md` §9 and §11). To force a manual sequential
+> deploy, run the on-box helper `/root/deploy-sequential.sh` (`web` | `worker` | `both`).
 
 ---
 
@@ -101,13 +102,16 @@ S3_FORCE_PATH_STYLE=true                     # true for MinIO; false for AWS S3
 
 ### 6. Enable auto-deploy
 
-Turn on "auto deploy on push" for both apps (Coolify installs the GitHub webhook). Push to
-`main` now deploys automatically.
+Turn on "auto deploy on push" for the **web** app only; **leave the worker's auto-deploy off**.
+Push to `main` now deploys web automatically, and web chains the worker after it (see below).
 
-> ⚠️ With auto-deploy on **both** apps, one push builds web **and** worker at the same time. On a
-> small box that concurrency is the main cause of failed deploys (see `INFRASTRUCTURE.md` §9/§11).
-> Consider disabling the worker's webhook and chaining it off web's `post_deployment_command`, or
-> deploy via the sequential helper `/root/deploy-sequential.sh`.
+> ⚠️ Do **not** enable auto-deploy on both apps — one push would then build web **and** worker at
+> the same time, and that concurrency is the main cause of failed deploys on this small box (see
+> `INFRASTRUCTURE.md` §9/§11). Instead, chain them: set the **web** app's `post_deployment_command`
+> to trigger the worker deploy via the Coolify API once web finishes —
+> `curl "http://coolify:8080/api/v1/deploy?uuid=<worker-uuid>" -H "Authorization: Bearer $COOLIFY_DEPLOY_TOKEN" || true`
+> (token stored as the web app's encrypted `COOLIFY_DEPLOY_TOKEN` env var). This is already set up
+> in production; the full wiring + rollback is documented in `INFRASTRUCTURE.md` §9.
 
 ---
 
