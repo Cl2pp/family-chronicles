@@ -34,7 +34,7 @@ export const de: Dictionary = {
     eyebrow: 'Privat · Sicher · Nur auf Einladung',
     heroTitle: 'Eure Familie schreibt ihr eigenes Buch.',
     heroSubtitle:
-      'Erzählt Erinnerungen — getippt oder einfach gesprochen. Familienwerk verwandelt sie in eine fortlaufende Familienchronik, die sich liest wie ein echtes Memoir. Und wird am Ende ein gedrucktes Buch.',
+      'Erzählt Erinnerungen — getippt oder einfach gesprochen. Familienwerk verwandelt sie in eine fortlaufende Familiengeschichte, die sich liest wie ein echtes Memoir. Und wird am Ende ein gedrucktes Buch.',
     ctaPrimary: 'Familienwerk starten',
     ctaSecondary: 'So funktioniert’s',
     heroTrust: 'Von Oma bis Enkel — alle schreiben mit.',
@@ -72,7 +72,7 @@ export const de: Dictionary = {
       'Geschichten werden datiert und geordnet — so liest sich eure Familiengeschichte als ein durchgehender Faden, von den Ältesten bis heute.',
     treeTitle: 'Stammbaum & Familien-Tags',
     treeText:
-      'Legt euren Stammbaum einmal an. Geschichten ordnen sich automatisch den richtigen Personen und Zweigen zu — filtert die Chronik auf eine Seite der Familie.',
+      'Legt euren Stammbaum einmal an. Geschichten ordnen sich automatisch den richtigen Personen und Zweigen zu — filtert das Familienwerk auf eine Seite der Familie.',
     // — Das Buch (dunkler Abschnitt) —
     bookEyebrow: 'Das Finale',
     bookTitle: 'Am Ende steht ein echtes Buch im Regal.',
@@ -84,7 +84,7 @@ export const de: Dictionary = {
     bookCoverMeta: '1924 — 2026 · 214 Seiten',
     // — Privatsphäre —
     privacy1Title: 'Nur auf Einladung',
-    privacy1Text: 'Eure Chronik gehört eurer Familie. Kein öffentliches Profil, keine Fremden.',
+    privacy1Text: 'Euer Familienwerk gehört eurer Familie. Kein öffentliches Profil, keine Fremden.',
     privacy2Title: 'Originale für immer',
     privacy2Text:
       'Jede Sprachnotiz, jeder Text, jedes Foto bleibt erhalten — jede Geschichte zeigt, wer wann was beigetragen hat.',
@@ -95,7 +95,7 @@ export const de: Dictionary = {
     closingLine1: 'Die beste Zeit anzufangen war vor 30 Jahren.',
     closingLine2: 'Die zweitbeste ist heute.',
     closingText:
-      'Startet eure Chronik und ladet die Familie ein — die erste Geschichte ist in fünf Minuten erzählt.',
+      'Startet euer Familienwerk und ladet die Familie ein — die erste Geschichte ist in fünf Minuten erzählt.',
     closingCta: 'Familienwerk starten',
     // — Footer —
     footerTagline: 'Familienwerk · familienwerk.co',
@@ -107,7 +107,7 @@ export const de: Dictionary = {
     faqItems: [
       {
         q: 'Was ist Familienwerk?',
-        a: 'Ein privater Ort nur auf Einladung, an dem eure Familie ihre Geschichten sammelt — getippt oder gesprochen. Familienwerk macht daraus eine fortlaufende Familienchronik auf einer Zeitleiste und am Ende ein gedrucktes Hardcover.',
+        a: 'Ein privater Ort nur auf Einladung, an dem eure Familie ihre Geschichten sammelt — getippt oder gesprochen. Familienwerk macht daraus eine fortlaufende Familiengeschichte auf einer Zeitleiste und am Ende ein gedrucktes Hardcover.',
       },
       {
         q: 'Wie erzähle ich eine Geschichte?',
@@ -115,7 +115,7 @@ export const de: Dictionary = {
       },
       {
         q: 'Sind unsere Geschichten privat?',
-        a: 'Ja. Familienwerk ist nur auf Einladung, ohne öffentliches Profil und ohne Werbung. Eure Chronik gehört allein eurer Familie.',
+        a: 'Ja. Familienwerk ist nur auf Einladung, ohne öffentliches Profil und ohne Werbung. Euer Familienwerk gehört allein eurer Familie.',
       },
       {
         q: 'Können auch ältere Familienmitglieder mitmachen?',
@@ -193,24 +193,24 @@ export const de: Dictionary = {
     languageTitle: 'Sprache',
     uiLanguageLabel: 'App-Sprache',
     uiLanguageDescription: 'Die Sprache von Menüs, Buttons und Seiten auf diesem Gerät.',
-    chroniclesTitle: 'Chroniken',
+    chroniclesTitle: 'Familienwerke',
     chroniclesHint:
-      'Die ausgewählte Chronik ist die, mit der Chat, Geschichten und Stammbaum öffnen. Klappe eine Chronik auf, um ihre Einstellungen zu bearbeiten.',
+      'Das ausgewählte Familienwerk ist das, mit dem Chat, Geschichten und Stammbaum öffnen. Klappe ein Familienwerk auf, um seine Einstellungen zu bearbeiten.',
     onlyOwners: 'Nur Eigentümer können diese Einstellungen ändern.',
-    chronicleName: 'Name der Chronik',
-    chronicleNameRequired: 'Ein Name für die Chronik ist erforderlich',
+    chronicleName: 'Name des Familienwerks',
+    chronicleNameRequired: 'Ein Name für das Familienwerk ist erforderlich',
     description: 'Beschreibung',
     writingStyle: 'Schreibstil',
     writingStyleDescription:
       'Vorgaben, die beim Nacherzählen der Geschichten in den Stil-Prompt einfließen.',
     storyLanguage: 'Sprache der Geschichten',
     storyLanguageDescription:
-      'Die Sprache, in der Geschichten für diese Chronik nacherzählt werden.',
+      'Die Sprache, in der Geschichten für dieses Familienwerk nacherzählt werden.',
     storyLanguageAuto: 'Wie erzählt (keine Übersetzung)',
     storyAccess: 'Sichtbarkeit der Geschichten',
     storyAccessDescription:
-      'Wer die Geschichten dieser Chronik lesen kann. Im Familien-Modus sehen Mitglieder nur Geschichten über sich selbst oder ihre enge Familie — plus alles, was sie selbst erzählt haben; Eigentümer sehen immer alles.',
-    storyAccessOpen: 'Alle in der Chronik',
+      'Wer die Geschichten dieses Familienwerks lesen kann. Im Familien-Modus sehen Mitglieder nur Geschichten über sich selbst oder ihre enge Familie — plus alles, was sie selbst erzählt haben; Eigentümer sehen immer alles.',
+    storyAccessOpen: 'Alle im Familienwerk',
     storyAccessFamily: 'Nur enge Familie',
     storyAccessUnlinkedWarning: (n: number) =>
       n === 1
@@ -224,33 +224,33 @@ export const de: Dictionary = {
     appTitle: 'App',
   },
   chroniclesCard: {
-    noChroniclesYet: 'Noch keine Chroniken',
+    noChroniclesYet: 'Noch keine Familienwerke',
     createFirstHint:
-      'Erstelle eine Chronik, um Geschichten zu sammeln und euren Stammbaum aufzubauen.',
-    startYourChronicle: 'Starte deine Chronik',
+      'Erstelle ein Familienwerk, um Geschichten zu sammeln und euren Stammbaum aufzubauen.',
+    startYourChronicle: 'Starte dein Familienwerk',
     useChronicleAria: (name: string) => `${name} verwenden`,
     activeBadge: 'Aktiv',
     open: 'Öffnen',
     created: (date: string) => `Erstellt am ${date}`,
     toggleSettingsAria: (name: string) => `Einstellungen für ${name}`,
-    newChronicle: 'Neue Chronik',
+    newChronicle: 'Neues Familienwerk',
   },
   chronicleNew: {
-    title: 'Eine Chronik starten',
+    title: 'Ein Familienwerk starten',
     intro:
-      'Eine Chronik ist der private Ort deiner Familie für Geschichten und einen gemeinsamen Stammbaum. Familien entstehen darin automatisch aus Nachnamen und Ehen.',
+      'Ein Familienwerk ist der private Ort deiner Familie für Geschichten und einen gemeinsamen Stammbaum. Familien entstehen darin automatisch aus Nachnamen und Ehen.',
     namePlaceholder: 'z. B. Ortlepp & Hartwick',
-    descriptionPlaceholder: 'Eine kurze Notiz zu dieser Chronik (optional)',
-    create: 'Chronik erstellen',
+    descriptionPlaceholder: 'Eine kurze Notiz zu diesem Familienwerk (optional)',
+    create: 'Familienwerk erstellen',
   },
   chronicleEmpty: {
-    title: 'Starte deine Chronik',
-    text: 'Erstelle eine private Chronik, um die Geschichten deiner Familie zu sammeln und gemeinsam einen Stammbaum aufzubauen.',
-    button: 'Starte deine Chronik',
+    title: 'Starte dein Familienwerk',
+    text: 'Erstelle ein privates Familienwerk, um die Geschichten deiner Familie zu sammeln und gemeinsam einen Stammbaum aufzubauen.',
+    button: 'Starte dein Familienwerk',
   },
   tree: {
     pageTitle: 'Stammbaum',
-    activeChronicleAria: 'Aktive Chronik',
+    activeChronicleAria: 'Aktives Familienwerk',
     tabTree: 'Baum',
     tabAccess: 'Zugriff',
     familiesTitle: 'Familien',
@@ -330,7 +330,7 @@ export const de: Dictionary = {
   access: {
     invite: 'Einladen',
     pendingInvitations: 'Ausstehende Einladungen',
-    inviteModalTitle: 'In die Chronik einladen',
+    inviteModalTitle: 'Ins Familienwerk einladen',
     shareLinkText: 'Teile diesen Link mit der eingeladenen Person:',
     copied: 'Kopiert',
     copyLink: 'Link kopieren',
@@ -365,7 +365,7 @@ export const de: Dictionary = {
   },
   chat: {
     setupSuggestions: [
-      'Meine Chronik einrichten',
+      'Mein Familienwerk einrichten',
       'Verwandte(n) hinzufügen',
       'Eine Erinnerung aufnehmen',
     ],
@@ -376,11 +376,11 @@ export const de: Dictionary = {
     ],
     newChat: 'Neuer Chat',
     welcomeTitle: 'Was möchtest du tun?',
-    welcomeTitleSetup: 'Willkommen — lass uns deine Chronik beginnen',
+    welcomeTitleSetup: 'Willkommen — lass uns dein Familienwerk beginnen',
     welcomeText:
       'Sprich oder tippe — ich schreibe Geschichten und lasse euren Stammbaum wachsen.',
     welcomeTextSetup:
-      'Erzähl mir von deiner Familie und ich richte deine Chronik ein — dann können wir anfangen, Erinnerungen zu sammeln.',
+      'Erzähl mir von deiner Familie und ich richte dein Familienwerk ein — dann können wir anfangen, Erinnerungen zu sammeln.',
     thinking: 'Denke nach…',
     transcribing: 'Transkribiere…',
     somethingWentWrong: 'Entschuldigung — etwas ist schiefgelaufen. Bitte versuch es noch einmal.',
@@ -403,7 +403,7 @@ export const de: Dictionary = {
     discard: 'Verwerfen',
     couldNotUndo: 'Das konnte nicht rückgängig gemacht werden. Bitte versuch es noch einmal.',
     addStoryPrompt:
-      'Ich möchte eine neue Geschichte zur Chronik hinzufügen. Bitte frag mich, welche Geschichte ich erzählen möchte.',
+      'Ich möchte eine neue Geschichte zum Familienwerk hinzufügen. Bitte frag mich, welche Geschichte ich erzählen möchte.',
   },
   recorder: {
     start: 'Aufnahme starten',
@@ -429,7 +429,7 @@ export const de: Dictionary = {
     addStory: 'Geschichte hinzufügen',
     unlinkedTitle: 'Du bist noch nicht im Stammbaum',
     unlinkedBody:
-      'Mindestens eine deiner Chroniken zeigt Geschichten nur der engen Familie. Bis dich ein Eigentümer im Stammbaum einträgt, siehst du nur die Geschichten, die du selbst erzählt hast.',
+      'Mindestens eines deiner Familienwerke zeigt Geschichten nur der engen Familie. Bis dich ein Eigentümer im Stammbaum einträgt, siehst du nur die Geschichten, die du selbst erzählt hast.',
     unlinkedDismiss: 'Ausblenden',
   },
   story: {
@@ -461,7 +461,7 @@ export const de: Dictionary = {
     editStoryDescription:
       'Änderungen betreffen die nacherzählte Geschichte; das Original-Transkript bleibt unberührt.',
     recordedOn: (date: string) => `Festgehalten am ${date}`,
-    sharePlaceholder: 'In eine andere Chronik teilen…',
+    sharePlaceholder: 'In ein anderes Familienwerk teilen…',
     addPhotos: 'Fotos hinzufügen',
     photoUploadFailed: 'Hochladen fehlgeschlagen. Bitte versuch es noch einmal.',
     viewPhoto: 'Foto ansehen',
@@ -517,7 +517,7 @@ export const de: Dictionary = {
       moveDown: 'Nach unten',
       removeStory: 'Aus dem Buch entfernen',
       moreStories: 'Weitere Geschichten',
-      moreStoriesHint: 'Fertige Geschichten dieser Chronik, die noch nicht im Buch sind.',
+      moreStoriesHint: 'Fertige Geschichten dieses Familienwerks, die noch nicht im Buch sind.',
       addStory: 'Hinzufügen',
       withPhotos: 'Mit Fotos',
       settings: 'Bucheinstellungen',
@@ -609,16 +609,16 @@ export const de: Dictionary = {
     notFound: 'Dieser Einladungslink ist nicht gültig.',
     expired: 'Diese Einladung ist abgelaufen. Bitte um eine neue Einladung.',
     used: 'Diese Einladung wurde bereits verwendet.',
-    goToChronicles: 'Zu deinen Chroniken',
+    goToChronicles: 'Zu deinen Familienwerken',
     confirmText: (chronicle: string) => `Du wurdest eingeladen, „${chronicle}“ beizutreten.`,
     confirmPerson: (name: string) =>
       `Dein Konto wird im Stammbaum mit ${name} verknüpft.`,
     confirmAccept: 'Einladung annehmen',
     acceptedTitle: 'Willkommen!',
     acceptedLinkedText:
-      'Du hast jetzt Zugriff auf die Chronik, und dein Platz im Stammbaum ist mit deinem Konto verknüpft.',
+      'Du hast jetzt Zugriff auf das Familienwerk, und dein Platz im Stammbaum ist mit deinem Konto verknüpft.',
     acceptedLinkFailedText:
-      'Du hast jetzt Zugriff auf die Chronik — aber dein Platz im Stammbaum konnte nicht automatisch verknüpft werden. Bitte einen Eigentümer, dein Konto im Zugriff-Tab zu verknüpfen.',
+      'Du hast jetzt Zugriff auf das Familienwerk — aber dein Platz im Stammbaum konnte nicht automatisch verknüpft werden. Bitte einen Eigentümer, dein Konto im Zugriff-Tab zu verknüpfen.',
   },
   offline: {
     title: 'Du bist offline',
@@ -632,7 +632,8 @@ export const de: Dictionary = {
     install: 'Installieren',
     notNow: 'Später',
     guideTitle: 'Zum Home-Bildschirm hinzufügen',
-    iosStep1: 'Tippe auf das Teilen-Symbol in der Browserleiste.',
+    iosStep1:
+      'Tippe auf das Teilen-Symbol in der Browserleiste. Siehst du es nicht, tippe zuerst auf „…“, um es zu finden.',
     iosStep2: 'Scrolle nach unten und tippe auf „Zum Home-Bildschirm“.',
     iosStep3:
       'Tippe auf „Hinzufügen“ — Familienwerk liegt jetzt wie eine App auf deinem Home-Bildschirm.',

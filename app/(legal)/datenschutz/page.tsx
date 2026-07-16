@@ -40,8 +40,8 @@ export default function DatenschutzPage() {
           personenbezogener Daten innerhalb von Familienwerk (nachfolgend „die Anwendung“).
           Rechtsgrundlagen der Verarbeitung sind, soweit nicht anders angegeben, die Vorschriften der
           Datenschutz-Grundverordnung (DSGVO). Familienwerk ist ein privater, ausschließlich
-          einladungsbasierter Dienst: Inhalte sind nur für die Mitglieder der jeweiligen
-          Familienchronik sichtbar. Es gibt keine öffentlichen Profile, keine Werbung und kein
+          einladungsbasierter Dienst: Inhalte sind nur für die Mitglieder des jeweiligen
+          Familienwerks sichtbar. Es gibt keine öffentlichen Profile, keine Werbung und kein
           Tracking zu Werbezwecken.
         </P>
       </Section>
@@ -137,7 +137,7 @@ export default function DatenschutzPage() {
         <P>
           Wir speichern personenbezogene Daten so lange, wie es für die genannten Zwecke erforderlich
           ist bzw. wie du dein Konto und deine Inhalte nutzt. Die Rohdaten (Original-Audioaufnahmen
-          und -Fotos) werden zur Nachvollziehbarkeit aufbewahrt, solange die zugehörige Chronik
+          und -Fotos) werden zur Nachvollziehbarkeit aufbewahrt, solange das zugehörige Familienwerk
           besteht. Löschst du dein Konto oder einzelne Inhalte, werden die betroffenen Daten gelöscht,
           soweit keine gesetzlichen Aufbewahrungspflichten entgegenstehen.
         </P>
