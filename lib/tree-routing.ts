@@ -34,6 +34,10 @@ export interface ParentBus {
   childIds: string[];
   /** The rail's y coordinate — exposed for tests. */
   busY: number;
+  /** Where the source drop meets the parents (spouse bar / lone-parent bottom). */
+  source: { x: number; y: number };
+  /** Each child's drop: its x on the rail and the card top it lands on. */
+  children: { id: string; x: number; top: number }[];
 }
 
 /** Rows are top-aligned, so same-row couples differ in top by rendering noise only. */
@@ -173,11 +177,20 @@ export function routeParentConnectors(opts: {
       const busY = bandTop + step * (bus.lane + 1);
       let d = `M ${bus.sourceX} ${bus.sourceY} V ${busY}`;
       if (bus.right > bus.left) d += ` M ${bus.left} ${busY} H ${bus.right}`;
+      const children: ParentBus['children'] = [];
       for (const c of bus.childIds) {
         const p = positions.get(c)!;
         d += ` M ${p.cx} ${busY} V ${p.top}`;
+        children.push({ id: c, x: p.cx, top: p.top });
       }
-      out.push({ d, parentIds: [...bus.parentIds], childIds: [...bus.childIds], busY });
+      out.push({
+        d,
+        parentIds: [...bus.parentIds],
+        childIds: [...bus.childIds],
+        busY,
+        source: { x: bus.sourceX, y: bus.sourceY },
+        children,
+      });
     }
   }
   return out;

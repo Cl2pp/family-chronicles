@@ -144,6 +144,32 @@ describe('routeParentConnectors', () => {
     expect(buses[0].busY).toBeLessThan(row2Top);
   });
 
+  it('exposes structured source + child geometry for per-segment highlighting', () => {
+    const buses = route(
+      {
+        A: { cx: 300, row: 0 },
+        B: { cx: 474, row: 0 },
+        k1: { cx: 200, row: 1 },
+        k2: { cx: 374, row: 1 },
+        k3: { cx: 548, row: 1 },
+      },
+      couple('A', 'B', ['k1', 'k2', 'k3']),
+    );
+    const [bus] = buses;
+    // Source sits at the spouse-bar midpoint, same point the `d` string starts at.
+    expect(bus.source).toEqual({ x: 387, y: ROW_H / 2 });
+    // One structured drop per child, x/top matching the card boxes, sorted by x.
+    expect(bus.children).toEqual([
+      { id: 'k1', x: 200, top: ROW_H + ROW_GAP },
+      { id: 'k2', x: 374, top: ROW_H + ROW_GAP },
+      { id: 'k3', x: 548, top: ROW_H + ROW_GAP },
+    ]);
+    // The renderer highlights only the sub-rail spanning highlighted attachment
+    // points — e.g. source + k1 only spans x=200..387, never out to k3 at 548.
+    const railXs = [bus.source.x, bus.children[0].x];
+    expect(Math.max(...railXs)).toBe(387);
+  });
+
   it('is deterministic', () => {
     const cards = {
       A: { cx: 300, row: 0 },

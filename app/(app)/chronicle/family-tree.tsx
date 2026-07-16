@@ -614,28 +614,58 @@ export function FamilyTree({
               >
                 {connectors.parents.map((bus, i) => {
                   const color = busColor(bus);
-                  // While a family is hovered: buses touching a member get its
-                  // color at full strength, all other lines fade out.
-                  const touched = highlightedIds
-                    ? bus.parentIds.some((id) => highlightedIds.has(id)) ||
-                      bus.childIds.some((id) => highlightedIds.has(id))
-                    : null;
+                  const baseColor = color ?? 'var(--mantine-color-slate-3)';
+                  // No family hovered: the whole bus draws at rest.
+                  if (!highlightedIds) {
+                    return (
+                      <path
+                        key={`p-${i}`}
+                        d={bus.d}
+                        fill="none"
+                        stroke={baseColor}
+                        strokeOpacity={color ? 0.45 : 1}
+                        strokeWidth={1.5}
+                        style={{ transition: 'stroke-opacity 120ms ease, stroke 120ms ease' }}
+                      />
+                    );
+                  }
+                  // A family is hovered: fade the whole bus, then re-draw only the
+                  // segments that link highlighted members on top. The bright rail
+                  // spans just the highlighted attachment points, so it never runs
+                  // past the last member and no drop points at a faded card.
+                  const parentHit = bus.parentIds.some((id) => highlightedIds.has(id));
+                  const hlChildren = bus.children.filter((c) => highlightedIds.has(c.id));
+                  const railXs = [
+                    ...(parentHit ? [bus.source.x] : []),
+                    ...hlChildren.map((c) => c.x),
+                  ];
+                  let hd = '';
+                  if (parentHit) hd += `M ${bus.source.x} ${bus.source.y} V ${bus.busY} `;
+                  if (railXs.length >= 2) {
+                    hd += `M ${Math.min(...railXs)} ${bus.busY} H ${Math.max(...railXs)} `;
+                  }
+                  for (const c of hlChildren) hd += `M ${c.x} ${bus.busY} V ${c.top} `;
                   return (
-                    <path
-                      key={`p-${i}`}
-                      d={bus.d}
-                      fill="none"
-                      stroke={
-                        touched && highlightColor
-                          ? highlightColor
-                          : (color ?? 'var(--mantine-color-slate-3)')
-                      }
-                      strokeOpacity={
-                        touched === null ? (color ? 0.45 : 1) : touched ? 0.9 : 0.12
-                      }
-                      strokeWidth={touched ? 2.5 : 1.5}
-                      style={{ transition: 'stroke-opacity 120ms ease, stroke 120ms ease' }}
-                    />
+                    <g key={`p-${i}`}>
+                      <path
+                        d={bus.d}
+                        fill="none"
+                        stroke={baseColor}
+                        strokeOpacity={0.12}
+                        strokeWidth={1.5}
+                        style={{ transition: 'stroke-opacity 120ms ease, stroke 120ms ease' }}
+                      />
+                      {hd && highlightColor && (
+                        <path
+                          d={hd}
+                          fill="none"
+                          stroke={highlightColor}
+                          strokeOpacity={0.9}
+                          strokeWidth={2.5}
+                          style={{ transition: 'stroke-opacity 120ms ease, stroke 120ms ease' }}
+                        />
+                      )}
+                    </g>
                   );
                 })}
                 {connectors.spouses.map((s, i) => {
