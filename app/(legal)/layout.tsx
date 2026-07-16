@@ -1,42 +1,45 @@
-import { Box, Container, Divider, Group, Anchor } from '@mantine/core';
+import { getI18n } from '@/lib/i18n/server';
+import { BrandGlyph } from '@/components/brand-glyph';
 import { LandingTopbar } from '../landing-topbar';
+import s from '../landing.module.css';
 
 /**
- * Public chrome for the legal pages (Impressum, Datenschutz). Mirrors the
- * marketing page's top bar and footer so the pages feel part of the site, but
- * — unlike the (auth) layout — it never redirects: these must be reachable by
- * anyone, signed in or not, to satisfy the German Impressumspflicht.
+ * Public chrome for the legal pages (Impressum, Datenschutz). Reuses the
+ * rebrand's landing shell (`s.page`/`s.wrap`, paper background, brand fonts)
+ * and its top bar + footer so a visitor moving from the landing page into a
+ * legal page sees no seam. Unlike the (auth) layout it never redirects — these
+ * must be reachable by anyone to satisfy the German Impressumspflicht.
+ *
+ * The top bar is pointed home (`logoHref="/"`, no section links), since the
+ * landing page's in-page anchors don't exist on these routes.
  *
  * The content is German-only (Impressum/Datenschutz are German legal
- * artifacts), so we pin `lang="de"` on the article regardless of the UI locale.
+ * artifacts), so `lang="de"` is pinned on the article regardless of UI locale.
  */
-export default function LegalLayout({ children }: { children: React.ReactNode }) {
+export default async function LegalLayout({ children }: { children: React.ReactNode }) {
+  const { t } = await getI18n();
+  const h = t.home;
+
   return (
-    <Box bg="white" mih="100dvh">
-      <Container size="lg" py="md">
-        <LandingTopbar />
-      </Container>
+    <div className={s.page}>
+      <div className={s.wrap}>
+        <LandingTopbar logoHref="/" showSections={false} />
 
-      <Container size="sm" py={{ base: 32, sm: 56 }} lang="de">
-        {children}
-      </Container>
+        <main lang="de" style={{ maxWidth: 720, margin: '0 auto', padding: '32px 0 8px' }}>
+          {children}
+        </main>
 
-      <Container size="lg" py="xl">
-        <Divider mb="md" />
-        <Group justify="space-between" wrap="wrap" gap="sm">
-          <Anchor href="/" c="slate.5" fz="sm" underline="hover">
-            Familienwerk
-          </Anchor>
-          <Group gap="md" wrap="wrap">
-            <Anchor href="/impressum" c="slate.5" fz="sm" underline="hover">
-              Impressum
-            </Anchor>
-            <Anchor href="/datenschutz" c="slate.5" fz="sm" underline="hover">
-              Datenschutz
-            </Anchor>
-          </Group>
-        </Group>
-      </Container>
-    </Box>
+        <footer className={s.footer}>
+          <div className={s.footerBrand}>
+            <BrandGlyph size={18} />
+            <span>{h.footerTagline}</span>
+          </div>
+          <div className={s.footerLinks}>
+            <a href="/impressum">{h.footerImprint}</a>
+            <a href="/datenschutz">{h.footerPrivacy}</a>
+          </div>
+        </footer>
+      </div>
+    </div>
   );
 }
