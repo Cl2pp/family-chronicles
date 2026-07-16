@@ -25,6 +25,7 @@ import { AddPersonModal } from './add-person-modal';
 import { EditPersonModal } from './edit-person-modal';
 import { AccessTab } from './access-tab';
 import type { AddTarget, ChronicleRow, InviteRow, MemberRow, PersonRow } from './types';
+import classes from './chronicle-tabs.module.css';
 
 // 12 hues × 3 shades = 36 distinct colors before the cycle repeats. Neighboring
 // hues are ordered for contrast; green ('green') is skipped as too close to brand.
@@ -79,16 +80,6 @@ export function ChronicleTabs({
     person: null,
   });
   const [familiesOpen, setFamiliesOpen] = useState(true);
-  // Hover previews a family highlight; click pins it (hover still wins while active,
-  // and pinning is the only way to highlight on touch devices).
-  const [hoverTag, setHoverTag] = useState<string | null>(null);
-  const [pinnedTag, setPinnedTag] = useState<string | null>(null);
-  const highlightTag = hoverTag ?? pinnedTag;
-
-  function switchChronicle(id: string) {
-    document.cookie = `activeChronicleId=${id}; path=/; max-age=31536000; samesite=lax`;
-    router.refresh();
-  }
 
   // Families are derived, not configured: collect every tag on the tree's people,
   // biggest family first, and give each a stable palette color.
@@ -101,6 +92,36 @@ export function ChronicleTabs({
       .map(([tag, count]) => ({ tag, count }))
       .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
   }, [tree.people]);
+
+  // Once a tree has many families the colored dots alone are hard to read, so we
+  // pre-highlight the signed-in member's own surname (and, via hover, their family)
+  // to give the eye an anchor. Only kicks in past the threshold; below it the tree
+  // is legible unhighlighted.
+  const HIGHLIGHT_THRESHOLD = 5;
+  const ownFamilyTag = useMemo(() => {
+    const me = (tree.people as TreePerson[]).find((p) => p.userId === currentUserId);
+    const name = me?.familyName?.trim();
+    return name && me?.familyTags.includes(name) ? name : null;
+  }, [tree.people, currentUserId]);
+  const defaultTag = familyTags.length > HIGHLIGHT_THRESHOLD ? ownFamilyTag : null;
+
+  // Hover previews a family highlight; click pins it (hover still wins while active,
+  // and pinning is the only way to highlight on touch devices). The pin starts on
+  // the default tag so a busy tree opens with the member's own family lit up; the
+  // user can click it again to clear or hover another family as usual.
+  const [hoverTag, setHoverTag] = useState<string | null>(null);
+  const [pinnedTag, setPinnedTag] = useState<string | null>(defaultTag);
+  // Guard against a stale pin: switching chronicles keeps this component mounted,
+  // so a tag pinned (or defaulted) for one tree may not exist in the next. An
+  // unknown tag would otherwise dim every card and highlight none, so drop it.
+  const knownTags = useMemo(() => new Set(familyTags.map((f) => f.tag)), [familyTags]);
+  const rawHighlight = hoverTag ?? pinnedTag;
+  const highlightTag = rawHighlight && knownTags.has(rawHighlight) ? rawHighlight : null;
+
+  function switchChronicle(id: string) {
+    document.cookie = `activeChronicleId=${id}; path=/; max-age=31536000; samesite=lax`;
+    router.refresh();
+  }
 
   const colorByTag: Record<string, string> = {};
   familyTags.forEach((family, i) => {
@@ -141,7 +162,7 @@ export function ChronicleTabs({
         <Tabs.Panel value="tree" pt="lg">
           <Stack gap="md">
             {familyTags.length > 0 && (
-              <Paper withBorder radius="md" p="md">
+              <Paper withBorder radius="md" p="md" className={classes.legend}>
                 <UnstyledButton
                   onClick={() => setFamiliesOpen((o) => !o)}
                   aria-label={t.tree.familiesToggleAria}
