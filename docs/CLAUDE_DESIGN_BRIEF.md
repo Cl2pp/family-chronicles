@@ -1,5 +1,12 @@
 # Familienwerk — Claude Design Brief (wireframe revision)
 
+> **⚠️ Superseded (2026-07) — visual language rebranded.** The blue/Inter identity
+> described in §0–1 was replaced by the **Familienwerk green** system: Werk Green
+> `#12C24A` as the single accent, **Space Grotesk** (headings/wordmark) + **Outfit**
+> (body), pill buttons, and the "Familienstimmen" voice-bars logo. §1 below is
+> updated to the new tokens; the live source of truth is `app/theme.ts` +
+> `app/globals.css` (`--fw-*`). The app **structure/layout** in §2–7 is still accurate.
+>
 > **Status: delivered.** The wireframes were produced from this brief
 > (`Familienwerk Wireframes.dc.html`). This file is now **reference** for what was
 > asked of design. Roadmap & current step: `~/.claude/plans/curious-gliding-dijkstra.md`.
@@ -10,15 +17,15 @@
 > there and are *not* needed here.
 >
 > **Biggest change to apply:** the **Family tab is no longer a member list — it is a
-> family tree.** See §5. All other screens get the new blue/white/black look and the
+> family tree.** See §5. All other screens get the new green/paper/ink look and the
 > sidebar layout.
 
 ---
 
 ## 0. What's changing at a glance
 
-1. **New visual language:** warm terracotta → **modern blue / white / black**, **light
-   mode only**, **fully sans (Inter)** everywhere (no serif).
+1. **New visual language:** warm terracotta → **Familienwerk green / paper / ink**, **light
+   mode only**, **fully sans** everywhere (Space Grotesk headings + Outfit body; no serif).
 2. **New layout:** persistent **left sidebar** + center content (top-bar with a
    **family switcher**); mobile collapses to a **bottom tab bar**.
 3. **Create flow is now a chat:** the old *Write / Speak* composer is replaced by a
@@ -30,25 +37,27 @@
 
 ## 1. Visual language (design tokens)
 
-**Primary — brand blue** (`#2563EB` family):
-`50 #EFF4FF · 100 #DBE6FE · 200 #BFD3FE · 300 #93B4FD · 400 #609AFA · 500 #3B82F6 ·`
-`600 #2563EB (primary) · 700 #1D4ED8 (hover) · 800 #1E40AF · 900 #1E3A8A`
+**Primary — Werk Green** (green is the *single* accent: primary action, active nav,
+tags, links, record indicator):
+`0 #E9FAE5 (tint) · 1 #C6F5D5 · 2 #97ECB2 · 3 #5FE08C · 4 #33D26E · 5 #1CC957 ·`
+`6 #12C24A (primary) · 7 #0FA03D (hover) · 8 #0C8038 (deep — links/green text) · 9 #0A6B2E`
+Plus **Lime `#7BE84B`** — highlights on dark surfaces only (not in the ramp).
 
-**Neutrals (white → black, cool slate):**
-`surface #FFFFFF · app/sidebar bg #F8FAFC · muted/well #F1F5F9 · border #E2E8F0 ·`
-`border-strong #CBD5E1 · text-secondary #64748B · text-primary #0F172A · ink #020617`
+**Neutrals (warm ink-green ramp, paper → ink):**
+`paper/app-bg #FBFCFB · shade/panel #F3F6F4 · border #E6EBE8 · #CBD4CF · #9BA8A1 ·`
+`muted-text #6E7C75 · body-text #4A554F · #333D38 · #232E28 · ink #17211C`
 
-**Semantic:** success `#16A34A` · warning `#D97706` · error `#DC2626` · info = brand.
-**Story status:** draft = gray · processing = brand blue (animated) · ready = green ·
-failed = red.
+**Semantic:** success = green (`#12C24A`/`#0C8038`) · warning `#D97706` · error `#DC2626`.
+**Story status:** draft = gray · processing = green (animated) · ready = green · failed = red.
 
-**Type:** Inter (system sans fallback). `display 32/40 · h1 24/32 · h2 20/28 ·
-h3 16/24 · body 15/24 · small 13/20 · caption 12/16`; weights 400/500/600. Reading view
-uses body at ~18/1.7, ~68ch max measure.
+**Type:** **Space Grotesk** — wordmark, headings, titles (weight 600, ~−2% tracking).
+**Outfit** — body & UI (400/500, friendly-geometric, legible for older readers; UI ≥13px,
+body 14–16px). No serif. Reading view uses body at ~18/1.7, ~68ch max measure.
 
-**Shape & depth:** radius `sm 8 / md 12 (default) / lg 16 / full`. Prefer **hairline
-borders + subtle shadow** over heavy shadows. Motion 120–180ms ease-out; respect
-reduced-motion. Icons: **Tabler**, 1.5–2px stroke.
+**Shape & depth:** radius `card 14–16 · button 999 (pill) · icon 25% · sm 8 / md 12`.
+Prefer **hairline borders + subtle shadow**. Motion 120–180ms ease-out; respect
+reduced-motion. Icons: **Tabler**, 1.5–2px stroke (in-app); the landing uses bespoke
+green SVGs.
 
 ---
 
@@ -175,8 +184,8 @@ prose). Switch / create / leave family.
 ## 6. Auth & account
 - **Account:** profile (name, avatar, email), **"My families"** with the user's role in
   each + quick switch, sign out.
-- **Auth (login / signup / invite-accept):** centered card on `#F8FAFC`, brand-blue
-  primary button, new palette + Inter.
+- **Auth (login / signup / invite-accept):** centered card on paper `#FBFCFB`, green
+  pill primary button, new palette + Space Grotesk/Outfit.
 
 ---
 
@@ -198,6 +207,6 @@ Restyle/redraw in the new system, and add the new ones (★):
 - Family access & settings: access row (account + role badge), invite modal, settings
   form.
 - Account & auth: account page, "my families" list, login/signup/invite cards.
-- Primitives: buttons (primary blue / secondary / ghost / danger), inputs, badges
+- Primitives: buttons (primary green pill / secondary / ghost / danger), inputs, badges
   (status + role), avatars, segmented control, toasts, skeletons, dialogs.
 - **Every screen needs:** empty, loading/streaming, error/retry, and processing states.

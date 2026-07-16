@@ -1,264 +1,130 @@
 /**
- * Hand-built SVG illustrations for the marketing page. Static server-rendered
- * markup; colors reference Mantine theme CSS variables so they track the brand
- * palette (light-mode only app).
+ * Landing-only SVG illustrations — pure server-rendered markup, no client JS.
+ * The reusable brand mark lives in components/brand-glyph.tsx.
  */
 
-/** Hero pipeline: a spoken/typed memory → AI shaping → a finished book. */
-export function PipelineGraphic() {
+const G = '#12C24A';
+
+export function IconSpeak() {
+  return (
+    <svg width="30" height="30" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <rect x="16" y="26" width="6" height="12" rx="3" fill={G} />
+      <rect x="29" y="16" width="6" height="32" rx="3" fill={G} />
+      <rect x="42" y="22" width="6" height="20" rx="3" fill={G} />
+    </svg>
+  );
+}
+
+export function IconMemoir() {
+  return (
+    <svg width="30" height="30" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <rect x="14" y="14" width="36" height="8" rx="4" fill={G} />
+      <rect x="14" y="28" width="28" height="8" rx="4" fill="#17211C" opacity="0.55" />
+      <rect x="14" y="42" width="20" height="8" rx="4" fill="#17211C" opacity="0.3" />
+    </svg>
+  );
+}
+
+export function IconPhotos() {
+  return (
+    <svg width="30" height="30" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <rect x="10" y="12" width="26" height="26" rx="6" fill="#17211C" opacity="0.5" />
+      <rect x="24" y="24" width="30" height="28" rx="6" fill={G} />
+    </svg>
+  );
+}
+
+export function IconChat() {
+  return (
+    <svg width="30" height="30" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+      <path
+        d="M14 20 a8 8 0 0 1 8-8 h20 a8 8 0 0 1 8 8 v12 a8 8 0 0 1-8 8 H30 L18 50 q-4 3-4-2 Z"
+        fill={G}
+      />
+      <rect x="21" y="18" width="20" height="5" rx="2.5" fill="#fff" />
+      <rect x="21" y="27" width="13" height="5" rx="2.5" fill="#fff" opacity="0.75" />
+    </svg>
+  );
+}
+
+/**
+ * Hero illustration: a spoken note → AI shaping → a printed book, as one
+ * responsive SVG (scales cleanly from phone to desktop).
+ */
+export function HeroArt() {
   return (
     <svg
-      viewBox="0 0 760 260"
+      viewBox="0 0 468 150"
+      width="100%"
+      style={{ maxWidth: 520, height: 'auto', display: 'block', margin: '0 auto' }}
       role="img"
-      aria-label="A voice or text memory becomes a written story and then a printed book"
-      style={{ width: '100%', height: 'auto', display: 'block' }}
+      aria-label="A spoken note becomes a story and then a printed book"
     >
       <defs>
-        <linearGradient id="pg-bg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="var(--mantine-color-brand-0)" />
-          <stop offset="1" stopColor="var(--mantine-color-slate-0)" />
-        </linearGradient>
-        <linearGradient id="pg-book" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="var(--mantine-color-brand-5)" />
-          <stop offset="1" stopColor="var(--mantine-color-brand-7)" />
-        </linearGradient>
+        <filter id="fwCardShadow" x="-20%" y="-20%" width="140%" height="160%">
+          <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="#17211C" floodOpacity="0.08" />
+        </filter>
+        <filter id="fwBookShadow" x="-30%" y="-20%" width="170%" height="160%">
+          <feDropShadow dx="0" dy="8" stdDeviation="7" floodColor="#0C8038" floodOpacity="0.25" />
+        </filter>
       </defs>
 
-      <rect x="0" y="0" width="760" height="260" rx="20" fill="url(#pg-bg)" />
-
-      {/* Stage 1 — input (voice + text) */}
-      <g transform="translate(60 70)">
-        <rect width="150" height="120" rx="16" fill="white" stroke="var(--mantine-color-slate-2)" />
-        {/* speech bubble */}
-        <rect x="22" y="26" width="106" height="42" rx="12" fill="var(--mantine-color-brand-1)" />
-        <path d="M40 68 l0 14 l16 -14 Z" fill="var(--mantine-color-brand-1)" />
-        {/* waveform */}
-        <g stroke="var(--mantine-color-brand-6)" strokeWidth="3" strokeLinecap="round">
-          <path d="M38 47 v-8" />
-          <path d="M48 51 v-16" />
-          <path d="M58 54 v-22" />
-          <path d="M68 51 v-16" />
-          <path d="M78 48 v-10" />
-          <path d="M88 52 v-18" />
-          <path d="M98 50 v-14" />
-          <path d="M108 47 v-8" />
-        </g>
-        {/* text lines */}
-        <g stroke="var(--mantine-color-slate-3)" strokeWidth="4" strokeLinecap="round">
-          <path d="M26 88 h98" />
-          <path d="M26 100 h74" />
-        </g>
+      {/* Note card */}
+      <g filter="url(#fwCardShadow)">
+        <rect x="6" y="22" width="118" height="106" rx="14" fill="#fff" />
       </g>
+      <g transform="translate(21 36)">
+        <rect x="2" y="2" width="80" height="40" rx="12" fill="#E9FAE5" />
+        <path d="M14 40 L14 53 L29 40 Z" fill="#E9FAE5" />
+        <rect x="16" y="17" width="4" height="10" rx="2" fill={G} />
+        <rect x="24" y="13" width="4" height="18" rx="2" fill={G} />
+        <rect x="32" y="9" width="4" height="26" rx="2" fill={G} />
+        <rect x="40" y="15" width="4" height="14" rx="2" fill={G} />
+        <rect x="48" y="11" width="4" height="22" rx="2" fill={G} />
+        <rect x="56" y="17" width="4" height="10" rx="2" fill={G} />
+        <rect x="64" y="14" width="4" height="16" rx="2" fill={G} />
+      </g>
+      <rect x="24" y="100" width="76" height="6" rx="3" fill="#E3E8E4" />
+      <rect x="24" y="110" width="52" height="6" rx="3" fill="#EDF1EE" />
 
       {/* Arrow 1 */}
-      <Arrow x={218} />
-
-      {/* Stage 2 — AI shaping */}
-      <g transform="translate(305 70)">
-        <rect width="150" height="120" rx="16" fill="white" stroke="var(--mantine-color-slate-2)" />
-        <circle cx="75" cy="52" r="26" fill="var(--mantine-color-brand-0)" />
-        <Sparkle x={75} y={52} s={1.15} />
-        <Sparkle x={102} y={34} s={0.6} />
-        <Sparkle x={49} y={70} s={0.55} />
-        <g stroke="var(--mantine-color-slate-3)" strokeWidth="4" strokeLinecap="round">
-          <path d="M30 96 h90" />
-          <path d="M30 106 h64" />
-        </g>
+      <g transform="translate(132 68)">
+        <circle cx="4" cy="7" r="2.5" fill={G} />
+        <circle cx="14" cy="7" r="2.5" fill={G} />
+        <circle cx="24" cy="7" r="2.5" fill={G} />
+        <path d="M33 1 L40 7 L33 13" fill="none" stroke={G} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
       </g>
+
+      {/* AI / sparkle card */}
+      <g filter="url(#fwCardShadow)">
+        <rect x="188" y="18" width="100" height="114" rx="14" fill="#fff" />
+      </g>
+      <g transform="translate(207 30)">
+        <circle cx="32" cy="30" r="21" fill="#E9FAE5" />
+        <path d="M32 12 L36.5 25.5 L50 30 L36.5 34.5 L32 48 L27.5 34.5 L14 30 L27.5 25.5 Z" fill={G} />
+        <path d="M49 9 L51 15 L57 17 L51 19 L49 25 L47 19 L41 17 L47 15 Z" fill={G} opacity="0.55" />
+      </g>
+      <rect x="206" y="102" width="66" height="6" rx="3" fill="#E3E8E4" />
+      <rect x="206" y="112" width="44" height="6" rx="3" fill="#EDF1EE" />
 
       {/* Arrow 2 */}
-      <Arrow x={463} />
+      <g transform="translate(296 68)">
+        <circle cx="4" cy="7" r="2.5" fill={G} />
+        <circle cx="14" cy="7" r="2.5" fill={G} />
+        <circle cx="24" cy="7" r="2.5" fill={G} />
+        <path d="M33 1 L40 7 L33 13" fill="none" stroke={G} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+      </g>
 
-      {/* Stage 3 — printed book */}
-      <g transform="translate(550 62)">
-        <rect x="8" y="8" width="150" height="136" rx="12" fill="var(--mantine-color-slate-2)" opacity="0.6" />
-        <rect width="150" height="136" rx="12" fill="url(#pg-book)" />
-        <rect x="16" y="16" width="118" height="104" rx="6" fill="white" opacity="0.14" />
-        {/* little framed photo + lines on the cover */}
-        <rect x="26" y="28" width="98" height="46" rx="4" fill="white" opacity="0.9" />
-        <path d="M26 62 l22 -18 l16 12 l18 -14 l42 30 v6 H26 Z" fill="var(--mantine-color-brand-2)" />
-        <circle cx="44" cy="40" r="6" fill="var(--mantine-color-brand-4)" />
-        <g stroke="white" strokeWidth="4" strokeLinecap="round" opacity="0.9">
-          <path d="M26 90 h98" />
-          <path d="M26 102 h74" />
-        </g>
-        {/* spine */}
-        <rect x="0" y="0" width="10" height="136" rx="4" fill="var(--mantine-color-brand-8)" />
+      {/* Book */}
+      <g transform="translate(352 26) scale(1.08)" filter="url(#fwBookShadow)">
+        <rect x="10" y="4" width="78" height="78" rx="8" fill={G} />
+        <rect x="10" y="4" width="9" height="78" rx="4.5" fill="#0C8038" />
+        <rect x="28" y="15" width="52" height="35" rx="6" fill="#fff" opacity="0.95" />
+        <circle cx="39" cy="26" r="4.5" fill="#7BE84B" />
+        <path d="M32 46 L45 33 L54 41 L63 31 L76 46 Z" fill="#A9EE93" />
+        <rect x="28" y="58" width="52" height="5" rx="2.5" fill="#fff" opacity="0.95" />
+        <rect x="28" y="68" width="36" height="5" rx="2.5" fill="#fff" opacity="0.6" />
       </g>
     </svg>
   );
 }
-
-function Arrow({ x }: { x: number }) {
-  return (
-    <g transform={`translate(${x} 130)`} stroke="var(--mantine-color-brand-5)" fill="none">
-      <path d="M0 0 h56" strokeWidth="4" strokeLinecap="round" strokeDasharray="2 9" />
-      <path d="M50 -7 l10 7 l-10 7" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
-    </g>
-  );
-}
-
-function Sparkle({ x, y, s = 1 }: { x: number; y: number; s?: number }) {
-  return (
-    <path
-      transform={`translate(${x} ${y}) scale(${s})`}
-      d="M0 -16 C1.5 -6 6 -1.5 16 0 C6 1.5 1.5 6 0 16 C-1.5 6 -6 1.5 -16 0 C-6 -1.5 -1.5 -6 0 -16 Z"
-      fill="var(--mantine-color-brand-6)"
-    />
-  );
-}
-
-/** Vertical timeline with dated story cards. */
-export function TimelineGraphic() {
-  const dots = [
-    { y: 34, label: '1948', w: 118 },
-    { y: 92, label: '1971', w: 96 },
-    { y: 150, label: '1994', w: 130 },
-    { y: 208, label: '2019', w: 104 },
-  ];
-  return (
-    <svg viewBox="0 0 300 250" role="img" aria-label="A timeline of dated family stories" style={{ width: '100%', height: 'auto' }}>
-      <path d="M40 20 V232" stroke="var(--mantine-color-slate-2)" strokeWidth="4" strokeLinecap="round" />
-      {dots.map((d) => (
-        <g key={d.label} transform={`translate(0 ${d.y})`}>
-          <circle cx="40" cy="10" r="8" fill="var(--mantine-color-brand-6)" stroke="white" strokeWidth="3" />
-          <rect x="64" y="-6" width={d.w + 60} height="34" rx="9" fill="white" stroke="var(--mantine-color-slate-2)" />
-          <text x="78" y="16" fontSize="13" fontWeight="600" fill="var(--mantine-color-brand-7)" fontFamily="inherit">
-            {d.label}
-          </text>
-          <rect x="118" y="4" width={d.w} height="5" rx="2.5" fill="var(--mantine-color-slate-3)" />
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-/** Small family tree with connected people nodes. */
-export function TreeGraphic() {
-  return (
-    <svg viewBox="0 0 300 250" role="img" aria-label="A family tree of connected people" style={{ width: '100%', height: 'auto' }}>
-      <g stroke="var(--mantine-color-slate-3)" strokeWidth="3" fill="none">
-        <path d="M110 52 H190 M150 52 V92" />
-        <path d="M70 150 V120 H230 V150 M150 92 V120" />
-      </g>
-      <Node x={110} y={40} tone="6" />
-      <Node x={190} y={40} tone="4" />
-      <Node x={70} y={168} tone="5" />
-      <Node x={150} y={168} tone="7" />
-      <Node x={230} y={168} tone="4" />
-      {/* family tag chips */}
-      <Chip x={40} y={210} label="Müller" />
-      <Chip x={128} y={210} label="Weber" />
-      <Chip x={210} y={210} label="Ercan" />
-    </svg>
-  );
-}
-
-function Node({ x, y, tone }: { x: number; y: number; tone: string }) {
-  return (
-    <g transform={`translate(${x} ${y})`}>
-      <circle r="22" fill="white" stroke={`var(--mantine-color-brand-${tone})`} strokeWidth="3" />
-      <circle cx="0" cy="-5" r="7" fill={`var(--mantine-color-brand-${tone})`} />
-      <path d="M-12 14 a12 10 0 0 1 24 0" fill={`var(--mantine-color-brand-${tone})`} />
-    </g>
-  );
-}
-
-function Chip({ x, y, label }: { x: number; y: number; label: string }) {
-  return (
-    <g transform={`translate(${x} ${y})`}>
-      <rect width="62" height="26" rx="13" fill="var(--mantine-color-brand-1)" />
-      <text x="31" y="17" fontSize="12" fontWeight="600" textAnchor="middle" fill="var(--mantine-color-brand-8)" fontFamily="inherit">
-        {label}
-      </text>
-    </g>
-  );
-}
-
-/** A hardcover book with a photo page — the printable output. */
-export function BookGraphic() {
-  return (
-    <svg viewBox="0 0 300 250" role="img" aria-label="A printed hardcover family book" style={{ width: '100%', height: 'auto' }}>
-      <defs>
-        <linearGradient id="bg-cover" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="var(--mantine-color-brand-5)" />
-          <stop offset="1" stopColor="var(--mantine-color-brand-7)" />
-        </linearGradient>
-      </defs>
-      {/* back cover */}
-      <rect x="150" y="48" width="118" height="164" rx="8" fill="var(--mantine-color-brand-8)" />
-      {/* left page */}
-      <rect x="40" y="40" width="118" height="164" rx="8" fill="url(#bg-cover)" />
-      <rect x="52" y="52" width="94" height="140" rx="5" fill="white" opacity="0.12" />
-      {/* right page (open, showing content) */}
-      <rect x="150" y="40" width="118" height="164" rx="8" fill="white" stroke="var(--mantine-color-slate-2)" />
-      <rect x="164" y="56" width="90" height="52" rx="5" fill="var(--mantine-color-brand-1)" />
-      <path d="M164 108 l24 -22 l17 14 l20 -16 l29 22 v2 H164 Z" fill="var(--mantine-color-brand-3)" />
-      <circle cx="182" cy="72" r="7" fill="var(--mantine-color-brand-4)" />
-      <g stroke="var(--mantine-color-slate-3)" strokeWidth="4" strokeLinecap="round">
-        <path d="M164 126 h90" />
-        <path d="M164 138 h90" />
-        <path d="M164 150 h72" />
-        <path d="M164 162 h84" />
-        <path d="M164 174 h56" />
-      </g>
-      {/* spine highlight */}
-      <rect x="148" y="40" width="4" height="164" fill="var(--mantine-color-brand-9)" opacity="0.5" />
-    </svg>
-  );
-}
-
-/* ── Small feature icons ─────────────────────────────────────────── */
-
-function IconFrame({ children }: { children: React.ReactNode }) {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {children}
-    </svg>
-  );
-}
-
-export const MicIcon = () => (
-  <IconFrame>
-    <rect x="9" y="2" width="6" height="12" rx="3" />
-    <path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" />
-  </IconFrame>
-);
-
-export const TimelineIcon = () => (
-  <IconFrame>
-    <path d="M12 3v18" />
-    <circle cx="12" cy="7" r="2.2" />
-    <circle cx="12" cy="17" r="2.2" />
-    <path d="M14 7h6M4 17h6" />
-  </IconFrame>
-);
-
-export const TreeIcon = () => (
-  <IconFrame>
-    <circle cx="12" cy="5" r="2.5" />
-    <circle cx="6" cy="18" r="2.5" />
-    <circle cx="18" cy="18" r="2.5" />
-    <path d="M12 7.5v3M12 10.5H6v5M12 10.5h6v5" />
-  </IconFrame>
-);
-
-export const BookIcon = () => (
-  <IconFrame>
-    <path d="M4 5a2 2 0 0 1 2-2h8v16H6a2 2 0 0 0-2 2V5Z" />
-    <path d="M14 3h4a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2h-4" />
-  </IconFrame>
-);
-
-export const LockIcon = () => (
-  <IconFrame>
-    <rect x="4" y="10" width="16" height="10" rx="2.5" />
-    <path d="M8 10V7a4 4 0 0 1 8 0v3" />
-  </IconFrame>
-);
-
-export const QuoteIcon = () => (
-  <IconFrame>
-    <path d="M8 7c-2.5 0-4 2-4 4.5S5.5 16 8 16m0-9v9H4m14-9c-2.5 0-4 2-4 4.5S15.5 16 18 16m0-9v9h-4" />
-  </IconFrame>
-);
