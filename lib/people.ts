@@ -52,28 +52,50 @@ export async function ensurePersonForUser(
  */
 export async function linkUserToPersonIfFree(personId: string, userId: string): Promise<boolean> {
   const other = alias(people, 'other');
-  const updated = await db
-    .update(people)
-    .set({ userId, updatedAt: new Date() })
-    .where(
-      and(
-        eq(people.id, personId),
-        isNull(people.userId),
-        notExists(
-          db.select({ one: sql`1` }).from(other).where(eq(other.userId, userId)),
+  try {
+    const updated = await db
+      .update(people)
+      .set({ userId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(people.id, personId),
+          isNull(people.userId),
+          notExists(
+            db.select({ one: sql`1` }).from(other).where(eq(other.userId, userId)),
+          ),
         ),
-      ),
-    )
-    .returning({ id: people.id });
-  return updated.length > 0;
+      )
+      .returning({ id: people.id });
+    return updated.length > 0;
+  } catch (e) {
+    // Two concurrent links of the same USER to different people both pass the
+    // notExists subquery; the loser hits `people_user_uq`. That race is this
+    // function's "already taken" case, not an error.
+    const code = (e as { code?: string; cause?: { code?: string } }).code
+      ?? (e as { cause?: { code?: string } }).cause?.code;
+    if (code === '23505') return false;
+    throw e;
+  }
+}
+
+/** The target account must be a member of the chronicle the owner is acting in —
+ *  otherwise an owner of ANY chronicle could anchor an arbitrary account to a
+ *  puppet person node and hijack (or strand) that account's story access. */
+async function assertTargetIsMember(chronicleId: string, userId: string) {
+  const member = await db.query.memberships.findFirst({
+    where: and(eq(memberships.chronicleId, chronicleId), eq(memberships.userId, userId)),
+  });
+  if (!member) throw new Error('That account is not a member of this chronicle.');
 }
 
 /**
  * Owner repair: link a chronicle member's account to a tree person. Guards (the
- * caller gates that the ACTING user is an owner): the person is in this chronicle's
- * tree and unlinked, and the target user has no person row yet.
+ * caller gates that the ACTING user is an owner): the target user is a member of
+ * this chronicle, the person is in this chronicle's tree and unlinked, and the
+ * target user has no person row yet.
  */
 export async function linkUserToPerson(chronicleId: string, userId: string, personId: string) {
+  await assertTargetIsMember(chronicleId, userId);
   if (!(await isPersonInChronicle(chronicleId, personId))) {
     throw new Error("That person is not in this chronicle's tree.");
   }
@@ -93,6 +115,7 @@ export async function linkUserToPerson(chronicleId: string, userId: string, pers
 
 /** Owner repair: unlink a member's account from its tree person (in this chronicle). */
 export async function unlinkUserPerson(chronicleId: string, userId: string) {
+  await assertTargetIsMember(chronicleId, userId);
   const person = await db.query.people.findFirst({ where: eq(people.userId, userId) });
   if (!person) return; // nothing linked — a no-op
   if (!(await isPersonInChronicle(chronicleId, person.id))) {

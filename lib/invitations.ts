@@ -46,14 +46,19 @@ export async function createInvitation(input: {
   return created;
 }
 
-/** Pending invitations of a chronicle, with the linked tree person's name (if any). */
+/**
+ * Pending invitations of a chronicle, with the linked tree person's name (if
+ * any). Deliberately does NOT select `token`: the list is rendered to every
+ * member, and a token is a bearer credential that would let any member redeem
+ * the invite — and claim its tree person — for themselves. Owners get the
+ * shareable link once, from `createInvitation`'s return value.
+ */
 export async function listPendingInvitations(chronicleId: string) {
   return db
     .select({
       id: invitations.id,
       email: invitations.email,
       accessRole: invitations.accessRole,
-      token: invitations.token,
       personId: invitations.personId,
       personName: people.displayName,
     })
@@ -63,7 +68,13 @@ export async function listPendingInvitations(chronicleId: string) {
 }
 
 export type AcceptResult =
-  | { ok: true; chronicleId: string; personLinked: boolean }
+  | {
+      ok: true;
+      chronicleId: string;
+      personLinked: boolean;
+      /** The invite carried a person but the link could not be made (claimed meanwhile). */
+      personLinkFailed: boolean;
+    }
   | { ok: false; reason: 'not_found' | 'expired' | 'used' };
 
 /** Accept an invitation for the given user, creating their membership. */
@@ -75,6 +86,16 @@ export async function acceptInvitation(token: string, userId: string): Promise<A
   if (!invite) return { ok: false, reason: 'not_found' };
   if (invite.acceptedAt) return { ok: false, reason: 'used' };
   if (invite.expiresAt.getTime() < Date.now()) return { ok: false, reason: 'expired' };
+
+  // Atomically claim the token — the conditional WHERE is the gate, so two
+  // accepts racing on the same link can never both redeem it (the loser sees
+  // 0 rows and gets 'used', whichever user it was).
+  const claimed = await db
+    .update(invitations)
+    .set({ acceptedAt: new Date() })
+    .where(and(eq(invitations.id, invite.id), isNull(invitations.acceptedAt)))
+    .returning({ id: invitations.id });
+  if (claimed.length === 0) return { ok: false, reason: 'used' };
 
   const existing = await getMembership(invite.chronicleId, userId);
   if (!existing) {
@@ -92,10 +113,10 @@ export async function acceptInvitation(token: string, userId: string): Promise<A
     personLinked = await linkUserToPersonIfFree(invite.personId, userId);
   }
 
-  await db
-    .update(invitations)
-    .set({ acceptedAt: new Date() })
-    .where(eq(invitations.id, invite.id));
-
-  return { ok: true, chronicleId: invite.chronicleId, personLinked };
+  return {
+    ok: true,
+    chronicleId: invite.chronicleId,
+    personLinked,
+    personLinkFailed: Boolean(invite.personId) && !personLinked,
+  };
 }

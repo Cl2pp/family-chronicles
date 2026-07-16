@@ -17,7 +17,7 @@ export default async function InvitePage({
   }
 
   const result = await acceptInvitation(token, session.user.id);
-  if (result.ok && !result.personLinked) {
+  if (result.ok && !result.personLinked && !result.personLinkFailed) {
     redirect(`/chronicle`);
   }
 
@@ -35,7 +35,11 @@ export default async function InvitePage({
           <Stack>
             <Title order={3}>{result.ok ? t.invite.acceptedTitle : t.invite.title}</Title>
             <Text c="dimmed">
-              {result.ok ? t.invite.acceptedLinkedText : messages[result.reason]}
+              {result.ok
+                ? result.personLinked
+                  ? t.invite.acceptedLinkedText
+                  : t.invite.acceptedLinkFailedText
+                : messages[result.reason]}
             </Text>
             <Button component="a" href="/chronicle">
               {t.invite.goToChronicles}

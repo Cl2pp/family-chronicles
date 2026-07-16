@@ -37,7 +37,6 @@ export interface InviteRow {
   id: string;
   email: string;
   role: AccessRole;
-  token: string;
   /** The tree person the invitee will be linked to on accept, if chosen. */
   personName: string | null;
 }
