@@ -488,7 +488,7 @@ export function renderBookHtml(input: LayoutInput): string {
   const colophon = `
     <section class="page colophon">
       <p>${esc(input.chronicleName)}</p>
-      <p>Created with Family Chronicle · ${esc(input.createdLabel)}</p>
+      <p>Created with Familienwerk · ${esc(input.createdLabel)}</p>
     </section>`;
 
   return `<!doctype html>

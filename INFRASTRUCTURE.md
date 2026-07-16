@@ -1,11 +1,11 @@
-# Family Chronicle — Infrastructure & Operations
+# Familienwerk — Infrastructure & Operations
 
-This document explains how Family Chronicle is built, deployed, and operated in production —
+This document explains how Familienwerk is built, deployed, and operated in production —
 written so a future agent or engineer can pick it up cold. For the **code** conventions see
 `AGENTS.md`; for the **step-by-step deploy runbook** see `DEPLOY.md`; for the original product
 plan see `~/.claude/plans/curious-gliding-dijkstra.md`.
 
-**Live:** https://family.clepp.de (real Let's Encrypt HTTPS)
+**Live:** https://familienwerk.co (real Let's Encrypt HTTPS)
 **Repo:** https://github.com/Cl2pp/family-chronicles (private, branch `main`)
 
 ---
@@ -75,7 +75,7 @@ recovery path if SSH ever gets locked out.
 - **Two applications**, both **Private Repository (deploy key)** → repo
   `git@github.com:Cl2pp/family-chronicles.git`, branch `main`, **Build Pack: Dockerfile**,
   Base Directory `/`:
-  - **web** — port `3000`, domain `https://family.clepp.de`, health check `/api/health`.
+  - **web** — port `3000`, domain `https://familienwerk.co`, health check `/api/health`.
   - **worker** — no domain, no exposed port, no health check, env `ROLE=worker`.
 - **PostgreSQL** is a Coolify database resource in the same project (so it shares the Docker
   network; the apps reach it by its internal hostname).
@@ -119,7 +119,7 @@ New-user registration is **disabled** in Coolify settings.
   signs the URL; the browser PUTs the file). So R2 needs a **CORS policy** allowing the app
   origin. Current policy (set in Cloudflare → R2 → bucket → Settings → CORS Policy):
   ```json
-  [{ "AllowedOrigins": ["https://family.clepp.de"],
+  [{ "AllowedOrigins": ["https://familienwerk.co"],
      "AllowedMethods": ["GET","PUT"], "AllowedHeaders": ["*"],
      "ExposeHeaders": ["ETag"], "MaxAgeSeconds": 3600 }]
   ```
@@ -127,8 +127,11 @@ New-user registration is **disabled** in Coolify settings.
 
 ## 7. Domain, DNS, TLS
 
-- Domain **`family.clepp.de`** — a subdomain of `clepp.de` (registrar **GoDaddy**). DNS:
-  an **A record** `family → 157.90.165.169`.
+- Domain **`familienwerk.co`** — a separate apex domain (its own `.co` registration; **not**
+  a subdomain of `clepp.de`). DNS: an **A record** `@ (familienwerk.co) → 157.90.165.169`
+  (add a `www` CNAME → `familienwerk.co` if you want the www host too). Set this at whichever
+  registrar/DNS provider holds `familienwerk.co`, then add the domain to the Coolify **web** app
+  so Traefik issues the Let's Encrypt cert.
 - **TLS** is a real Let's Encrypt cert, auto-provisioned and renewed by Coolify/Traefik (HTTP-01
   over port 80). HTTP redirects to HTTPS.
 - **Do not use `*.sslip.io` for HTTPS** — Let's Encrypt rate-limits that shared suffix, so cert
@@ -144,7 +147,7 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 |---|---|---|
 | `DATABASE_URL` | Postgres connection | Coolify Postgres resource → internal URL |
 | `BETTER_AUTH_SECRET` | auth signing secret | `openssl rand -base64 32` |
-| `BETTER_AUTH_URL` | app's public origin | must equal the live domain: `https://family.clepp.de` |
+| `BETTER_AUTH_URL` | app's public origin | must equal the live domain: `https://familienwerk.co` |
 | `OPENROUTER_API_KEY` | story styling | OpenRouter |
 | `STYLING_MODEL` | which LLM to style with | e.g. `anthropic/claude-opus-4-8` (swap for cost) |
 | `GROQ_API_KEY` | voice transcription | Groq (optional — voice only) |

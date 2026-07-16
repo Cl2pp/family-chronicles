@@ -61,7 +61,7 @@ const QUOTE_RECIPIENT = {
   postCode: '10115',
   firstName: 'Family',
   lastName: 'Chronicle',
-  email: 'quote@family.clepp.de',
+  email: 'quote@familienwerk.co',
 };
 
 interface GelatoQuoteResponse {

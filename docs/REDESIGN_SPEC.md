@@ -1,7 +1,7 @@
-# Family Chronicle — Redesign & Feature Spec
+# Familienwerk — Redesign & Feature Spec
 
 > **Purpose.** A design + product brief to hand to **Claude Design** for a significant
-> visual and structural redesign of Family Chronicle, plus the engineering notes
+> visual and structural redesign of Familienwerk, plus the engineering notes
 > (data model, AI chat pipeline) needed to implement it afterwards.
 >
 > **Audience.** UI/UX design first (sections 1–5), engineering second (sections 6–9).
@@ -14,7 +14,7 @@
 
 ## 1. Overview
 
-Family Chronicle is a private, multi-user **PWA** where families collect personal
+Familienwerk is a private, multi-user **PWA** where families collect personal
 stories and have them rewritten by AI into a shared, third-person family memoir on a
 timeline.
 
@@ -569,7 +569,7 @@ Rules that follow:
 - Drizzle: edit `db/schema.ts` → `db:generate` → `db:migrate`. Then refactor every
   `chronicleId`/`chronicle` reference across `app/`, `lib/`, `worker/`.
 - This is a **breaking schema change**; the app is live in production
-  (`family.clepp.de`) — coordinate a migration window and read `INFRASTRUCTURE.md`
+  (`familienwerk.co`) — coordinate a migration window and read `INFRASTRUCTURE.md`
   before deploying.
 
 ---
@@ -608,7 +608,7 @@ Concrete components to design in the new blue/white/black system:
 **Resolved (locked in):**
 
 1. ✅ **Naming** — rename the entity `Chronicle` → `Family` everywhere. App stays named
-   *Family Chronicle*; a "family" is the group, the memoir is its collected stories.
+   *Familienwerk*; a "family" is the group, the memoir is its collected stories.
 2. ✅ **Dark mode** — **light only** for v1. Black = text/structure on light surfaces;
    no dark theme in scope.
 3. ✅ **Reading typography** — **fully modern sans** (Inter) everywhere, including the

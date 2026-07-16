@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import { Center, Container, Paper, Stack, Text, Title } from '@mantine/core';
 import { getI18n } from '@/lib/i18n/server';
 
-export const metadata: Metadata = { title: 'Offline · Family Chronicle' };
+export const metadata: Metadata = { title: 'Offline · Familienwerk' };
 
 export default async function OfflinePage() {
   const { t } = await getI18n();

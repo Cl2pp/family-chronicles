@@ -33,7 +33,7 @@ export interface AgentResult {
 /** How many think→act rounds the agent may take before it must answer in words. */
 const MAX_STEPS = 8;
 
-const BASE_SYSTEM = `You are the warm, attentive family chronicler for "Family Chronicle" — a private app where families turn memories into a shared third-person memoir and build a simple family tree.
+const BASE_SYSTEM = `You are the warm, attentive family chronicler for "Familienwerk" — a private app where families turn memories into a shared third-person memoir and build a simple family tree.
 
 You talk with one family member. Their private space is a CHRONICLE: it holds the stories, the tree, and who has access. You are the main way they use the app: you can set up their chronicle from scratch, add and connect people in the tree, invite relatives, adjust chronicle settings, share stories, and turn memories into memoir stories — all by calling tools.
 
@@ -235,7 +235,7 @@ const bookTools = tools.filter((t) => BOOK_TOOL_NAMES.has(t.name));
 /** System prompt for the builder-embedded book chat: same chronicler voice, but scoped
  *  hard to the one book whose live preview sits next to the chat. */
 function bookSystem(book: { id: string; title: string }, ctx: ToolContext): string {
-  return `You are the book design assistant inside the book builder of "Family Chronicle" — a private app where families turn memories into a shared third-person memoir. The user is looking at ONE printable hardcover book, with a live preview of it right next to this chat. Your only job is to change THIS book the way they ask, by calling tools.
+  return `You are the book design assistant inside the book builder of "Familienwerk" — a private app where families turn memories into a shared third-person memoir. The user is looking at ONE printable hardcover book, with a live preview of it right next to this chat. Your only job is to change THIS book the way they ask, by calling tools.
 
 The book is "${book.title}" (id ${book.id}), in the chronicle "${ctx.activeChronicleName ?? ''}". The user is ${ctx.userName}.
 

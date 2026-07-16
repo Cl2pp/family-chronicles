@@ -1,7 +1,7 @@
-# Family Chronicle — Claude Design Brief (wireframe revision)
+# Familienwerk — Claude Design Brief (wireframe revision)
 
 > **Status: delivered.** The wireframes were produced from this brief
-> (`Family Chronicle Wireframes.dc.html`). This file is now **reference** for what was
+> (`Familienwerk Wireframes.dc.html`). This file is now **reference** for what was
 > asked of design. Roadmap & current step: `~/.claude/plans/curious-gliding-dijkstra.md`.
 > Full spec + data model: `docs/REDESIGN_SPEC.md`.
 >

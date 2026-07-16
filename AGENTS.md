@@ -4,7 +4,7 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
-# Family Chronicle
+# Familienwerk
 
 A private, multi-user **PWA** where families collect stories (typed or voice) and have them
 transcribed and rewritten into a shared third-person family-memoir, placed on a timeline.
@@ -85,7 +85,7 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
 - `npm run lint`, `npm run build`
 
 ## Deployment & infrastructure
-The app is **live in production** at https://family.clepp.de (Hetzner VPS + Coolify + Cloudflare
+The app is **live in production** at https://familienwerk.co (Hetzner VPS + Coolify + Cloudflare
 R2). Before touching anything deploy/server/storage-related, read **`INFRASTRUCTURE.md`** — it
 documents the server, Coolify, R2 (incl. the EU-endpoint gotcha), the security model (admin ports
 are private; reach Coolify via SSH tunnel), env vars, the deploy loop, and the gotchas we hit.

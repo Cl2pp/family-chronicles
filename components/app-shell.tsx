@@ -90,7 +90,7 @@ export function AppChrome({
         <Group gap={8} mb="md" px={6}>
           <Image src="/icon.svg" alt="" width={22} height={22} priority />
           <Text fw={700} fz={14}>
-            Family Chronicle
+            Familienwerk
           </Text>
         </Group>
 

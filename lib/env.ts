@@ -54,7 +54,7 @@ const schema = z.object({
   BOOK_ORDER_CONTACT_EMAIL: z.string().email().default('clemens@mtx.studio'),
   /** smtp(s)://user:pass@host:port — used by lib/email.ts (dormant until a flow sends mail). */
   SMTP_URL: z.string().optional(),
-  SMTP_FROM: z.string().default('Family Chronicle <no-reply@family.clepp.de>'),
+  SMTP_FROM: z.string().default('Familienwerk <no-reply@familienwerk.co>'),
   /** System Chromium for the book renderer (set in Docker; empty = puppeteer's own). */
   PUPPETEER_EXECUTABLE_PATH: z.string().optional(),
 
