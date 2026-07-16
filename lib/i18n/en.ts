@@ -424,6 +424,15 @@ export const en = {
   story: {
     backToStories: 'Back to stories',
     families: 'Families',
+    people: 'People',
+    noPeopleYet: 'No one identified yet',
+    identifyPeople: 'Identify people',
+    editPeople: 'Edit people',
+    peopleLabel: 'Who is in this story?',
+    peopleDescription:
+      "Pick the family members this story is about — they drive the story's family names.",
+    peoplePlaceholder: 'Search family members…',
+    peopleNoneFound: 'No matching family member',
     sharedWith: 'Shared with',
     failedTitle: 'Something went wrong retelling this story',
     photos: 'Photos',

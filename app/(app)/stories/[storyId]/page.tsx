@@ -8,6 +8,8 @@ import {
   getStoryForUser,
   listAssets,
   listContributions,
+  listStoryPeople,
+  listStoryPeopleCandidates,
 } from '@/lib/stories';
 import { familyTagsByStory } from '@/lib/family-tags';
 import { listChroniclesForUser } from '@/lib/chronicles';
@@ -22,6 +24,7 @@ import { ShareControl } from './share-control';
 import { EditControl } from './edit-control';
 import { AddPhotosControl } from './add-photos-control';
 import { PhotoGallery } from './photo-gallery';
+import { StoryPeopleControl } from './people-control';
 
 function paragraphs(text: string): string[] {
   return text
@@ -41,15 +44,25 @@ export default async function StoryDetailPage({
   const story = await getStoryForUser(storyId, user.id);
   if (!story) notFound();
 
-  const [shareChronicles, assets, userChronicles, canEdit, tagsByStory, contributions] =
-    await Promise.all([
-      chroniclesForStory(storyId),
-      listAssets(storyId),
-      listChroniclesForUser(user.id),
-      canUserEditStory(storyId, user.id),
-      familyTagsByStory([storyId]),
-      listContributions(storyId),
-    ]);
+  const [
+    shareChronicles,
+    assets,
+    userChronicles,
+    canEdit,
+    tagsByStory,
+    contributions,
+    storyPeople,
+    peopleCandidates,
+  ] = await Promise.all([
+    chroniclesForStory(storyId),
+    listAssets(storyId),
+    listChroniclesForUser(user.id),
+    canUserEditStory(storyId, user.id),
+    familyTagsByStory([storyId]),
+    listContributions(storyId),
+    listStoryPeople(storyId),
+    listStoryPeopleCandidates(storyId),
+  ]);
   const familyTags = tagsByStory.get(storyId) ?? [];
 
   const sharedIds = new Set(shareChronicles.map((f) => f.id));
@@ -180,6 +193,14 @@ export default async function StoryDetailPage({
                 </Badge>
               ))}
             </Group>
+          )}
+          {(canEdit || storyPeople.length > 0) && (
+            <StoryPeopleControl
+              storyId={story.id}
+              candidates={peopleCandidates}
+              tagged={storyPeople}
+              canEdit={canEdit}
+            />
           )}
           {shareChronicles.length > 1 && (
             <Group gap="xs" align="center">

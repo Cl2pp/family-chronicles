@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   assets,
+  chronicleMembers,
   chronicles,
   contributions,
   memberships,
@@ -121,6 +122,26 @@ export async function listStoryPeople(storyId: string) {
     .innerJoin(people, eq(storyPeople.personId, people.id))
     .where(eq(storyPeople.storyId, storyId))
     .orderBy(asc(people.displayName));
+}
+
+/**
+ * People who may be tagged in a story: everyone in the tree of any chronicle the story
+ * is shared into. This is the candidate list the story page's "who's in this story"
+ * picker offers; the currently tagged subset comes from {@link listStoryPeople}.
+ */
+export async function listStoryPeopleCandidates(storyId: string) {
+  const rows = await db
+    .selectDistinct({
+      id: people.id,
+      displayName: people.displayName,
+      familyName: people.familyName,
+    })
+    .from(storyChronicles)
+    .innerJoin(chronicleMembers, eq(storyChronicles.chronicleId, chronicleMembers.chronicleId))
+    .innerJoin(people, eq(chronicleMembers.personId, people.id))
+    .where(eq(storyChronicles.storyId, storyId))
+    .orderBy(asc(people.displayName));
+  return rows;
 }
 
 /** Tag people in an existing story. Already-tagged people are skipped. */
