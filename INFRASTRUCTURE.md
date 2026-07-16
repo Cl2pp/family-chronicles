@@ -244,7 +244,11 @@ done (the creds never leave the box).
 - **Deploys failing under load = disk + concurrency (the #1 operational issue).** The 40 GB disk
   fills with Docker image layers, and back-to-back app+worker builds outpace cleanup. Symptoms:
   builds die with `no space left on device`; at 100% full even **coolify-db (Postgres) crashes**
-  and the Coolify UI throws a 500 (`SQLSTATE[53100] … No space left on device`). Debugging notes:
+  and the Coolify UI throws a 500 (`SQLSTATE[53100] … No space left on device`). A softer variant
+  (hit 2026-07-16): near-full disk makes **coolify-redis** fail its RDB snapshot, Redis goes
+  read-only (`MISCONF … stop-writes-on-bgsave-error`), the UI 500s with that message and — worse —
+  **Horizon (Coolify's queue) wedges, so Coolify's own scheduled cleanup can no longer run**.
+  Debugging notes:
   - Docker uses the **containerd image store**, so reclaimable layers live in **`/var/lib/containerd`**
     (~29 GB when full), **not** `/var/lib/docker` — `du` on the latter is misleading. Check with
     `docker system df` and `du -xh --max-depth=2 /var | sort -rh | head`.
@@ -252,6 +256,17 @@ done (the creds never leave the box).
     a **running** container — web/worker/db images are safe). Frees ~17 GB in the full state.
   - **Docker Cleanup** (Coolify → Server → Docker Cleanup) runs on `server_settings.docker_cleanup_frequency`
     at **`30 * * * *`** (moved off `0 * * * *` on 2026-07-16 so it can't prune mid-build), threshold 80%.
+  - **Host-level disk guard** (added 2026-07-16, after the Redis-MISCONF variant above): Coolify's
+    cleanup can't save a disk that already wedged its own Redis/queue, so
+    `/etc/cron.d/docker-disk-guard` runs `/usr/local/bin/docker-disk-guard.sh` every 5 min,
+    **independent of Coolify** (plain cron + docker). Levels: <80% no-op; ≥80% prune build cache +
+    dangling images, but **defers while a `coolify-helper` build container is running** (a mid-build
+    prune can kill the build — it instead fires within 5 min of the build finishing); if still ≥90%
+    also prune all unused images (sacrifices rollback tags); ≥95% act even mid-build (at 100% the
+    build dies anyway and takes coolify-db/redis with it). Logs to syslog as `docker-disk-guard`
+    (`journalctl -t docker-disk-guard`). One deploy burst writes ~16 GB (steady state after deep
+    clean is ~56%, peaks hit 98%), so the box lives close to the edge — the durable fix remains the
+    cx33 resize (§12).
   - **Concurrent app+worker builds** were the trigger — a push auto-deploys both apps, and with
     Coolify's default `concurrent_builds=2` they built simultaneously, doubling the RAM/disk spike.
     **Fixed** by setting `server_settings.concurrent_builds = 1` (serialises all builds, §9).
