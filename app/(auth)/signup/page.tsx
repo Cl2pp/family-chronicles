@@ -42,12 +42,15 @@ function SignupForm() {
       name: values.name.trim(),
       email: values.email,
       password: values.password,
+      // Where the emailed verification link drops the user after confirming.
+      callbackURL: next,
     });
     setLoading(false);
     if (error) {
       notifications.show({ color: 'red', message: error.message ?? t.auth.signUpFailed });
       return;
     }
+    notifications.show({ message: t.auth.checkInboxAfterSignup });
     router.push(next);
     router.refresh();
   }

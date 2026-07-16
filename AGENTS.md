@@ -12,7 +12,11 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
 ## Stack
 - **Next.js 16** (App Router) + **Mantine v9** (UI; light-mode only — see `app/theme.ts`)
 - **PostgreSQL** + **Drizzle ORM** (`db/schema.ts`, `db/index.ts`)
-- **better-auth** (`lib/auth.ts`, client `lib/auth-client.ts`, route `app/api/auth/[...all]`)
+- **better-auth** (`lib/auth.ts`, client `lib/auth-client.ts`, route `app/api/auth/[...all]`).
+  Email verification is **soft**: login never requires it, but only verified accounts can be
+  auto-linked by a Google sign-in (better-auth's `requireLocalEmailVerified` default).
+  Verification emails go through `lib/email.ts` (SMTP via `SMTP_URL`; unset = logged only).
+  Unverified users get a banner with resend (`components/verify-email-banner.tsx`).
 - **pg-boss** job queue (`lib/queue.ts`) + **worker** process (`worker/index.ts`)
 - **S3-compatible** storage (`lib/s3.ts`) for audio + photos
 - AI: **OpenRouter** for styling (`lib/ai/openrouter.ts`, model = `STYLING_MODEL` env),
@@ -58,7 +62,7 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
   page count and a full-resolution binding PDF. Pricing = Gelato quote (`lib/gelato.ts`);
   there is NO in-app ordering — the order screen shows the quote and a prefilled mailto
   to `BOOK_ORDER_CONTACT_EMAIL`; payment/Gelato submission are parked (the `book_orders`
-  table and `ordered` status wait for that flow; `lib/email.ts` is dormant). A "Design my
+  table and `ordered` status wait for that flow). A "Design my
   book" button queues the `design-book` job (`lib/book-ai-layout.ts`'s `proposeLayoutPlan`,
   worker-side): a vision-capable model looks at the book's chapters and actual photos and
   proposes a new `layout_plan` (`layout_source: 'ai'`), falling back to the auto-layouter
