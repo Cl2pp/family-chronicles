@@ -17,9 +17,13 @@ const outfit = Outfit({
   variable: '--font-outfit',
 });
 
+// Space Grotesk is a display face used only for headings/wordmark, always at 600
+// (theme `headings.fontWeight` + every `--fw-font-brand` element) — so we load just
+// that one weight instead of four. Outfit (body/UI) keeps 400/500/600/700, which are
+// all used across the app.
 const spaceGrotesk = Space_Grotesk({
   subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
+  weight: ['600'],
   display: 'swap',
   variable: '--font-space-grotesk',
 });
