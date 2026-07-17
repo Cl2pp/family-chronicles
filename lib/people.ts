@@ -228,6 +228,16 @@ export async function deletePerson(personId: string) {
   await db.delete(people).where(eq(people.id, personId));
 }
 
+/** How many parents a person already has on record — used to warn before staging a
+ *  third parent link (connectPeople enforces the real cap at write time). */
+export async function countParents(personId: string): Promise<number> {
+  const rows = await db
+    .select({ id: relationships.personFromId })
+    .from(relationships)
+    .where(and(eq(relationships.type, 'parent'), eq(relationships.personToId, personId)));
+  return rows.length;
+}
+
 /** Remove a single kinship edge (spouse edges are canonicalised, matching connectPeople). */
 export async function removeRelationship(input: {
   type: RelationshipType;

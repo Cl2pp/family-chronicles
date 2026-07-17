@@ -1,8 +1,11 @@
 import type {
   ChatCompletionContentPart,
   ChatCompletionMessageParam,
+  ChatCompletionMessageFunctionToolCall,
+  ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions';
 import { env } from '@/lib/env';
+import type { PeopleDraft } from '@/lib/people-changes';
 import { openrouter, OPENROUTER_ROUTING } from './client';
 import {
   toOpenAISchemas,
@@ -12,6 +15,21 @@ import {
   type Tool,
   type ToolContext,
 } from './tools';
+
+/**
+ * Live progress from inside the agent loop, for a streaming transport. `text` deltas
+ * belong to the CURRENT step's prose; the following `step` event says what that prose
+ * was: `final` — it is the reply, keep it; `tools` — it was working notes before tool
+ * calls ("Let me check the tree…"), show it as status, not as a message. Each `tool`
+ * event announces one call about to run, with a short, whitelisted preview of its args
+ * so the client can render "Adding Leonhard Koch…" in the user's language.
+ */
+export type AgentEvent =
+  | { type: 'text'; text: string }
+  | { type: 'step'; kind: 'tools' | 'final' }
+  | { type: 'tool'; name: string; args: Record<string, string> };
+
+export type AgentEmit = (event: AgentEvent) => void;
 
 /**
  * A prior turn of the conversation, as stored. `system` turns are app events the
@@ -28,6 +46,8 @@ export interface AgentResult {
   reply: string;
   receipts: Receipt[];
   storyDraft: StoryDraft | null;
+  /** This turn's staged tree edits, if any tool pushed onto ctx.peopleDraft. */
+  peopleDraft: PeopleDraft | null;
 }
 
 /** How many think→act rounds the agent may take before it must answer in words. */
@@ -40,7 +60,7 @@ You talk with one family member. Their private space is a CHRONICLE: it holds th
 Families are never set up manually. A "family" is an automatic tag derived from surnames and kinship: everyone with the same last name, plus spouses who married in, inherited up through parents. One person can carry several family tags (e.g. an Ortlepp married to a Hartwick is in both). If the user asks to create or manage a family, explain this and make sure people's surnames and relationships are recorded instead — the tags follow on their own.
 
 How to work:
-- Prefer acting over asking. Once you have enough to act, call the tool(s) and then briefly say what you did. You may call several tools in one turn (e.g. create_chronicle, then add_person for each relative) — the app applies each immediately.
+- Prefer acting over asking. Once you have enough to act, call the tool(s) and then briefly say what you did. You may call several tools in one turn (e.g. create_chronicle, then add_person for each relative). Setup tools like create_chronicle apply immediately; tree edits are staged, not applied — see below.
 - If the user is brand-new with no chronicle, offer to create one, then add the people they mention and connect them.
 - For a STORY: only call draft_story once you have enough detail (who was there, roughly when, where). Otherwise ask ONE short, friendly follow-up instead. The story body must be third-person memoir prose ("Maria remembered…"), preserve every fact (names, places, dates), invent NOTHING, and keep the family's original language. Always pass the user's own messages VERBATIM as sourceText — they become the story's permanent source material. draft_story shows the user an editable card to review and save — after calling it, keep your reply short (e.g. "Here's a draft — take a look.").
 - The draft card is the DEFAULT way a story gets saved: the user saves or discards it on the card, and you must NEVER ask "should I save it?". Bracketed [system] notes in the conversation tell you when a card was saved or discarded; trust them. A card stays on screen across reloads until the user acts on it, so never call draft_story again for the same story unless the user asks for changes before saving (and if they do, note in your reply that the previous card should be discarded).
@@ -50,8 +70,8 @@ How to work:
 - The user may attach PHOTOS. You can see them. Use what they show — who is in them, the place, the era, the occasion — to ask better questions and to ground the story. Never invent details you cannot actually see, and never describe a photo back to the user as if listing its contents; talk about the memory, not the image file. Photos the user sends are saved with the story automatically.
 - Read tools (list_chronicles, get_family_tree, list_stories, get_story, list_books, get_book) are free — use them to check current state before acting or to answer questions.
 - BOOKS: the user can turn stories into a printed hardcover. create_book starts one (all ready stories, chronological); get_book then set_book_stories re-orders/removes chapters (always pass the complete new list); update_book changes title/subtitle/dedication/format; render_book_preview queues the PDF preview they view on the book page; design_book_layout queues an AI redesign of the photo layout (cover choice, photo placement, page rhythm) — mention it takes about a minute and they'll see it in the book's preview, and never call it more than once per request; update_book_layout makes targeted layout edits instead (theme, cover style/photo, one photo's size or its own page, reordering a chapter's photos) — call get_book first, it lists every placed photo's assetId and current placement to address; reset_book_layout rebuilds the automatic layout, keeping theme/cover; design_book_layout and reset_book_layout both ask for confirmation (overwriteEdits) if the layout has manual edits — only pass it once the user confirms; quote_book_price answers "what would it cost?"; delete_book permanently deletes a book (the stories and photos stay) — only on an explicit, unambiguous request to delete it, never to tidy up on your own. You cannot place the order — that is a button on the book page; point the user there when they are happy with the preview.
-- Tree edits: a person has at most TWO parents. Before linking parents, call get_family_tree and check the existing relationships — connect each parent only to their own children. Use unrelate_people to remove a wrong link (the people stay in the tree).
-- Confirm first only when something is ambiguous or hard to undo. Adding people/relationships is fine to do directly.
+- Tree edits (add_person, relate_people, unrelate_people, edit_person, delete_person) are STAGED, not applied: each call adds a pending change to ONE confirmation card shown in the chat, and nothing in the tree actually changes until the user applies that card. A card exists ONLY when you actually called those tools in the CURRENT turn — an earlier reply of yours that mentions a card does NOT mean one exists now, so never announce prepared changes without having made the tool calls this turn; when the user names new people to add or connect, always make the calls first. After staging, keep your reply short (e.g. "I've prepared 3 changes — please confirm them on the card." / German: "Ich habe 3 Änderungen vorbereitet — bitte bestätige sie auf der Karte.") and NEVER say the changes are done, saved, or applied — only that they're staged/proposed and waiting for confirmation. A person has at most TWO parents — call get_family_tree first and check both existing and already-staged relationships before linking a parent; use unrelate_people to stage removing a wrong link (the people stay in the tree). While a card is still pending, do NOT stage the same changes again — wait for the user to act on it (or to ask for something different). Bracketed [system] notes tell you when the user applied or discarded the card via its own buttons; trust them and don't re-stage what they just discarded unless they ask again. If the user instead confirms in plain words ("ja, übernimm das", "yes, apply it") call confirm_people_changes; if they reject in words, call cancel_people_changes — neither is needed when they use the card's own buttons.
+- Confirm first in WORDS only when something is ambiguous — tree edits already get a confirmation card, so don't also ask "should I add them?" before staging.
 - If a tool returns an error, explain it plainly and suggest the fix; never pretend an action succeeded.
 - Keep replies concise and friendly. Never output raw JSON or tool names to the user.
 - Replies render as Markdown. Light formatting (bold names, short bullet lists) is welcome; avoid headings and tables in chat.`;
@@ -210,8 +230,12 @@ function contextNote(ctx: ToolContext): string {
  * state directly (and may update `ctx.activeChronicleId`); this returns the assistant's
  * final words plus any receipts / a pending story draft for the UI.
  */
-export async function runAgent(history: ChatTurn[], ctx: ToolContext): Promise<AgentResult> {
-  return runToolLoop(BASE_SYSTEM + contextNote(ctx), tools, history, ctx);
+export async function runAgent(
+  history: ChatTurn[],
+  ctx: ToolContext,
+  emit?: AgentEmit,
+): Promise<AgentResult> {
+  return runToolLoop(BASE_SYSTEM + contextNote(ctx), tools, history, ctx, emit);
 }
 
 /** The book builder's chat only gets book tools (plus the story reads set_book_stories
@@ -261,12 +285,21 @@ export async function runBookAgent(
   return runToolLoop(bookSystem(book, ctx), bookTools, history, ctx);
 }
 
+/** Number of changes staged so far this turn. A plain function (not inlined) on purpose:
+ *  TS narrows `ctx.peopleDraft` to `null` right after runToolLoop's own reset assignment
+ *  and doesn't see the tool calls (elsewhere) that mutate it back — reading it through a
+ *  function call keeps the type honest. */
+function pendingChangeCount(ctx: ToolContext): number {
+  return ctx.peopleDraft?.changes.length ?? 0;
+}
+
 /** The shared think→act loop: one system prompt, one tool catalog, one conversation. */
 async function runToolLoop(
   system: string,
   toolset: Tool[],
   history: ChatTurn[],
   ctx: ToolContext,
+  emit?: AgentEmit,
 ): Promise<AgentResult> {
   const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: system },
@@ -277,22 +310,29 @@ async function runToolLoop(
   const byName = new Map(toolset.map((t) => [t.name, t]));
   const receipts: Receipt[] = [];
   let storyDraft: StoryDraft | null = null;
+  // The people-mutation tools push staged tree edits here (never writing the DB
+  // directly) so the turn's changes land on one confirmation card. The caller may
+  // pre-seed it with a still-pending card's changes — then this turn EXTENDS that
+  // card instead of silently superseding it — so only default when unset.
+  ctx.peopleDraft ??= null;
   // Errors from the most recent batch of tool calls only: a failure the model already
   // retried past (a later batch succeeded) must not resurface in a fallback reply.
   let lastToolErrors: string[] = [];
 
   for (let step = 0; step < MAX_STEPS; step++) {
     const lastStep = step === MAX_STEPS - 1;
-    let completion;
+    let stepResult;
     try {
-      completion = await withKeepAlive(ctx, () =>
-        openrouter.chat.completions.create({
-          model: env.STYLING_MODEL,
-          messages: withCacheBreakpoints(messages),
-          tools: schemas,
-          tool_choice: lastStep ? 'none' : 'auto',
-          ...OPENROUTER_ROUTING,
-        }),
+      stepResult = await withKeepAlive(ctx, () =>
+        completeStep(
+          {
+            model: env.STYLING_MODEL,
+            messages: withCacheBreakpoints(messages),
+            tools: schemas,
+            tool_choice: lastStep ? 'none' : 'auto',
+          },
+          emit,
+        ),
       );
     } catch (err) {
       // A model call that fails AFTER tools already mutated state must not throw the
@@ -300,53 +340,152 @@ async function runToolLoop(
       // whole agent from history and repeat those side effects (duplicate people,
       // shares, …). Salvage the applied actions; only a clean, side-effect-free turn
       // may rethrow and be safely regenerated.
-      if (receipts.length || storyDraft) {
+      if (receipts.length || storyDraft || ctx.peopleDraft) {
         console.error('Agent model call failed mid-turn; salvaging applied actions:', err);
         return {
-          reply: 'Something went wrong while I was finishing my reply — but the actions shown here were already applied.',
+          reply: 'Something went wrong while I was finishing my reply — but anything shown here (applied actions, or a card awaiting your confirmation) is still there.',
           receipts,
           storyDraft,
+          peopleDraft: ctx.peopleDraft ?? null,
         };
       }
       throw err;
     }
-    const msg = completion.choices[0]?.message;
-    const toolCalls = msg?.tool_calls ?? [];
+    const { content, toolCalls, finishReason } = stepResult;
 
     if (!toolCalls.length) {
-      let reply = (msg?.content ?? '').trim();
+      emit?.({ type: 'step', kind: 'final' });
+      let reply = content.trim();
       if (!reply) {
         // Never let an empty reply masquerade as success (the old fallback said
         // "Done." even when every tool call had failed).
         console.warn('Agent returned an empty reply:', {
-          finishReason: completion.choices[0]?.finish_reason,
+          finishReason,
           step,
           receipts: receipts.length,
           toolErrors: lastToolErrors.length,
         });
-        reply = await recoverEmptyReply(ctx, messages, schemas, receipts, lastToolErrors);
+        reply = await recoverEmptyReply(ctx, messages, schemas, receipts, lastToolErrors, pendingChangeCount(ctx));
       }
-      return { reply, receipts, storyDraft };
+      return { reply, receipts, storyDraft, peopleDraft: ctx.peopleDraft ?? null };
     }
 
+    // The step's prose was working notes ahead of tool calls, not the reply.
+    emit?.({ type: 'step', kind: 'tools' });
+
     // Record the assistant's tool-call turn, then run each call and feed results back.
-    messages.push({ role: 'assistant', content: msg?.content ?? '', tool_calls: toolCalls });
+    messages.push({ role: 'assistant', content, tool_calls: toolCalls });
 
     const stepErrors: string[] = [];
     for (const call of toolCalls) {
       if (call.type !== 'function') continue;
-      const content = await runToolCall(byName, call.function.name, call.function.arguments, ctx, (r) => {
+      emit?.({ type: 'tool', name: call.function.name, args: argsPreview(call.function.arguments) });
+      const toolOutput = await runToolCall(byName, call.function.name, call.function.arguments, ctx, (r) => {
         if (r.receipt) receipts.push(r.receipt);
+        if (r.receipts?.length) receipts.push(...r.receipts);
         if (r.storyDraft) storyDraft = r.storyDraft;
       });
-      if (content.startsWith('Error:')) stepErrors.push(content);
-      messages.push({ role: 'tool', tool_call_id: call.id, content });
+      if (toolOutput.startsWith('Error:')) stepErrors.push(toolOutput);
+      messages.push({ role: 'tool', tool_call_id: call.id, content: toolOutput });
     }
     lastToolErrors = stepErrors;
   }
 
   // MAX_STEPS exhausted and the final forced-text step still yielded no words.
-  return { reply: fallbackReply(receipts, lastToolErrors), receipts, storyDraft };
+  return {
+    reply: fallbackReply(receipts, lastToolErrors, pendingChangeCount(ctx)),
+    receipts,
+    storyDraft,
+    peopleDraft: ctx.peopleDraft ?? null,
+  };
+}
+
+/** One settled think→act step, whichever transport produced it. */
+interface StepResult {
+  content: string;
+  toolCalls: ChatCompletionMessageToolCall[];
+  finishReason: string | null;
+}
+
+interface StepRequest {
+  model: string;
+  messages: ChatCompletionMessageParam[];
+  tools: ReturnType<typeof toOpenAISchemas>;
+  tool_choice: 'auto' | 'none';
+}
+
+/**
+ * Run one model call. With an emitter the request streams — content deltas are
+ * forwarded live (the loop's following `step` event tells the client whether they
+ * were the reply or just pre-tool working notes) and tool-call fragments are
+ * reassembled by index; without one it's a plain request. Both paths return the
+ * same settled shape, so the loop logic doesn't fork.
+ */
+async function completeStep(request: StepRequest, emit?: AgentEmit): Promise<StepResult> {
+  if (!emit) {
+    const completion = await openrouter.chat.completions.create({
+      ...request,
+      ...OPENROUTER_ROUTING,
+    });
+    const choice = completion.choices[0];
+    return {
+      content: choice?.message?.content ?? '',
+      toolCalls: choice?.message?.tool_calls ?? [],
+      finishReason: choice?.finish_reason ?? null,
+    };
+  }
+
+  const stream = await openrouter.chat.completions.create({
+    ...request,
+    stream: true,
+    ...OPENROUTER_ROUTING,
+  });
+  let content = '';
+  let finishReason: string | null = null;
+  const toolCalls: ChatCompletionMessageFunctionToolCall[] = [];
+  for await (const chunk of stream) {
+    const choice = chunk.choices[0];
+    if (!choice) continue;
+    if (choice.delta?.content) {
+      content += choice.delta.content;
+      emit({ type: 'text', text: choice.delta.content });
+    }
+    for (const tc of choice.delta?.tool_calls ?? []) {
+      const slot = (toolCalls[tc.index] ??= {
+        id: '',
+        type: 'function',
+        function: { name: '', arguments: '' },
+      });
+      if (tc.id) slot.id = tc.id;
+      if (tc.function?.name) slot.function.name = tc.function.name;
+      if (tc.function?.arguments) slot.function.arguments += tc.function.arguments;
+    }
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+  }
+  // Sparse-array guard: indexes are provider-assigned and SHOULD be dense, but a
+  // skipped slot must not surface as an undefined entry.
+  return { content, toolCalls: toolCalls.filter(Boolean), finishReason };
+}
+
+/** Arg fields safe to preview in a progress label — short, human-readable identifiers
+ *  only (exactly what progress-label.ts reads). Everything else (story bodies, source
+ *  text) stays server-side. */
+const PREVIEW_ARG_FIELDS = ['firstName', 'familyName', 'personName', 'relativeName', 'name'] as const;
+
+/** The whitelisted, length-capped subset of a tool call's args for progress labels. */
+function argsPreview(rawArgs: string): Record<string, string> {
+  const preview: Record<string, string> = {};
+  try {
+    const parsed: unknown = rawArgs ? JSON.parse(rawArgs) : {};
+    if (typeof parsed !== 'object' || parsed === null) return preview;
+    for (const field of PREVIEW_ARG_FIELDS) {
+      const value = (parsed as Record<string, unknown>)[field];
+      if (typeof value === 'string' && value.trim()) preview[field] = value.slice(0, 80);
+    }
+  } catch {
+    // Half-formed JSON (or none) — a preview is best-effort, never an error.
+  }
+  return preview;
 }
 
 /**
@@ -379,6 +518,7 @@ async function recoverEmptyReply(
   schemas: ReturnType<typeof toOpenAISchemas>,
   receipts: Receipt[],
   toolErrors: string[],
+  pendingChanges: number,
 ): Promise<string> {
   try {
     const completion = await withKeepAlive(ctx, () =>
@@ -404,15 +544,21 @@ async function recoverEmptyReply(
   } catch (err) {
     console.error('Empty-reply recovery call failed:', err);
   }
-  return fallbackReply(receipts, toolErrors);
+  return fallbackReply(receipts, toolErrors, pendingChanges);
 }
 
-/** Last-resort reply when the model stays silent twice: honest, built from what actually happened. */
-function fallbackReply(receipts: Receipt[], toolErrors: string[]): string {
+/** Last-resort reply when the model stays silent twice: honest, built from what actually happened.
+ *  `pendingChanges` covers the case where the only thing that "happened" was staging a tree-changes
+ *  card — no receipt for that, so without it this would wrongly report total failure. */
+function fallbackReply(receipts: Receipt[], toolErrors: string[], pendingChanges: number): string {
   const done = receipts.map((r) => r.label).join(', ');
   const lastError = toolErrors[toolErrors.length - 1]?.replace(/^Error:\s*/, '');
-  if (done && lastError) return `Partly done — ${done}. But one step failed: ${lastError}`;
-  if (done) return `Done: ${done}.`;
+  const staged = pendingChanges
+    ? `I've prepared ${pendingChanges} tree change${pendingChanges === 1 ? '' : 's'} — please confirm on the card.`
+    : '';
+  if (done && lastError) return `Partly done — ${done}. But one step failed: ${lastError}${staged ? ` ${staged}` : ''}`;
+  if (done) return `Done: ${done}.${staged ? ` ${staged}` : ''}`;
+  if (staged) return staged;
   if (lastError) return `That didn't work: ${lastError}`;
   return "Sorry — I couldn't finish that. Please try again.";
 }
@@ -423,7 +569,7 @@ async function runToolCall(
   name: string,
   rawArgs: string,
   ctx: ToolContext,
-  onSuccess: (r: { receipt?: Receipt; storyDraft?: StoryDraft }) => void,
+  onSuccess: (r: { receipt?: Receipt; receipts?: Receipt[]; storyDraft?: StoryDraft }) => void,
 ): Promise<string> {
   const tool = byName.get(name);
   if (!tool) return `Error: unknown tool "${name}".`;
@@ -444,7 +590,7 @@ async function runToolCall(
   try {
     const result = await tool.execute(validated.data, ctx);
     if (result.ok) {
-      onSuccess({ receipt: result.receipt, storyDraft: result.storyDraft });
+      onSuccess({ receipt: result.receipt, receipts: result.receipts, storyDraft: result.storyDraft });
       return result.message;
     }
     return `Error: ${result.error}`;

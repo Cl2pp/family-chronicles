@@ -14,6 +14,7 @@ import {
   relatePeopleTool,
   unrelatePeopleTool,
 } from './people';
+import { cancelPeopleChangesTool, confirmPeopleChangesTool } from './people-confirm';
 import {
   draftStoryTool,
   getStoryTool,
@@ -57,6 +58,8 @@ export const tools: Tool[] = [
   unrelatePeopleTool,
   editPersonTool,
   deletePersonTool,
+  confirmPeopleChangesTool,
+  cancelPeopleChangesTool,
   updateChronicleSettingsTool,
   inviteMemberTool,
   shareStoryTool,

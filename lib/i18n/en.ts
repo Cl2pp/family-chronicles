@@ -407,6 +407,51 @@ export const en = {
     couldNotUndo: 'Could not undo that. Please try again.',
     addStoryPrompt:
       'I’d like to add a new story to the chronicle. Please ask me what story I want to tell.',
+    // Tree-changes confirmation card (staged add/relate/unrelate/edit/delete_person).
+    treeChanges: 'Tree changes',
+    applyChanges: 'Apply',
+    changesPartlyFailed: (n: number) =>
+      n === 1 ? '1 change could not be applied.' : `${n} changes could not be applied.`,
+    relationWord: (r: 'parent' | 'child' | 'partner'): string =>
+      r === 'parent' ? 'parent' : r === 'child' ? 'child' : 'partner',
+    addPerson: (label: string, years: string) => `Add ${label}${years}`,
+    addPersonRelated: (label: string, years: string, relation: string, relative: string) =>
+      `Add ${label}${years} — ${relation} of ${relative}`,
+    relate: (person: string, relation: string, relative: string) => `${person} → ${relation} of ${relative}`,
+    unrelate: (person: string, relation: string, relative: string) =>
+      `${person} — no longer ${relation} of ${relative}`,
+    editPerson: (label: string, summary: string) => `Edit ${label}: ${summary}`,
+    deletePerson: (label: string) => `Remove ${label}`,
+    editFieldFirstName: 'first name',
+    editFieldFamilyName: 'surname',
+    editFieldBirthFamilyName: 'birth surname',
+    editFieldGender: 'gender',
+    editFieldBorn: 'born',
+    editFieldDied: 'died',
+    editValueCleared: 'cleared',
+    editValueMale: 'male',
+    editValueFemale: 'female',
+    // Live status lines while the assistant works (streamed per tool call).
+    progress: {
+      readingTree: 'Looking at the family tree…',
+      addingPerson: (name: string) => `Adding ${name}…`,
+      linkingPeople: (a: string, b: string) => `Linking ${a} and ${b}…`,
+      unlinkingPeople: (a: string, b: string) => `Unlinking ${a} and ${b}…`,
+      editingPerson: (name: string) => `Updating ${name}…`,
+      removingPerson: (name: string) => `Removing ${name}…`,
+      applyingChanges: 'Applying the changes…',
+      draftingStory: 'Writing a story draft…',
+      updatingStory: 'Revising the story…',
+      savingStory: 'Saving the story…',
+      readingStories: 'Reading the stories…',
+      sharingStory: 'Sharing the story…',
+      taggingPeople: 'Noting who was there…',
+      invitingMember: 'Preparing the invitation…',
+      settingUpChronicle: 'Setting up the chronicle…',
+      updatingSettings: 'Updating the settings…',
+      workingOnBook: 'Working on the book…',
+      working: 'Working on it…',
+    },
   },
   recorder: {
     start: 'Start recording',

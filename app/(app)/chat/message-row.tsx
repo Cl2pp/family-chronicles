@@ -6,21 +6,31 @@ import { useI18n } from '@/lib/i18n/client';
 import { ActionReceipts } from './action-receipts';
 import { MessageAttachments } from './message-attachments';
 import { MessageMarkdown } from './message-markdown';
+import { PeopleChangesCard } from './people-changes-card';
 import { StoryDraftCard } from './story-draft-card';
-import type { Msg, MsgResult } from './types';
+import type { Msg, MsgPeopleResult, MsgResult } from './types';
 
 export function MessageRow({
   msg,
   conversationId,
   onResult,
+  onPeopleResult,
 }: {
   msg: Msg;
   conversationId: string | null;
   onResult: (r: MsgResult) => void;
+  onPeopleResult: (r: MsgPeopleResult) => void;
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  const [discarded, setDiscarded] = useState(false);
+  // One message can carry BOTH a story card and a tree-changes card (a turn that
+  // drafts a story and stages people edits) — each card has its own result slot and
+  // discard flag, so resolving one never hides or resurrects the other.
+  const [storyDiscarded, setStoryDiscarded] = useState(false);
+  const [peopleDiscarded, setPeopleDiscarded] = useState(false);
+
+  const storySettled = Boolean(msg.result) || storyDiscarded;
+  const peopleSettled = Boolean(msg.peopleResult) || peopleDiscarded;
 
   if (msg.role === 'user') {
     return (
@@ -64,14 +74,39 @@ export function MessageRow({
         />
       )}
 
-      {msg.storyDraft && !msg.result && !discarded && (
+      {msg.peopleResult && (
+        <>
+          {msg.peopleResult.receipts.length ? (
+            <ActionReceipts receipts={msg.peopleResult.receipts} />
+          ) : null}
+          {msg.peopleResult.errors.length ? (
+            <Text size="xs" c="dimmed">
+              {t.chat.changesPartlyFailed(msg.peopleResult.errors.length)}
+            </Text>
+          ) : null}
+        </>
+      )}
+
+      {msg.storyDraft && !storySettled && (
         <StoryDraftCard
           draft={msg.storyDraft}
           conversationId={conversationId}
           busy={busy}
           setBusy={setBusy}
-          onDiscard={() => setDiscarded(true)}
+          onDiscard={() => setStoryDiscarded(true)}
           onResult={onResult}
+        />
+      )}
+
+      {msg.peopleDraft && !peopleSettled && (
+        <PeopleChangesCard
+          draft={msg.peopleDraft}
+          conversationId={conversationId}
+          messageId={msg.peopleDraftMessageId ?? null}
+          busy={busy}
+          setBusy={setBusy}
+          onDiscard={() => setPeopleDiscarded(true)}
+          onResult={onPeopleResult}
         />
       )}
     </Stack>

@@ -418,6 +418,53 @@ export const de: Dictionary = {
     couldNotUndo: 'Das konnte nicht rückgängig gemacht werden. Bitte versuch es noch einmal.',
     addStoryPrompt:
       'Ich möchte eine neue Geschichte zum Familienwerk hinzufügen. Bitte frag mich, welche Geschichte ich erzählen möchte.',
+    // Karte zur Bestätigung von Stammbaum-Änderungen (gesammelte add/relate/unrelate/edit/delete_person).
+    treeChanges: 'Änderungen am Stammbaum',
+    applyChanges: 'Übernehmen',
+    changesPartlyFailed: (n: number) =>
+      n === 1
+        ? '1 Änderung konnte nicht übernommen werden.'
+        : `${n} Änderungen konnten nicht übernommen werden.`,
+    relationWord: (r: 'parent' | 'child' | 'partner') =>
+      r === 'parent' ? 'Elternteil' : r === 'child' ? 'Kind' : 'Partner:in',
+    addPerson: (label: string, years: string) => `${label}${years} hinzufügen`,
+    addPersonRelated: (label: string, years: string, relation: string, relative: string) =>
+      `${label}${years} hinzufügen — ${relation} von ${relative}`,
+    relate: (person: string, relation: string, relative: string) => `${person} → ${relation} von ${relative}`,
+    unrelate: (person: string, relation: string, relative: string) =>
+      `${person} — nicht mehr ${relation} von ${relative}`,
+    editPerson: (label: string, summary: string) => `${label} bearbeiten: ${summary}`,
+    deletePerson: (label: string) => `${label} entfernen`,
+    editFieldFirstName: 'Vorname',
+    editFieldFamilyName: 'Nachname',
+    editFieldBirthFamilyName: 'Geburtsname',
+    editFieldGender: 'Geschlecht',
+    editFieldBorn: 'geboren',
+    editFieldDied: 'gestorben',
+    editValueCleared: 'gelöscht',
+    editValueMale: 'männlich',
+    editValueFemale: 'weiblich',
+    // Live-Status, während der Assistent arbeitet (pro Tool-Aufruf gestreamt).
+    progress: {
+      readingTree: 'Schaue in den Stammbaum…',
+      addingPerson: (name: string) => `Füge ${name} hinzu…`,
+      linkingPeople: (a: string, b: string) => `Verknüpfe ${a} und ${b}…`,
+      unlinkingPeople: (a: string, b: string) => `Trenne ${a} und ${b}…`,
+      editingPerson: (name: string) => `Aktualisiere ${name}…`,
+      removingPerson: (name: string) => `Entferne ${name}…`,
+      applyingChanges: 'Übernehme die Änderungen…',
+      draftingStory: 'Schreibe einen Entwurf der Geschichte…',
+      updatingStory: 'Überarbeite die Geschichte…',
+      savingStory: 'Speichere die Geschichte…',
+      readingStories: 'Lese in den Geschichten…',
+      sharingStory: 'Teile die Geschichte…',
+      taggingPeople: 'Halte fest, wer dabei war…',
+      invitingMember: 'Bereite die Einladung vor…',
+      settingUpChronicle: 'Richte die Chronik ein…',
+      updatingSettings: 'Aktualisiere die Einstellungen…',
+      workingOnBook: 'Arbeite am Buch…',
+      working: 'Arbeite daran…',
+    },
   },
   recorder: {
     start: 'Aufnahme starten',
