@@ -32,8 +32,12 @@ import { MOBILE_TABBAR_OFFSET } from '@/components/app-shell';
 import { CONVERSATION_IDLE_MS } from '@/lib/chat-idle';
 import { PHOTO_ACCEPT, readDimensions } from '@/lib/uploads';
 import { useI18n } from '@/lib/i18n/client';
+import { MessageMarkdown } from './message-markdown';
 import { MessageRow } from './message-row';
-import { endConversation, presignUpload, sendMessage, sendVoiceMessage, syncChat } from './actions';
+import { endConversation, presignUpload, syncChat } from './actions';
+import { progressLabel } from './progress-label';
+import type { SendResult } from './respond';
+import type { ChatStreamEvent, ChatStreamRequest } from './stream-events';
 import type { ChatAttachment, Msg } from './types';
 
 // Icons paired by index with t.chat.setupSuggestions / t.chat.familySuggestions.

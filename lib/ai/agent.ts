@@ -1,6 +1,8 @@
 import type {
   ChatCompletionContentPart,
   ChatCompletionMessageParam,
+  ChatCompletionMessageFunctionToolCall,
+  ChatCompletionMessageToolCall,
 } from 'openai/resources/chat/completions';
 import { env } from '@/lib/env';
 import type { PeopleDraft } from '@/lib/people-changes';
@@ -13,6 +15,21 @@ import {
   type Tool,
   type ToolContext,
 } from './tools';
+
+/**
+ * Live progress from inside the agent loop, for a streaming transport. `text` deltas
+ * belong to the CURRENT step's prose; the following `step` event says what that prose
+ * was: `final` — it is the reply, keep it; `tools` — it was working notes before tool
+ * calls ("Let me check the tree…"), show it as status, not as a message. Each `tool`
+ * event announces one call about to run, with a short, whitelisted preview of its args
+ * so the client can render "Adding Leonhard Koch…" in the user's language.
+ */
+export type AgentEvent =
+  | { type: 'text'; text: string }
+  | { type: 'step'; kind: 'tools' | 'final' }
+  | { type: 'tool'; name: string; args: Record<string, string> };
+
+export type AgentEmit = (event: AgentEvent) => void;
 
 /**
  * A prior turn of the conversation, as stored. `system` turns are app events the
@@ -213,8 +230,12 @@ function contextNote(ctx: ToolContext): string {
  * state directly (and may update `ctx.activeChronicleId`); this returns the assistant's
  * final words plus any receipts / a pending story draft for the UI.
  */
-export async function runAgent(history: ChatTurn[], ctx: ToolContext): Promise<AgentResult> {
-  return runToolLoop(BASE_SYSTEM + contextNote(ctx), tools, history, ctx);
+export async function runAgent(
+  history: ChatTurn[],
+  ctx: ToolContext,
+  emit?: AgentEmit,
+): Promise<AgentResult> {
+  return runToolLoop(BASE_SYSTEM + contextNote(ctx), tools, history, ctx, emit);
 }
 
 /** The book builder's chat only gets book tools (plus the story reads set_book_stories
@@ -278,6 +299,7 @@ async function runToolLoop(
   toolset: Tool[],
   history: ChatTurn[],
   ctx: ToolContext,
+  emit?: AgentEmit,
 ): Promise<AgentResult> {
   const messages: ChatCompletionMessageParam[] = [
     { role: 'system', content: system },
@@ -297,15 +319,18 @@ async function runToolLoop(
 
   for (let step = 0; step < MAX_STEPS; step++) {
     const lastStep = step === MAX_STEPS - 1;
-    let completion;
+    let stepResult;
     try {
-      completion = await withKeepAlive(ctx, () =>
-        openrouter.chat.completions.create({
-          model: env.STYLING_MODEL,
-          messages: withCacheBreakpoints(messages),
-          tools: schemas,
-          tool_choice: lastStep ? 'none' : 'auto',
-        }),
+      stepResult = await withKeepAlive(ctx, () =>
+        completeStep(
+          {
+            model: env.STYLING_MODEL,
+            messages: withCacheBreakpoints(messages),
+            tools: schemas,
+            tool_choice: lastStep ? 'none' : 'auto',
+          },
+          emit,
+        ),
       );
     } catch (err) {
       // A model call that fails AFTER tools already mutated state must not throw the
@@ -324,16 +349,16 @@ async function runToolLoop(
       }
       throw err;
     }
-    const msg = completion.choices[0]?.message;
-    const toolCalls = msg?.tool_calls ?? [];
+    const { content, toolCalls, finishReason } = stepResult;
 
     if (!toolCalls.length) {
-      let reply = (msg?.content ?? '').trim();
+      emit?.({ type: 'step', kind: 'final' });
+      let reply = content.trim();
       if (!reply) {
         // Never let an empty reply masquerade as success (the old fallback said
         // "Done." even when every tool call had failed).
         console.warn('Agent returned an empty reply:', {
-          finishReason: completion.choices[0]?.finish_reason,
+          finishReason,
           step,
           receipts: receipts.length,
           toolErrors: lastToolErrors.length,
@@ -343,19 +368,23 @@ async function runToolLoop(
       return { reply, receipts, storyDraft, peopleDraft: ctx.peopleDraft ?? null };
     }
 
+    // The step's prose was working notes ahead of tool calls, not the reply.
+    emit?.({ type: 'step', kind: 'tools' });
+
     // Record the assistant's tool-call turn, then run each call and feed results back.
-    messages.push({ role: 'assistant', content: msg?.content ?? '', tool_calls: toolCalls });
+    messages.push({ role: 'assistant', content, tool_calls: toolCalls });
 
     const stepErrors: string[] = [];
     for (const call of toolCalls) {
       if (call.type !== 'function') continue;
-      const content = await runToolCall(byName, call.function.name, call.function.arguments, ctx, (r) => {
+      emit?.({ type: 'tool', name: call.function.name, args: argsPreview(call.function.arguments) });
+      const toolOutput = await runToolCall(byName, call.function.name, call.function.arguments, ctx, (r) => {
         if (r.receipt) receipts.push(r.receipt);
         if (r.receipts?.length) receipts.push(...r.receipts);
         if (r.storyDraft) storyDraft = r.storyDraft;
       });
-      if (content.startsWith('Error:')) stepErrors.push(content);
-      messages.push({ role: 'tool', tool_call_id: call.id, content });
+      if (toolOutput.startsWith('Error:')) stepErrors.push(toolOutput);
+      messages.push({ role: 'tool', tool_call_id: call.id, content: toolOutput });
     }
     lastToolErrors = stepErrors;
   }
@@ -367,6 +396,95 @@ async function runToolLoop(
     storyDraft,
     peopleDraft: ctx.peopleDraft ?? null,
   };
+}
+
+/** One settled think→act step, whichever transport produced it. */
+interface StepResult {
+  content: string;
+  toolCalls: ChatCompletionMessageToolCall[];
+  finishReason: string | null;
+}
+
+interface StepRequest {
+  model: string;
+  messages: ChatCompletionMessageParam[];
+  tools: ReturnType<typeof toOpenAISchemas>;
+  tool_choice: 'auto' | 'none';
+}
+
+/**
+ * Run one model call. With an emitter the request streams — content deltas are
+ * forwarded live (the loop's following `step` event tells the client whether they
+ * were the reply or just pre-tool working notes) and tool-call fragments are
+ * reassembled by index; without one it's a plain request. Both paths return the
+ * same settled shape, so the loop logic doesn't fork.
+ */
+async function completeStep(request: StepRequest, emit?: AgentEmit): Promise<StepResult> {
+  if (!emit) {
+    const completion = await openrouter.chat.completions.create(request);
+    const choice = completion.choices[0];
+    return {
+      content: choice?.message?.content ?? '',
+      toolCalls: choice?.message?.tool_calls ?? [],
+      finishReason: choice?.finish_reason ?? null,
+    };
+  }
+
+  const stream = await openrouter.chat.completions.create({ ...request, stream: true });
+  let content = '';
+  let finishReason: string | null = null;
+  const toolCalls: ChatCompletionMessageFunctionToolCall[] = [];
+  for await (const chunk of stream) {
+    const choice = chunk.choices[0];
+    if (!choice) continue;
+    if (choice.delta?.content) {
+      content += choice.delta.content;
+      emit({ type: 'text', text: choice.delta.content });
+    }
+    for (const tc of choice.delta?.tool_calls ?? []) {
+      const slot = (toolCalls[tc.index] ??= {
+        id: '',
+        type: 'function',
+        function: { name: '', arguments: '' },
+      });
+      if (tc.id) slot.id = tc.id;
+      if (tc.function?.name) slot.function.name = tc.function.name;
+      if (tc.function?.arguments) slot.function.arguments += tc.function.arguments;
+    }
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+  }
+  // Sparse-array guard: indexes are provider-assigned and SHOULD be dense, but a
+  // skipped slot must not surface as an undefined entry.
+  return { content, toolCalls: toolCalls.filter(Boolean), finishReason };
+}
+
+/** Arg fields safe to preview in a progress label — short, human-readable identifiers
+ *  only. Everything else (story bodies, source text) stays server-side. */
+const PREVIEW_ARG_FIELDS = [
+  'firstName',
+  'familyName',
+  'personName',
+  'relativeName',
+  'name',
+  'newName',
+  'relation',
+  'title',
+] as const;
+
+/** The whitelisted, length-capped subset of a tool call's args for progress labels. */
+function argsPreview(rawArgs: string): Record<string, string> {
+  const preview: Record<string, string> = {};
+  try {
+    const parsed: unknown = rawArgs ? JSON.parse(rawArgs) : {};
+    if (typeof parsed !== 'object' || parsed === null) return preview;
+    for (const field of PREVIEW_ARG_FIELDS) {
+      const value = (parsed as Record<string, unknown>)[field];
+      if (typeof value === 'string' && value.trim()) preview[field] = value.slice(0, 80);
+    }
+  } catch {
+    // Half-formed JSON (or none) — a preview is best-effort, never an error.
+  }
+  return preview;
 }
 
 /**
