@@ -25,6 +25,14 @@ ENV SKIP_ENV_VALIDATION=1
 # SOURCE_COMMIT; the timestamp fallback covers other builders.
 ARG SOURCE_COMMIT
 RUN echo "${SOURCE_COMMIT:-$(date +%Y%m%d%H%M%S)}" > .deployment-id
+# NEXT_PUBLIC_* are inlined into the client bundle at `next build` time, so the
+# PostHog key must be present HERE, not just at runtime. Coolify passes it as a
+# --build-arg (env var marked "Available at Buildtime"); without this ARG Docker
+# drops it and browser-side analytics silently never initializes. (Only the key
+# needs baking — the host is hardcoded to /ingest client-side and defaults to
+# the EU host server-side, so leaving it unset keeps the env.ts default intact.)
+ARG NEXT_PUBLIC_POSTHOG_KEY
+ENV NEXT_PUBLIC_POSTHOG_KEY=$NEXT_PUBLIC_POSTHOG_KEY
 RUN npm run build
 
 # ── runtime ──────────────────────────────────────────────────────────────────
