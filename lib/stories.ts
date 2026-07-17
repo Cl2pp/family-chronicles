@@ -135,7 +135,7 @@ export async function listStoryPeopleCandidates(storyId: string, userId: string)
   const rows = await db
     .selectDistinct({
       id: people.id,
-      displayName: people.displayName,
+      firstName: people.firstName,
       familyName: people.familyName,
     })
     .from(storyChronicles)
@@ -149,7 +149,7 @@ export async function listStoryPeopleCandidates(storyId: string, userId: string)
     .innerJoin(chronicleMembers, eq(chronicleMembers.chronicleId, storyChronicles.chronicleId))
     .innerJoin(people, eq(people.id, chronicleMembers.personId))
     .where(eq(storyChronicles.storyId, storyId))
-    .orderBy(asc(people.displayName));
+    .orderBy(asc(people.firstName));
   return rows;
 }
 
