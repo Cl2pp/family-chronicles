@@ -429,6 +429,12 @@ export function ChatView({
     return result;
   }
 
+  /** A fresh tree-changes card replaces any older pending one (the server already
+   *  superseded it) — retire stale cards from view instead of leaving two live. */
+  function withoutSupersededCards(msgs: Msg[]): Msg[] {
+    return msgs.map((m) => (m.peopleDraft && !m.peopleResult ? { ...m, peopleDraft: null } : m));
+  }
+
   async function send(text: string) {
     const trimmed = text.trim();
     if ((!trimmed && photos.length === 0) || sending) return;
@@ -461,7 +467,7 @@ export function ChatView({
       advanceTurn();
       adoptConversation(res.conversationId);
       setMessages((m) => [
-        ...m,
+        ...(res.peopleDraft ? withoutSupersededCards(m) : m),
         {
           role: 'assistant',
           content: res.reply,
@@ -555,7 +561,7 @@ export function ChatView({
       advanceTurn();
       adoptConversation(res.conversationId);
       setMessages((m) => [
-        ...m,
+        ...(res.peopleDraft ? withoutSupersededCards(m) : m),
         {
           role: 'assistant',
           content: res.reply,
