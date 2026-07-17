@@ -6,6 +6,7 @@ import { useI18n } from '@/lib/i18n/client';
 import { ActionReceipts } from './action-receipts';
 import { MessageAttachments } from './message-attachments';
 import { MessageMarkdown } from './message-markdown';
+import { PeopleChangesCard } from './people-changes-card';
 import { StoryDraftCard } from './story-draft-card';
 import type { Msg, MsgResult } from './types';
 
@@ -49,7 +50,7 @@ export function MessageRow({
 
       {msg.receipts?.length ? <ActionReceipts receipts={msg.receipts} /> : null}
 
-      {msg.result && (
+      {msg.result && msg.result.kind !== 'people' && (
         <ActionReceipts
           receipts={[
             {
@@ -64,9 +65,31 @@ export function MessageRow({
         />
       )}
 
+      {msg.result && msg.result.kind === 'people' && (
+        <>
+          {msg.result.receipts.length ? <ActionReceipts receipts={msg.result.receipts} /> : null}
+          {msg.result.errors.length ? (
+            <Text size="xs" c="dimmed">
+              {t.chat.changesPartlyFailed(msg.result.errors.length)}
+            </Text>
+          ) : null}
+        </>
+      )}
+
       {msg.storyDraft && !msg.result && !discarded && (
         <StoryDraftCard
           draft={msg.storyDraft}
+          conversationId={conversationId}
+          busy={busy}
+          setBusy={setBusy}
+          onDiscard={() => setDiscarded(true)}
+          onResult={onResult}
+        />
+      )}
+
+      {msg.peopleDraft && !msg.result && !discarded && (
+        <PeopleChangesCard
+          draft={msg.peopleDraft}
           conversationId={conversationId}
           busy={busy}
           setBusy={setBusy}

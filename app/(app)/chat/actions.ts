@@ -10,12 +10,15 @@ import {
   claimPendingReply,
   closeConversation,
   createConversation,
+  findPendingPeopleDraft,
   getConversation,
   listMessages,
   photosByMessage,
   releasePendingReply,
   resolveDraftCard,
+  resolvePeopleCard,
   resumableConversation,
+  supersedePendingPeopleDrafts,
   tryClaimPendingReply,
   type AttachmentInput,
 } from '@/lib/conversations';
@@ -29,6 +32,7 @@ import {
   getPerson,
   removeRelationship,
 } from '@/lib/people';
+import { applyPeopleChanges, type PeopleDraft } from '@/lib/people-changes';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { buildKey, getObjectBuffer, presignGet, presignPut } from '@/lib/s3';
 import { validateUpload } from '@/lib/uploads';
@@ -79,6 +83,7 @@ export interface SendResult {
   reply: string;
   receipts: Receipt[];
   storyDraft: StoryDraft | null;
+  peopleDraft: PeopleDraft | null;
 }
 
 /** Build the mutable per-turn tool context from the resolved active chronicle. */
@@ -146,13 +151,18 @@ async function respondAndStore(
   );
 
   const result = await runAgent(history, ctx);
+  const peopleDraft = result.peopleDraft?.changes.length ? result.peopleDraft : null;
+  // A fresh card supersedes any earlier one still pending — only one tree-changes card
+  // is ever live at a time, so an older, un-acted-on card can't be confused for this one.
+  if (peopleDraft) await supersedePendingPeopleDrafts(conversationId);
   // Persist receipts and any draft card on the assistant message so the ✓ chips and the
   // reviewable card both survive a reload (a phone backgrounding the PWA, say).
   const metadata =
-    result.receipts.length || result.storyDraft
+    result.receipts.length || result.storyDraft || peopleDraft
       ? {
           ...(result.receipts.length ? { receipts: result.receipts } : {}),
           ...(result.storyDraft ? { storyDraft: result.storyDraft } : {}),
+          ...(peopleDraft ? { peopleDraft } : {}),
         }
       : undefined;
   await addMessage(conversationId, 'assistant', result.reply, metadata);
@@ -165,6 +175,16 @@ async function respondAndStore(
       'system',
       `[A story draft card "${draftTitle}" is now showing. Only the user can save or discard it ` +
         'on the card; a note will appear here once they do. Do not draft it again or offer to save it.]',
+    );
+  }
+  if (peopleDraft) {
+    await addMessage(
+      conversationId,
+      'system',
+      `[A tree-changes card with ${peopleDraft.changes.length} staged change` +
+        `${peopleDraft.changes.length === 1 ? '' : 's'} is now showing. Only the user can apply or ` +
+        'discard it on the card (or say so explicitly in chat); a note will appear here once they do. ' +
+        'Nothing has been applied yet — do not claim it has, and do not stage the same changes again.]',
     );
   }
 
@@ -183,6 +203,7 @@ async function respondAndStore(
     reply: result.reply,
     receipts: result.receipts,
     storyDraft: result.storyDraft,
+    peopleDraft,
   };
 }
 
@@ -482,5 +503,52 @@ export async function discardStoryDraft(input: {
     'system',
     `[The user discarded the story draft card "${input.title}" without saving. Do not save it; ` +
       'if they want a story about this later, draft a fresh card.]',
+  );
+}
+
+/**
+ * Apply the newest pending tree-changes card via its own Apply button. Server-
+ * authoritative: the changeset comes from the stored message metadata, never from the
+ * client, so a tampered request can't smuggle in edits the model never actually staged.
+ */
+export async function confirmPeopleChanges(input: {
+  conversationId: string;
+}): Promise<{ receipts: Receipt[]; errors: string[] }> {
+  const user = await requireUser();
+  const convo = await getConversation(input.conversationId);
+  if (!convo || convo.userId !== user.id) throw new Error('Conversation not found');
+
+  const pending = await findPendingPeopleDraft(input.conversationId);
+  if (!pending) return { receipts: [], errors: [] }; // already resolved — nothing to do
+
+  const { receipts, errors } = await applyPeopleChanges(pending.draft, user.id);
+  await resolvePeopleCard(pending.messageId);
+
+  const applied = receipts.length
+    ? `Applied ${receipts.length} change${receipts.length === 1 ? '' : 's'} from the card.`
+    : 'Nothing from the card could be applied.';
+  const failed = errors.length ? ` ${errors.length} failed: ${errors.join('; ')}` : '';
+  await addMessage(input.conversationId, 'system', `[The user tapped Apply on the tree-changes card. ${applied}${failed}]`, {
+    receipts,
+  });
+
+  revalidatePath('/chronicle');
+  return { receipts, errors };
+}
+
+/** Discard the newest pending tree-changes card via its own Discard button — nothing is applied. */
+export async function discardPeopleChanges(input: { conversationId: string }): Promise<void> {
+  const user = await requireUser();
+  const convo = await getConversation(input.conversationId);
+  if (!convo || convo.userId !== user.id) return;
+
+  const pending = await findPendingPeopleDraft(input.conversationId);
+  if (!pending) return;
+  await resolvePeopleCard(pending.messageId);
+  await addMessage(
+    input.conversationId,
+    'system',
+    '[The user discarded the tree-changes card without applying it. Do not stage those changes ' +
+      'again unless they ask.]',
   );
 }

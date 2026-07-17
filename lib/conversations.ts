@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from 'drizzle-or
 import { db } from '@/db';
 import { conversations, messageAttachments, messages } from '@/db/schema';
 import { CONVERSATION_IDLE_MS } from '@/lib/chat-idle';
+import type { PeopleDraft } from '@/lib/people-changes';
 
 export type ChatRole = 'user' | 'assistant' | 'system' | 'tool';
 export type AttachmentKind = 'audio' | 'photo';
@@ -147,6 +148,65 @@ export async function resolveDraftCard(conversationId: string) {
     .update(messages)
     .set({ metadata: { ...meta, draftResolved: true } })
     .where(eq(messages.id, pending.id));
+}
+
+/**
+ * The newest still-pending people-changes card in a conversation, if any — the tools
+ * confirm_people_changes/cancel_people_changes and the confirmPeopleChanges/
+ * discardPeopleChanges server actions all resolve the SAME card this way, so a
+ * card can only ever be acted on once.
+ */
+export async function findPendingPeopleDraft(
+  conversationId: string,
+): Promise<{ messageId: string; draft: PeopleDraft } | null> {
+  const recent = await db
+    .select({ id: messages.id, metadata: messages.metadata })
+    .from(messages)
+    .where(and(eq(messages.conversationId, conversationId), eq(messages.role, 'assistant')))
+    .orderBy(desc(messages.createdAt));
+
+  const pending = recent.find((m) => {
+    const meta = m.metadata as { peopleDraft?: unknown; peopleDraftResolved?: boolean } | null;
+    return meta?.peopleDraft && !meta.peopleDraftResolved;
+  });
+  if (!pending) return null;
+  const meta = pending.metadata as { peopleDraft: PeopleDraft };
+  return { messageId: pending.id, draft: meta.peopleDraft };
+}
+
+/** Mark one message's people-changes card resolved (applied or discarded), so a reload
+ *  renders it as history instead of re-offering a live card. */
+export async function resolvePeopleCard(messageId: string) {
+  const row = await db.query.messages.findFirst({ where: eq(messages.id, messageId) });
+  if (!row) return;
+  const meta = (row.metadata ?? {}) as Record<string, unknown>;
+  await db
+    .update(messages)
+    .set({ metadata: { ...meta, peopleDraftResolved: true } })
+    .where(eq(messages.id, messageId));
+}
+
+/** Resolve every still-pending people-changes card in a conversation — called right
+ *  before a NEW one is stored, so only one card is ever live at a time. In practice
+ *  there's at most one, but this stays correct even if that invariant is ever broken. */
+export async function supersedePendingPeopleDrafts(conversationId: string) {
+  const recent = await db
+    .select({ id: messages.id, metadata: messages.metadata })
+    .from(messages)
+    .where(and(eq(messages.conversationId, conversationId), eq(messages.role, 'assistant')))
+    .orderBy(desc(messages.createdAt));
+
+  const pending = recent.filter((m) => {
+    const meta = m.metadata as { peopleDraft?: unknown; peopleDraftResolved?: boolean } | null;
+    return meta?.peopleDraft && !meta.peopleDraftResolved;
+  });
+  for (const m of pending) {
+    const meta = (m.metadata ?? {}) as Record<string, unknown>;
+    await db
+      .update(messages)
+      .set({ metadata: { ...meta, peopleDraftResolved: true } })
+      .where(eq(messages.id, m.id));
+  }
 }
 
 export async function addMessage(

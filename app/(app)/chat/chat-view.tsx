@@ -359,7 +359,13 @@ export function ChatView({
       adoptConversation(res.conversationId);
       setMessages((m) => [
         ...m,
-        { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
+        {
+          role: 'assistant',
+          content: res.reply,
+          receipts: res.receipts,
+          storyDraft: res.storyDraft,
+          peopleDraft: res.peopleDraft,
+        },
       ]);
       setBusyLabel(null);
     } catch {
@@ -431,7 +437,13 @@ export function ChatView({
         if (i !== -1) next[i] = { ...pending, content: res.transcript };
         return [
           ...next,
-          { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
+          {
+            role: 'assistant',
+            content: res.reply,
+            receipts: res.receipts,
+            storyDraft: res.storyDraft,
+            peopleDraft: res.peopleDraft,
+          },
         ];
       });
       setBusyLabel(null);

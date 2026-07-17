@@ -393,6 +393,31 @@ export const en = {
     couldNotUndo: 'Could not undo that. Please try again.',
     addStoryPrompt:
       'I’d like to add a new story to the chronicle. Please ask me what story I want to tell.',
+    // Tree-changes confirmation card (staged add/relate/unrelate/edit/delete_person).
+    treeChanges: 'Tree changes',
+    applyChanges: 'Apply',
+    changesApplied: (n: number) => (n === 1 ? '1 change applied.' : `${n} changes applied.`),
+    changesPartlyFailed: (n: number) =>
+      n === 1 ? '1 change could not be applied.' : `${n} changes could not be applied.`,
+    relationWord: (r: 'parent' | 'child' | 'partner'): string =>
+      r === 'parent' ? 'parent' : r === 'child' ? 'child' : 'partner',
+    addPerson: (label: string, years: string) => `Add ${label}${years}`,
+    addPersonRelated: (label: string, years: string, relation: string, relative: string) =>
+      `Add ${label}${years} — ${relation} of ${relative}`,
+    relate: (person: string, relation: string, relative: string) => `${person} → ${relation} of ${relative}`,
+    unrelate: (person: string, relation: string, relative: string) =>
+      `${person} — no longer ${relation} of ${relative}`,
+    editPerson: (label: string, summary: string) => `Edit ${label}: ${summary}`,
+    deletePerson: (label: string) => `Remove ${label}`,
+    editFieldFirstName: 'first name',
+    editFieldFamilyName: 'surname',
+    editFieldBirthFamilyName: 'birth surname',
+    editFieldGender: 'gender',
+    editFieldBorn: 'born',
+    editFieldDied: 'died',
+    editValueCleared: 'cleared',
+    editValueMale: 'male',
+    editValueFemale: 'female',
   },
   recorder: {
     start: 'Start recording',

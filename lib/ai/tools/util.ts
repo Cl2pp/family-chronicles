@@ -3,6 +3,7 @@ import { listChroniclePeople } from '@/lib/people';
 import { findPersonByName } from '@/lib/person-match';
 import { personFullName } from '@/lib/person-name';
 import { canContribute, canManage, type AccessRole } from '@/lib/permissions';
+import type { PersonRef } from '@/lib/people-changes';
 import type { ToolContext } from './types';
 
 /** Resolve the active chronicle + confirm the user can contribute, or return an error string. */
@@ -57,6 +58,66 @@ export async function resolvePerson(
   if ('person' in result) return { person: result.person };
   if (result.error === 'ambiguous') {
     const names = result.candidates.map(describeCandidate).join(', ');
+    return {
+      error:
+        `"${name}" could mean several people (${names}) — refer to one as "first name + family ` +
+        'name", or ask the user which one is meant.',
+    };
+  }
+  return { error: `No one named "${name}" is in this chronicle's tree yet.` };
+}
+
+/** A tree-lookup candidate: either a real DB row, or a not-yet-created `add` staged
+ *  earlier in this turn's changeset — `id` is `staged:<index>` for the latter. */
+interface StagingCandidate {
+  id: string;
+  firstName: string;
+  familyName: string | null;
+  birthFamilyName: string | null;
+  bornOn?: Date | null;
+}
+
+function describeStagingCandidate(c: StagingCandidate): string {
+  const born = c.bornOn ? ` (b. ${new Date(c.bornOn).getUTCFullYear()})` : '';
+  return `${personFullName(c)}${born}`;
+}
+
+/**
+ * Like `resolvePerson`, but the name pool also includes people staged as `add`
+ * changes earlier in the SAME in-progress changeset (`ctx.peopleDraft`) — so a turn
+ * that adds "Anna" and then relates "Anna" to someone else doesn't need Anna to
+ * exist in the DB yet. Returns a `PersonRef` pointing at whichever kind matched.
+ */
+export async function resolvePersonOrStaged(
+  ctx: ToolContext,
+  chronicleId: string,
+  name: string,
+): Promise<{ ref: PersonRef } | { error: string }> {
+  const people = await listChroniclePeople(chronicleId);
+  const stagedAdds: StagingCandidate[] = (ctx.peopleDraft?.changes ?? []).flatMap((c, index) =>
+    c.op === 'add'
+      ? [
+          {
+            id: `staged:${index}`,
+            firstName: c.firstName,
+            familyName: c.familyName,
+            birthFamilyName: c.birthFamilyName,
+          },
+        ]
+      : [],
+  );
+  const candidates: StagingCandidate[] = [...people, ...stagedAdds];
+
+  const result = findPersonByName(candidates, name);
+  if ('person' in result) {
+    const p = result.person;
+    if (p.id.startsWith('staged:')) {
+      return { ref: { kind: 'staged', index: Number(p.id.slice('staged:'.length)), label: personFullName(p) } };
+    }
+    return { ref: { kind: 'existing', personId: p.id, label: personFullName(p) } };
+  }
+  if (result.error === 'ambiguous') {
+    const names = result.candidates.map(describeStagingCandidate).join(', ');
     return {
       error:
         `"${name}" could mean several people (${names}) — refer to one as "first name + family ` +
