@@ -8,7 +8,12 @@ import { env } from '@/lib/env';
  * single client; the model is chosen per-call via `env.STYLING_MODEL`.
  */
 export const openrouter = new OpenAI({
-  apiKey: env.OPENROUTER_API_KEY,
+  // The `?? 'unset'` matters at build time only: `next build` runs with
+  // SKIP_ENV_VALIDATION=1 and no secrets, page-data collection evaluates this
+  // module via the chat stream route, and the SDK throws on an undefined key.
+  // No request is made during build; real processes validate the key in
+  // lib/env.ts before this can ever be used.
+  apiKey: env.OPENROUTER_API_KEY ?? 'unset',
   baseURL: env.OPENROUTER_BASE_URL,
   defaultHeaders: {
     'HTTP-Referer': env.BETTER_AUTH_URL,
