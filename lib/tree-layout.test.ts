@@ -466,6 +466,123 @@ describe('layoutFamilyTree', () => {
     expect(crossings).toBe(0);
   });
 
+  it('never does worse than the classic joint search (adversarial-review seeds)', () => {
+    // An independent review of the stub-anchoring change fuzz-compared the
+    // engine against the pre-stub implementation and found a handful of
+    // random genealogies where extraction (or the probe-settled relocation)
+    // regressed the crossing count. The dual-candidate selection must keep
+    // those at the classic engine's numbers. Generator ported from the
+    // review's fuzz harness (mulberry32-seeded).
+    const mulberry32 = (a: number) => () => {
+      a |= 0;
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const gencase = (seed: number) => {
+      const rnd = mulberry32(seed);
+      const people: LayoutPerson[] = [];
+      const edges: LayoutEdge[] = [];
+      let n = 0;
+      const add = (year: number) => {
+        const id = `p${n++}`;
+        people.push({
+          id,
+          firstName: id,
+          bornOn: rnd() < 0.9 ? `${year}-0${1 + Math.floor(rnd() * 8)}-01` : null,
+        });
+        return id;
+      };
+      const sp = (a: string, b: string) => edges.push(spouse(a, b));
+      const par = (p: string, c: string) => edges.push(parent(p, c));
+      const ancestors = (id: string, year: number, depth: number) => {
+        let cur = id;
+        let y = year;
+        for (let d = 0; d < depth; d++) {
+          y -= 25 + Math.floor(rnd() * 10);
+          const f = add(y);
+          const m = add(y + 1);
+          sp(f, m);
+          par(f, cur);
+          par(m, cur);
+          if (rnd() < 0.3) {
+            const sib = add(y + 2);
+            par(f, sib);
+            edges.pop();
+            n--;
+            people.pop();
+          }
+          cur = rnd() < 0.5 ? f : m;
+        }
+      };
+      const gens = 3 + Math.floor(rnd() * 3);
+      const topCouples = 1 + Math.floor(rnd() * 3);
+      let layer: string[] = [];
+      for (let i = 0; i < topCouples; i++) {
+        const y = 1900 + Math.floor(rnd() * 6);
+        const a = add(y);
+        const b = add(y + 1);
+        sp(a, b);
+        const kids = 1 + Math.floor(rnd() * 3);
+        for (let k = 0; k < kids; k++) {
+          const c = add(y + 25 + k * 2);
+          par(a, c);
+          par(b, c);
+          layer.push(c);
+        }
+      }
+      let year = 1930;
+      for (let g = 1; g < gens; g++) {
+        year += 28;
+        const next: string[] = [];
+        for (const p of layer) {
+          if (rnd() < 0.75) {
+            const partner = add(year - 28 + Math.floor(rnd() * 4));
+            sp(p, partner);
+            if (rnd() < 0.5) ancestors(partner, year - 28, 1 + Math.floor(rnd() * 3));
+            const kids = Math.floor(rnd() * 3);
+            for (let k = 0; k < kids; k++) {
+              const c = add(year + k * 2);
+              par(p, c);
+              par(partner, c);
+              next.push(c);
+            }
+          } else if (rnd() < 0.3) {
+            const c = add(year);
+            par(p, c);
+            next.push(c);
+          }
+        }
+        if (next.length >= 2 && rnd() < 0.3) {
+          const i = Math.floor(rnd() * next.length);
+          let j = Math.floor(rnd() * next.length);
+          if (j === i) j = (j + 1) % next.length;
+          sp(next[i], next[j]);
+        }
+        layer = next;
+        if (!layer.length) break;
+      }
+      if (rnd() < 0.5) add(1950);
+      if (rnd() < 0.3) {
+        const a = add(1960);
+        const b = add(1961);
+        sp(a, b);
+      }
+      return { people, edges };
+    };
+    // (seed, classic-engine crossings) — the ceiling the engine must hold.
+    for (const [seed, classic] of [
+      [20, 0],
+      [73, 0],
+      [80, 1],
+    ] as [number, number][]) {
+      const { people, edges } = gencase(seed);
+      const { crossings } = layoutFamilyTree(people, edges);
+      expect(crossings, `fuzz seed ${seed}`).toBeLessThanOrEqual(classic);
+    }
+  });
+
   it('places a disconnected person on the row matching their birth year', () => {
     const people = [
       person('Mom', '1960-01-01'),

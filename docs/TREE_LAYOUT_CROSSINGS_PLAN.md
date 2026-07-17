@@ -13,6 +13,18 @@ person→block map and per-row child lists hoisted out of the loop. Results:
 `lib/tree-layout.test.ts`, wall-clock faster up to ~400 people and ~+28% on
 the 763-person case. The original diagnosis below is kept for reference.
 
+**Post-merge hardening:** an independent adversarial review fuzz-compared the
+merged engine against the pre-stub implementation over 500 random genealogies
+(no crashes, no invariant violations, no nondeterminism) but found ~5% of
+arbitrary trees where the intentional heuristic changes ended with MORE
+crossings than the classic joint search. The engine now runs both pipelines
+for trees up to 300 people — the stub-anchored one and the classic
+(no-extraction, old relocation gate) one — orients both, and keeps the
+better final score, so small/medium layouts are never worse than the
+pre-stub engine (re-fuzzed: 0 regressions in 500 cases). Above the cap the
+stub pipeline stands alone, where it beat the classic one on every
+benchmark case.
+
 **Scope:** the pure layout engine `lib/tree-layout.ts` (`layoutFamilyTree`),
 consumed only by `app/(app)/chronicle/family-tree.tsx`. Nothing else computes
 tree layout; there is no server/worker/DB layout state.
