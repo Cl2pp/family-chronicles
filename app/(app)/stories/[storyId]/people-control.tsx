@@ -5,9 +5,10 @@ import { Alert, Badge, Button, Group, MultiSelect, Stack, Text } from '@mantine/
 import { IconCheck, IconUsers, IconX } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { useI18n } from '@/lib/i18n/client';
+import { personFullName } from '@/lib/person-name';
 import { setStoryPeople } from './actions';
 
-type Person = { id: string; displayName: string };
+type Person = { id: string; firstName: string; familyName: string | null };
 
 /**
  * "Who is in this story" — shows the tagged people and, for editors, lets them pick
@@ -34,8 +35,8 @@ export function StoryPeopleControl({
   // Offer every candidate, plus any already-tagged person who is no longer a
   // candidate (e.g. they left the chronicle) so a save never silently drops them.
   const data = useMemo(() => {
-    const byId = new Map(candidates.map((c) => [c.id, c.displayName]));
-    for (const p of tagged) if (!byId.has(p.id)) byId.set(p.id, p.displayName);
+    const byId = new Map(candidates.map((c) => [c.id, personFullName(c)]));
+    for (const p of tagged) if (!byId.has(p.id)) byId.set(p.id, personFullName(p));
     return [...byId.entries()].map(([id, label]) => ({ value: id, label }));
   }, [candidates, tagged]);
 
@@ -110,7 +111,7 @@ export function StoryPeopleControl({
       {tagged.length > 0 ? (
         tagged.map((p) => (
           <Badge key={p.id} variant="light" color="gray" radius="sm">
-            {p.displayName}
+            {personFullName(p)}
           </Badge>
         ))
       ) : (

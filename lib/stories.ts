@@ -117,6 +117,9 @@ export async function listStoryPeople(storyId: string) {
       id: people.id,
       firstName: people.firstName,
       familyName: people.familyName,
+      // Matching qualifies by the surname at birth too ("Frieda Loges") — without it
+      // here, untagging a person could be ambiguous where tagging them was not.
+      birthFamilyName: people.birthFamilyName,
     })
     .from(storyPeople)
     .innerJoin(people, eq(storyPeople.personId, people.id))
@@ -135,8 +138,9 @@ export async function listStoryPeopleCandidates(storyId: string, userId: string)
   const rows = await db
     .selectDistinct({
       id: people.id,
-      displayName: people.displayName,
+      firstName: people.firstName,
       familyName: people.familyName,
+      birthFamilyName: people.birthFamilyName,
     })
     .from(storyChronicles)
     .innerJoin(
@@ -149,7 +153,7 @@ export async function listStoryPeopleCandidates(storyId: string, userId: string)
     .innerJoin(chronicleMembers, eq(chronicleMembers.chronicleId, storyChronicles.chronicleId))
     .innerJoin(people, eq(people.id, chronicleMembers.personId))
     .where(eq(storyChronicles.storyId, storyId))
-    .orderBy(asc(people.displayName));
+    .orderBy(asc(people.firstName));
   return rows;
 }
 

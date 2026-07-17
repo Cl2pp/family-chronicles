@@ -11,6 +11,8 @@ export interface MatchablePerson {
   id: string;
   firstName: string;
   familyName?: string | null;
+  /** Surname at birth (maiden name) — a valid way to refer to someone, too. */
+  birthFamilyName?: string | null;
 }
 
 export type PersonMatch<T extends MatchablePerson> =
@@ -20,7 +22,18 @@ export type PersonMatch<T extends MatchablePerson> =
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
-/** Resolve one name against the tree: exact display name first, then unique forgiving matches. */
+/** The surnames a person can be qualified by: current family name and name at birth. */
+function surnamesOf(p: MatchablePerson): string[] {
+  return [p.familyName, p.birthFamilyName].flatMap((s) => (s?.trim() ? [norm(s)] : []));
+}
+
+/**
+ * Resolve one name against the tree, most-specific rule first. The tiers matter:
+ * surname-qualified names ("Gisela Koch" → firstName "Gisela" + familyName "Koch")
+ * must be tried on their own BEFORE the loose partial-name rules — pooled together,
+ * "Gisela Koch" would also collect every other Gisela via the prefix rule, so the
+ * surname could never disambiguate two people sharing a first name.
+ */
 export function findPersonByName<T extends MatchablePerson>(
   people: T[],
   name: string,
@@ -28,19 +41,25 @@ export function findPersonByName<T extends MatchablePerson>(
   const wanted = norm(name);
   if (!wanted) return { error: 'missing' };
 
+  // Tier 1: exact stored name.
   const exact = people.filter((p) => norm(p.firstName) === wanted);
   if (exact.length === 1) return { person: exact[0] };
   if (exact.length > 1) return { error: 'ambiguous', candidates: exact };
 
+  // Tier 2: first name + a surname (current or at birth).
+  const qualified = people.filter((p) =>
+    surnamesOf(p).some((fam) => `${norm(p.firstName)} ${fam}` === wanted),
+  );
+  if (qualified.length === 1) return { person: qualified[0] };
+  if (qualified.length > 1) return { error: 'ambiguous', candidates: qualified };
+
+  // Tier 3: loose partial-name overlap.
   const candidates = people.filter((p) => {
     const dn = norm(p.firstName);
     // "Ava" → "Ava Naoko" (first name / prefix of the stored name)
     if (dn.startsWith(`${wanted} `)) return true;
     // "Ava Naoko Ortlepp" → "Ava Naoko" (stored name plus extras, e.g. an appended surname)
     if (wanted.startsWith(`${dn} `)) return true;
-    // "Clemens Ortlepp" → firstName "Clemens" + familyName "Ortlepp"
-    const fam = p.familyName ? norm(p.familyName) : '';
-    if (fam && norm(`${dn} ${fam}`) === wanted) return true;
     return false;
   });
   if (candidates.length === 1) return { person: candidates[0] };
