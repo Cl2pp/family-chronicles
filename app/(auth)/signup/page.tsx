@@ -51,10 +51,11 @@ function SignupForm() {
       notifications.show({ color: 'red', message: error.message ?? t.auth.signUpFailed });
       return;
     }
+    // The user_signed_up event is captured server-side (lib/auth.ts hooks);
+    // identify here just ties the anonymous browser session to the account.
     if (data?.user) {
       posthog.identify(data.user.id, { name: data.user.name, email: data.user.email });
     }
-    posthog.capture('user_signed_up', { method: 'email' });
     notifications.show({ message: t.auth.checkInboxAfterSignup });
     router.push(next);
     router.refresh();

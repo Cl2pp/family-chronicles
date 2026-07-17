@@ -49,10 +49,11 @@ function LoginForm() {
       notifications.show({ color: 'red', message: error.message ?? t.auth.signInFailed });
       return;
     }
+    // The user_signed_in event is captured server-side (lib/auth.ts hooks);
+    // identify here just ties the anonymous browser session to the account.
     if (data?.user) {
       posthog.identify(data.user.id, { name: data.user.name, email: data.user.email });
     }
-    posthog.capture('user_signed_in', { method: 'email' });
     router.push(next);
     router.refresh();
   }

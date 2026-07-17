@@ -21,7 +21,7 @@ import { getMembership } from '@/lib/chronicles';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { buildKey, presignPut } from '@/lib/s3';
 import { validateUpload } from '@/lib/uploads';
-import { getPostHogClient } from '@/lib/posthog-server';
+import { captureServerEvent } from '@/lib/posthog-server';
 
 /** Re-queue a failed story for styling and refresh its detail page. */
 export async function retryStory(storyId: string) {
@@ -70,9 +70,7 @@ export async function deleteStory(
   const result = await deleteStoryForUser(storyId, user.id);
   if (result.ok) {
     revalidatePath('/stories');
-    const posthog = getPostHogClient();
-    posthog.capture({ distinctId: user.id, event: 'story_deleted', properties: { storyId } });
-    await posthog.flush();
+    captureServerEvent(user.id, 'story_deleted', { story_id: storyId });
   }
   return result;
 }
@@ -120,13 +118,10 @@ export async function addStoryPhotos(input: {
   );
   revalidatePath(`/stories/${input.storyId}`);
   revalidatePath('/stories');
-  const posthog = getPostHogClient();
-  posthog.capture({
-    distinctId: user.id,
-    event: 'story_photos_added',
-    properties: { storyId: input.storyId, photo_count: input.photos.length },
+  captureServerEvent(user.id, 'story_photos_added', {
+    story_id: input.storyId,
+    photo_count: input.photos.length,
   });
-  await posthog.flush();
   return { ok: true };
 }
 

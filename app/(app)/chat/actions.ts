@@ -36,7 +36,7 @@ import { transcribeAudio } from '@/lib/ai/groq';
 import { enqueueTranscode } from '@/lib/queue';
 import { buildChatMessages } from './messages';
 import type { Msg } from './types';
-import { getPostHogClient } from '@/lib/posthog-server';
+import { captureServerEvent } from '@/lib/posthog-server';
 
 /** Throw unless the user can contribute to the chronicle (create stories / tree). */
 async function assertContributor(chronicleId: string, userId: string) {
@@ -319,15 +319,9 @@ export async function sendVoiceMessage(input: {
       console.error(`Failed to enqueue transcode for ${input.s3Key}:`, err);
     }
 
-    const posthog = getPostHogClient();
-    posthog.capture({
-      distinctId: user.id,
-      event: 'voice_message_sent',
-      properties: {
-        duration_sec: input.durationSec ?? null,
-      },
+    captureServerEvent(user.id, 'voice_message_sent', {
+      duration_sec: input.durationSec ?? null,
     });
-    await posthog.flush();
 
     const result = await respondAndStore(conversationId, ctx, previousChronicleId);
     return { ...result, transcript };
@@ -395,13 +389,10 @@ export async function acceptStory(input: {
   });
   if (saved.alreadySaved) return { storyId: saved.storyId };
 
-  const posthog = getPostHogClient();
-  posthog.capture({
-    distinctId: user.id,
-    event: 'story_accepted',
-    properties: { storyId: saved.storyId, chronicleId: input.chronicleId },
+  captureServerEvent(user.id, 'story_accepted', {
+    story_id: saved.storyId,
+    chronicle_id: input.chronicleId,
   });
-  await posthog.flush();
 
   if (conversationId) {
     // The receipt on the note renders as a persistent ✓ chip in the chat.
@@ -446,13 +437,7 @@ export async function applyStoryUpdate(input: {
   });
   if (!result.ok) throw new Error(result.error);
 
-  const posthog = getPostHogClient();
-  posthog.capture({
-    distinctId: user.id,
-    event: 'story_updated',
-    properties: { storyId: input.storyId },
-  });
-  await posthog.flush();
+  captureServerEvent(user.id, 'story_updated', { story_id: input.storyId });
 
   // Only write the note if the conversation belongs to the caller.
   const convo = input.conversationId ? await getConversation(input.conversationId) : null;

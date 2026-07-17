@@ -21,7 +21,7 @@ import { runBookAgent, type ChatTurn } from '@/lib/ai/agent';
 import type { Receipt, ToolContext } from '@/lib/ai/tools';
 import { getI18n } from '@/lib/i18n/server';
 import type { BookFormat } from '@/lib/gelato';
-import { getPostHogClient } from '@/lib/posthog-server';
+import { captureServerEvent } from '@/lib/posthog-server';
 
 /** UI actions are thin wrappers over lib/books.ts — the agent tools wrap the same functions. */
 
@@ -40,13 +40,10 @@ export async function createBookAction(): Promise<{ error: string } | never> {
   });
   if (!result.ok) return { error: result.error };
   revalidatePath('/books');
-  const posthog = getPostHogClient();
-  posthog.capture({
-    distinctId: user.id,
-    event: 'book_created',
-    properties: { bookId: result.value.bookId, chronicleId: active.id },
+  captureServerEvent(user.id, 'book_created', {
+    book_id: result.value.bookId,
+    chronicle_id: active.id,
   });
-  await posthog.flush();
   redirect(`/books/${result.value.bookId}`);
 }
 
@@ -89,13 +86,7 @@ export async function requestAiDesignAction(input: {
   const result = await requestAiDesign({ ...input, userId: user.id });
   revalidatePath(`/books/${input.bookId}`);
   if (result.ok) {
-    const posthog = getPostHogClient();
-    posthog.capture({
-      distinctId: user.id,
-      event: 'book_ai_design_requested',
-      properties: { bookId: input.bookId },
-    });
-    await posthog.flush();
+    captureServerEvent(user.id, 'book_ai_design_requested', { book_id: input.bookId });
   }
   return result.ok ? {} : { error: result.error };
 }
@@ -126,9 +117,7 @@ export async function deleteBookAction(bookId: string): Promise<{ error?: string
   const result = await deleteBook({ bookId, userId: user.id });
   if (!result.ok) return { error: result.error };
   revalidatePath('/books');
-  const posthog = getPostHogClient();
-  posthog.capture({ distinctId: user.id, event: 'book_deleted', properties: { bookId } });
-  await posthog.flush();
+  captureServerEvent(user.id, 'book_deleted', { book_id: bookId });
   return {};
 }
 

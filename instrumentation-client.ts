@@ -1,9 +1,13 @@
 import posthog from 'posthog-js';
 
-posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY!, {
-  api_host: '/ingest',
-  ui_host: 'https://eu.posthog.com',
-  defaults: '2026-01-30',
-  capture_exceptions: true,
-  debug: process.env.NODE_ENV === 'development',
-});
+// Must read process.env directly (not lib/env.ts): Next.js only inlines
+// NEXT_PUBLIC_* into the client bundle on static process.env references.
+if (process.env.NEXT_PUBLIC_POSTHOG_KEY) {
+  posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
+    api_host: '/ingest',
+    ui_host: 'https://eu.posthog.com',
+    defaults: '2026-01-30',
+    capture_exceptions: true,
+    debug: process.env.NODE_ENV === 'development',
+  });
+}

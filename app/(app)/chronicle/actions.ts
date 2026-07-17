@@ -24,7 +24,7 @@ import {
 import { createInvitation } from '@/lib/invitations';
 import type { AccessRole } from '@/lib/permissions';
 import { partsToEventDate, type EventDateParts } from '@/lib/dates';
-import { getPostHogClient } from '@/lib/posthog-server';
+import { captureServerEvent } from '@/lib/posthog-server';
 
 /** Create a chronicle, make it active, and go to the chronicle screen. */
 export async function createChronicleAction(formData: FormData) {
@@ -46,9 +46,7 @@ export async function createChronicleAction(formData: FormData) {
   cookieStore.set('activeChronicleId', chronicle.id, { path: '/' });
 
   revalidatePath('/chronicle');
-  const posthog = getPostHogClient();
-  posthog.capture({ distinctId: user.id, event: 'chronicle_created', properties: { chronicleId: chronicle.id } });
-  await posthog.flush();
+  captureServerEvent(user.id, 'chronicle_created', { chronicle_id: chronicle.id });
   redirect('/chronicle');
 }
 
@@ -238,13 +236,10 @@ export async function invite(input: {
   });
 
   revalidatePath('/chronicle');
-  const posthog = getPostHogClient();
-  posthog.capture({
-    distinctId: user.id,
-    event: 'member_invited',
-    properties: { chronicleId: input.chronicleId, role: input.role },
+  captureServerEvent(user.id, 'member_invited', {
+    chronicle_id: input.chronicleId,
+    role: input.role,
   });
-  await posthog.flush();
   return { token: created.token };
 }
 

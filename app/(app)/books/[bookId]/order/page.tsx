@@ -33,6 +33,7 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
         book={{
           id: book.id,
           title: book.title,
+          format: book.format,
           formatLabel: FORMAT_LABELS[book.format],
           pageCount,
           storyCount: book.chapters.length,

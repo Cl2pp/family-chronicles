@@ -4,6 +4,22 @@ import { db } from '@/db';
 import * as schema from '@/db/schema';
 import { env } from '@/lib/env';
 import { sendEmail } from '@/lib/email';
+import { captureServerEvent } from '@/lib/posthog-server';
+
+/**
+ * Analytics label for the auth endpoint that triggered a database hook, so
+ * sign-in/sign-up events cover every method (email form AND OAuth redirects,
+ * which never come back through our client-side pages). Path shapes follow
+ * better-auth's own last-login-method plugin.
+ */
+function authMethod(ctx?: { path?: string; params?: Record<string, string | undefined> } | null) {
+  const path = ctx?.path ?? '';
+  if (path.startsWith('/callback/') || path.startsWith('/oauth2/callback/')) {
+    return ctx?.params?.id ?? 'oauth';
+  }
+  if (path === '/sign-in/email' || path === '/sign-up/email') return 'email';
+  return 'other';
+}
 
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_URL,
@@ -82,6 +98,25 @@ export const auth = betterAuth({
     // (The better-auth default is 7 days.)
     expiresIn: 60 * 60 * 24 * 30,
     updateAge: 60 * 60 * 24,
+  },
+  // Server-side analytics for ALL auth methods. The sliding refresh above is
+  // an UPDATE, so session.create only fires on genuine sign-ins (including
+  // the auto sign-in right after signup/verification — which is one).
+  databaseHooks: {
+    user: {
+      create: {
+        after: async (user, ctx) => {
+          captureServerEvent(user.id, 'user_signed_up', { method: authMethod(ctx) });
+        },
+      },
+    },
+    session: {
+      create: {
+        after: async (session, ctx) => {
+          captureServerEvent(session.userId, 'user_signed_in', { method: authMethod(ctx) });
+        },
+      },
+    },
   },
 });
 
