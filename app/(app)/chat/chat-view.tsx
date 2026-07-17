@@ -34,7 +34,7 @@ import { PHOTO_ACCEPT, readDimensions } from '@/lib/uploads';
 import { useI18n } from '@/lib/i18n/client';
 import { MessageMarkdown } from './message-markdown';
 import { MessageRow } from './message-row';
-import { endConversation, presignUpload, syncChat } from './actions';
+import { endConversation, persistActiveChronicle, presignUpload, syncChat } from './actions';
 import { progressLabel } from './progress-label';
 import type { SendResult } from './respond';
 import type { ChatStreamEvent, ChatStreamRequest } from './stream-events';
@@ -340,6 +340,16 @@ export function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPrompt]);
 
+  /** Server-state side effects of a settled turn the streaming route can't do itself:
+   *  persist a chronicle switch (cookies can't be set mid-stream) and refresh the
+   *  router cache so the tree/stories pages reflect applied actions. */
+  function applyResultSideEffects(res: SendResult) {
+    if (res.activeChronicleChanged) {
+      void persistActiveChronicle(res.activeChronicleChanged).catch(() => {});
+    }
+    if (res.receipts.length || res.activeChronicleChanged) router.refresh();
+  }
+
   /**
    * POST the turn to the streaming endpoint and fold its events into the view:
    * status lines while tools run, live token deltas for the reply, then the
@@ -395,16 +405,22 @@ export function ChatView({
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        handle(JSON.parse(line) as ChatStreamEvent);
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          handle(JSON.parse(line) as ChatStreamEvent);
+        }
       }
+    } finally {
+      // A parse error mid-loop must not leave the connection dangling until the
+      // server finishes the whole turn. Cancel after normal completion is a no-op.
+      void reader.cancel().catch(() => {});
     }
     if (serverError) throw new Error(serverError);
     // A stream that ended without a result died mid-turn — throw so the caller
@@ -456,10 +472,19 @@ export function ChatView({
         },
       ]);
       setBusyLabel(null);
-    } catch {
+      applyResultSideEffects(res);
+    } catch (err) {
       // The request may have died mid-flight (a backgrounded mobile tab) while the
-      // server finished — or can redo — the turn. Reconcile before declaring failure.
+      // server finished — or can redo — the turn. Reconcile before declaring failure —
+      // and drop any half-streamed reply so it can't sit frozen (and hide the busy
+      // label) for the whole regeneration.
       if (turn !== turnRef.current) return;
+      liveTextRef.current = '';
+      setLiveText('');
+      setBusyLabel(t.chat.thinking);
+      if (sendBaselineRef.current?.turn === turn) {
+        sendBaselineRef.current.errorText = err instanceof Error ? err.message : null;
+      }
       void syncNow();
     }
   }
@@ -541,11 +566,15 @@ export function ChatView({
         },
       ]);
       setBusyLabel(null);
+      applyResultSideEffects(res);
     } catch (err) {
       // Real failures (e.g. "couldn't transcribe") carry a message worth showing —
       // but a killed request does not mean failure: the server may have stored the
       // message and finished the reply. Reconcile decides which case this is.
       if (turn !== turnRef.current) return;
+      liveTextRef.current = '';
+      setLiveText('');
+      setBusyLabel(t.chat.thinking);
       if (sendBaselineRef.current?.turn === turn) {
         sendBaselineRef.current.errorText = err instanceof Error ? err.message : null;
       }

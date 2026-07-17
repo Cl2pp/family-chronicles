@@ -461,17 +461,9 @@ async function completeStep(request: StepRequest, emit?: AgentEmit): Promise<Ste
 }
 
 /** Arg fields safe to preview in a progress label — short, human-readable identifiers
- *  only. Everything else (story bodies, source text) stays server-side. */
-const PREVIEW_ARG_FIELDS = [
-  'firstName',
-  'familyName',
-  'personName',
-  'relativeName',
-  'name',
-  'newName',
-  'relation',
-  'title',
-] as const;
+ *  only (exactly what progress-label.ts reads). Everything else (story bodies, source
+ *  text) stays server-side. */
+const PREVIEW_ARG_FIELDS = ['firstName', 'familyName', 'personName', 'relativeName', 'name'] as const;
 
 /** The whitelisted, length-capped subset of a tool call's args for progress labels. */
 function argsPreview(rawArgs: string): Record<string, string> {

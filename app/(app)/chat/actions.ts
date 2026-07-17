@@ -139,6 +139,18 @@ export async function endConversation(conversationId: string): Promise<void> {
   await closeConversation(conversationId);
 }
 
+/**
+ * Persist the active-chronicle cookie after a STREAMED turn switched or created a
+ * chronicle — the streaming route can't set cookies once its response has started
+ * (see respondAndStore). Membership is re-checked: the id arrives from the client.
+ */
+export async function persistActiveChronicle(chronicleId: string): Promise<void> {
+  const user = await requireUser();
+  const membership = await getMembership(chronicleId, user.id);
+  if (!membership) return;
+  (await cookies()).set('activeChronicleId', chronicleId, { path: '/' });
+}
+
 /** Reverse an applied structural action from a receipt's Undo button. */
 export async function undoAction(
   undo: UndoAction,

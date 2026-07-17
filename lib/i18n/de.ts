@@ -432,7 +432,7 @@ export const de: Dictionary = {
     editValueFemale: 'weiblich',
     // Live-Status, während der Assistent arbeitet (pro Tool-Aufruf gestreamt).
     progress: {
-      readingTree: 'Ich schaue in den Stammbaum…',
+      readingTree: 'Schaue in den Stammbaum…',
       addingPerson: (name: string) => `Füge ${name} hinzu…`,
       linkingPeople: (a: string, b: string) => `Verknüpfe ${a} und ${b}…`,
       unlinkingPeople: (a: string, b: string) => `Trenne ${a} und ${b}…`,

@@ -36,6 +36,13 @@ export interface SendResult {
   peopleDraft: PeopleDraft | null;
   /** The message carrying `peopleDraft` — Apply/Discard target exactly this card. */
   peopleDraftMessageId: string | null;
+  /**
+   * Set when a tool created/switched the active chronicle this turn. The STREAMING
+   * transport cannot persist the cookie itself — `cookies().set()` after the response
+   * has started streaming is a silent no-op — so the client calls the
+   * `persistActiveChronicle` action with this id when it sees the result.
+   */
+  activeChronicleChanged: string | null;
 }
 
 /** Build the mutable per-turn tool context from the resolved active chronicle. */
@@ -171,10 +178,19 @@ export async function respondAndStore(
   }
 
   // A tool may have created/switched the active chronicle — persist it to the cookie.
-  if (ctx.activeChronicleId && ctx.activeChronicleId !== previousChronicleId) {
-    (await cookies()).set('activeChronicleId', ctx.activeChronicleId, { path: '/' });
+  // Only effective on the server-action path (syncChat recovery): once a route
+  // handler's response is streaming, cookie mutations are silently dropped, so the
+  // result also carries the change for the client to persist via persistActiveChronicle.
+  const activeChronicleChanged =
+    ctx.activeChronicleId && ctx.activeChronicleId !== previousChronicleId
+      ? ctx.activeChronicleId
+      : null;
+  if (activeChronicleChanged) {
+    (await cookies()).set('activeChronicleId', activeChronicleChanged, { path: '/' });
   }
-  // Any applied action may have changed the family tree or stories pages.
+  // Same caveat: revalidation queued mid-stream never runs — these fire for the
+  // recovery path, while the streaming client refreshes its router cache on receipt
+  // of the result (chat-view calls router.refresh()).
   if (result.receipts.length) {
     revalidatePath('/chronicle');
     revalidatePath('/stories');
@@ -187,6 +203,7 @@ export async function respondAndStore(
     storyDraft: result.storyDraft,
     peopleDraft,
     peopleDraftMessageId: peopleDraft ? assistantMessage.id : null,
+    activeChronicleChanged,
   };
 }
 
