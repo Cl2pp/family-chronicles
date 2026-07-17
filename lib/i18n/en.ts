@@ -254,6 +254,8 @@ export const en = {
     tabAccess: 'Access',
     familiesTitle: 'Families',
     familiesHint: 'Detected automatically from last names, ancestry, and marriages',
+    familiesInteractionHint:
+      'Hover or tap a family to highlight it and everyone connected to it in the tree.',
     familiesToggleAria: 'Toggle families legend',
     addPerson: 'Add person',
     emptyTree: 'No people in the tree yet.',

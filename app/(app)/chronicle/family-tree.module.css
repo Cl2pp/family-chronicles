@@ -1,0 +1,13 @@
+/* The pan/zoom viewport swallows touch gestures (touch-action: none) so the map
+   can be dragged. On mobile a tall viewport therefore traps the whole screen and
+   the families legend that sits below it becomes unreachable. Keep the map shorter
+   on phones so the page still has room to scroll past it down to the legend. */
+.viewport {
+  height: clamp(300px, 55vh, 520px);
+}
+
+@media (min-width: $mantine-breakpoint-sm) {
+  .viewport {
+    height: clamp(360px, 70vh, 760px);
+  }
+}
