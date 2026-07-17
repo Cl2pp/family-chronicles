@@ -370,6 +370,102 @@ describe('layoutFamilyTree', () => {
     }
   });
 
+  it("anchors a marry-in's ancestor stub without disturbing the rest (Nagore's parents)", () => {
+    // The docs/TREE_LAYOUT_CROSSINGS_PLAN.md minimal repro: the Martina-bug
+    // shape lays out at 0 crossings, and adding ONE marry-in's parents
+    // (NopaN+NomaN above NagoreN) used to knock it into a 3-crossing local
+    // minimum. The stub must be parked directly above Nagore instead.
+    const people = [
+      person('ErnstO', '1919-01-01'), person('GiselaK', '1920-01-01'),
+      person('ChristianS', '1935-01-01'), person('IngeburgS', '1936-01-01'),
+      person('AnnemarieH', '1938-01-01'), person('WernerH', '1936-01-01'),
+      person('GiselaSch', '1940-01-01'), person('HansSch', '1938-01-01'),
+      person('KarstenO', '1957-01-01'), person('KathrinO', '1966-01-01'),
+      person('GeraldS', '1963-01-01'), person('PetraS', '1964-01-01'),
+      person('ImkeH', '1961-01-01'), person('UlfH', '1962-01-01'),
+      person('BjoernH', '1960-01-01'), person('SilkeH', '1964-01-01'),
+      person('MartinaSch', '1965-01-01'), person('MatthiasSch', '1963-01-01'),
+      person('AntjeG', '1966-01-01'), person('HeikeM', '1967-01-01'),
+      person('NagoreN', '1990-01-01'), person('ChristophO', '1989-01-01'),
+      person('ClemensO', '1994-01-01'), person('ChiraH', '1995-01-01'),
+      person('NicoleS', '1992-01-01'), person('SebastianS', '1994-01-01'),
+      person('LauraN', '1993-01-01'), person('GerritN', '1991-01-01'),
+      person('CarolaSch', '1992-01-01'), person('MarioSch', '1990-01-01'),
+      person('ElenaG', '1995-01-01'), person('LeonardG', '1997-01-01'),
+      person('TheresaM', '1996-01-01'), person('VincentM', '1998-01-01'),
+      person('BrunoO', '2024-01-01'), person('AvaO', '2026-01-01'),
+      person('XaverN', '2021-01-01'), person('JasperN', '2023-01-01'),
+      person('NopaN', '1960-01-01'), person('NomaN', '1962-01-01'),
+    ];
+    const edges = [
+      ...couple('ErnstO', 'GiselaK', ['KarstenO']),
+      ...couple('ChristianS', 'IngeburgS', ['KathrinO', 'GeraldS', 'MartinaSch']),
+      ...couple('AnnemarieH', 'WernerH', ['ImkeH', 'UlfH', 'BjoernH', 'AntjeG', 'HeikeM']),
+      ...couple('GiselaSch', 'HansSch', ['SilkeH']),
+      ...couple('KarstenO', 'KathrinO', ['ChristophO', 'ClemensO']),
+      ...couple('GeraldS', 'PetraS', ['NicoleS', 'SebastianS']),
+      ...couple('BjoernH', 'SilkeH', ['LauraN', 'ChiraH']),
+      ...couple('MartinaSch', 'MatthiasSch', ['CarolaSch', 'MarioSch']),
+      parent('AntjeG', 'ElenaG'), parent('AntjeG', 'LeonardG'),
+      parent('HeikeM', 'TheresaM'), parent('HeikeM', 'VincentM'),
+      ...couple('ChristophO', 'NagoreN', ['BrunoO']),
+      ...couple('ClemensO', 'ChiraH', ['AvaO']),
+      ...couple('LauraN', 'GerritN', ['XaverN', 'JasperN']),
+      ...couple('NopaN', 'NomaN', ['NagoreN']),
+    ];
+    const { rows, crossings } = layoutFamilyTree(people, edges);
+    expect(crossings).toBe(0);
+    // The stub sits in the row above Nagore, and horizontally near her.
+    expect(rowIndexOf(rows, 'NopaN')).toBe(rowIndexOf(rows, 'NagoreN') - 1);
+  });
+
+  it('lays out the production tree with four ancestor-stub couples at 0 crossings', () => {
+    // The app-screenshot shape that showed Schmalzbauer and Strauß sibling
+    // buses crossing: every grandparent couple on the top row is an ancestor
+    // stub over one marry-in, and the Schmalzbauer children (Silke, Yvonne)
+    // interleaved with the Strauß children (Kathrin, Gerald, Martina).
+    const people = [
+      person('RosaO', '1894-01-01'), person('AugustO', '1894-06-01'),
+      person('LeonhardK', '1889-01-01'), person('FriedaK', '1898-01-01'),
+      person('EmilS', '1899-01-01'), person('OlgaS', '1900-01-01'),
+      person('MartinM', '1903-01-01'), person('MarthaM', '1906-01-01'),
+      person('ErnstO', '1919-01-01'), person('GiselaK', '1920-01-01'),
+      person('GiselaSch', '1940-01-01'), person('HansSch', '1938-01-01'),
+      person('ChristianS', '1935-01-01'), person('IngeburgS', '1936-01-01'),
+      person('BjoernH', '1960-01-01'), person('SilkeH', '1964-01-01'),
+      person('KarstenO', '1957-01-01'), person('KathrinO', '1966-01-01'),
+      person('UlrichR', '1962-01-01'), person('YvonneR', '1965-01-01'),
+      person('GeraldS', '1963-01-01'), person('PetraS', '1964-01-01'),
+      person('MartinaSch', '1965-01-01'), person('MatthiasSch', '1963-01-01'),
+      person('LauraN', '1993-01-01'), person('ChiraH', '1995-01-01'),
+      person('ClemensO', '1994-01-01'), person('ChristophO', '1989-01-01'),
+      person('NagoreN', '1990-01-01'),
+      person('ChristopherR', '1990-01-01'), person('JosephineR', '1992-01-01'),
+      person('MaxR', '1994-01-01'),
+      person('NicoleS', '1992-01-01'), person('SebastianS', '1994-01-01'),
+      person('CarolaSch', '1992-01-01'), person('MarioSch', '1990-01-01'),
+      person('BrunoO', '2024-01-01'), person('AvaO', '2026-01-01'),
+    ];
+    const edges = [
+      ...couple('RosaO', 'AugustO', ['ErnstO']),
+      ...couple('LeonhardK', 'FriedaK', ['GiselaK']),
+      ...couple('EmilS', 'OlgaS', ['ChristianS']),
+      ...couple('MartinM', 'MarthaM', ['IngeburgS']),
+      ...couple('ErnstO', 'GiselaK', ['KarstenO']),
+      ...couple('GiselaSch', 'HansSch', ['SilkeH', 'YvonneR']),
+      ...couple('ChristianS', 'IngeburgS', ['KathrinO', 'GeraldS', 'MartinaSch']),
+      ...couple('BjoernH', 'SilkeH', ['LauraN', 'ChiraH']),
+      ...couple('KarstenO', 'KathrinO', ['ChristophO', 'ClemensO']),
+      ...couple('UlrichR', 'YvonneR', ['ChristopherR', 'JosephineR', 'MaxR']),
+      ...couple('GeraldS', 'PetraS', ['NicoleS', 'SebastianS']),
+      ...couple('MartinaSch', 'MatthiasSch', ['CarolaSch', 'MarioSch']),
+      ...couple('ChristophO', 'NagoreN', ['BrunoO']),
+      ...couple('ClemensO', 'ChiraH', ['AvaO']),
+    ];
+    const { crossings } = layoutFamilyTree(people, edges);
+    expect(crossings).toBe(0);
+  });
+
   it('places a disconnected person on the row matching their birth year', () => {
     const people = [
       person('Mom', '1960-01-01'),

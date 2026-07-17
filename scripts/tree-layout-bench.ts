@@ -37,7 +37,7 @@ function build(topCouples: number, gens: number, seed = 1) {
   let n = 0;
   const add = (year: number) => {
     const id = `p${n++}`;
-    people.push({ id, displayName: id, bornOn: `${year}-01-01` });
+    people.push({ id, firstName: id, bornOn: `${year}-01-01` });
     return id;
   };
   const marryIn = (year: number, upLayers: number) => {
@@ -87,7 +87,7 @@ function build(topCouples: number, gens: number, seed = 1) {
 
 /** The "marry-in with ancestors" minimal reproduction (0 → 3 crossings). */
 function nagoreRepro() {
-  const P = (id: string, born: string): LayoutPerson => ({ id, displayName: id, bornOn: born });
+  const P = (id: string, born: string): LayoutPerson => ({ id, firstName: id, bornOn: born });
   const people = [
     P('ErnstO', '1919-01-01'), P('GiselaK', '1920-01-01'),
     P('ChristianS', '1935-01-01'), P('IngeburgS', '1936-01-01'),

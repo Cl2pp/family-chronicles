@@ -1,7 +1,17 @@
 # Family-tree layout: crossings on wide/deep trees — diagnosis & fix plan
 
-**Status:** investigation complete, fix not yet implemented. Handoff doc for the
-next agent.
+**Status:** IMPLEMENTED. The stub-anchoring pass from §4 is in
+`lib/tree-layout.ts` (ancestor-stub extraction before the ordering search,
+barycenter + crossing-window re-insertion after the core settles, bounded
+reflow polish), plus two follow-ups found during implementation: the reflow
+relocation now also probes blocks already sitting at their kin barycenter
+(a pendant clan can be locally optimal while a coordinated multi-row move is
+strictly better), and the hot scoring path was made row-local, with the
+person→block map and per-row child lists hoisted out of the loop. Results:
+`nagore-repro` 3 → 0, every generated benchmark case below its baseline
+(e.g. tc=3 g=5: 30 → 8; tc=5 g=7 s=1: 174 → 165), regression tests added in
+`lib/tree-layout.test.ts`, wall-clock faster up to ~400 people and ~+28% on
+the 763-person case. The original diagnosis below is kept for reference.
 
 **Scope:** the pure layout engine `lib/tree-layout.ts` (`layoutFamilyTree`),
 consumed only by `app/(app)/chronicle/family-tree.tsx`. Nothing else computes
