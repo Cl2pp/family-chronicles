@@ -117,6 +117,9 @@ export async function listStoryPeople(storyId: string) {
       id: people.id,
       firstName: people.firstName,
       familyName: people.familyName,
+      // Matching qualifies by the surname at birth too ("Frieda Loges") — without it
+      // here, untagging a person could be ambiguous where tagging them was not.
+      birthFamilyName: people.birthFamilyName,
     })
     .from(storyPeople)
     .innerJoin(people, eq(storyPeople.personId, people.id))
@@ -137,6 +140,7 @@ export async function listStoryPeopleCandidates(storyId: string, userId: string)
       id: people.id,
       firstName: people.firstName,
       familyName: people.familyName,
+      birthFamilyName: people.birthFamilyName,
     })
     .from(storyChronicles)
     .innerJoin(

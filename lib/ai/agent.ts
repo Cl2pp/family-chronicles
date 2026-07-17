@@ -287,25 +287,26 @@ async function runToolLoop(
   const schemas = toOpenAISchemas(toolset);
   const byName = new Map(toolset.map((t) => [t.name, t]));
   const receipts: Receipt[] = [];
-  const toolErrors: string[] = [];
   let storyDraft: StoryDraft | null = null;
   // Fresh per turn: the people-mutation tools push staged tree edits here (never write
   // the DB directly) so this whole turn's changes land on one confirmation card.
   ctx.peopleDraft = null;
+  // Errors from the most recent batch of tool calls only: a failure the model already
+  // retried past (a later batch succeeded) must not resurface in a fallback reply.
+  let lastToolErrors: string[] = [];
 
   for (let step = 0; step < MAX_STEPS; step++) {
     const lastStep = step === MAX_STEPS - 1;
-    // Long multi-step turns outlive the reply-generation claim's staleness window —
-    // let the caller refresh it so a recovery sync never double-generates a live turn.
-    ctx.keepAlive?.();
     let completion;
     try {
-      completion = await openrouter.chat.completions.create({
-        model: env.STYLING_MODEL,
-        messages: withCacheBreakpoints(messages),
-        tools: schemas,
-        tool_choice: lastStep ? 'none' : 'auto',
-      });
+      completion = await withKeepAlive(ctx, () =>
+        openrouter.chat.completions.create({
+          model: env.STYLING_MODEL,
+          messages: withCacheBreakpoints(messages),
+          tools: schemas,
+          tool_choice: lastStep ? 'none' : 'auto',
+        }),
+      );
     } catch (err) {
       // A model call that fails AFTER tools already mutated state must not throw the
       // turn away: nothing would be stored, and the recovery sync would re-run the
@@ -335,9 +336,9 @@ async function runToolLoop(
           finishReason: completion.choices[0]?.finish_reason,
           step,
           receipts: receipts.length,
-          toolErrors: toolErrors.length,
+          toolErrors: lastToolErrors.length,
         });
-        reply = await recoverEmptyReply(messages, schemas, receipts, toolErrors, pendingChangeCount(ctx));
+        reply = await recoverEmptyReply(ctx, messages, schemas, receipts, lastToolErrors, pendingChangeCount(ctx));
       }
       return { reply, receipts, storyDraft, peopleDraft: ctx.peopleDraft ?? null };
     }
@@ -345,6 +346,7 @@ async function runToolLoop(
     // Record the assistant's tool-call turn, then run each call and feed results back.
     messages.push({ role: 'assistant', content: msg?.content ?? '', tool_calls: toolCalls });
 
+    const stepErrors: string[] = [];
     for (const call of toolCalls) {
       if (call.type !== 'function') continue;
       const content = await runToolCall(byName, call.function.name, call.function.arguments, ctx, (r) => {
@@ -352,18 +354,37 @@ async function runToolLoop(
         if (r.receipts?.length) receipts.push(...r.receipts);
         if (r.storyDraft) storyDraft = r.storyDraft;
       });
-      if (content.startsWith('Error:')) toolErrors.push(content);
+      if (content.startsWith('Error:')) stepErrors.push(content);
       messages.push({ role: 'tool', tool_call_id: call.id, content });
     }
+    lastToolErrors = stepErrors;
   }
 
   // MAX_STEPS exhausted and the final forced-text step still yielded no words.
   return {
-    reply: fallbackReply(receipts, toolErrors, pendingChangeCount(ctx)),
+    reply: fallbackReply(receipts, lastToolErrors, pendingChangeCount(ctx)),
     receipts,
     storyDraft,
     peopleDraft: ctx.peopleDraft ?? null,
   };
+}
+
+/**
+ * How often a run re-asserts its claim while awaiting the model. Well under the claim
+ * staleness window, so even a single arbitrarily slow model call never goes stale.
+ */
+const KEEP_ALIVE_MS = 60 * 1000;
+
+/** Run one model call with the caller's claim kept alive for its whole duration. */
+async function withKeepAlive<T>(ctx: ToolContext, work: () => Promise<T>): Promise<T> {
+  if (!ctx.keepAlive) return work();
+  ctx.keepAlive();
+  const timer = setInterval(ctx.keepAlive, KEEP_ALIVE_MS);
+  try {
+    return await work();
+  } finally {
+    clearInterval(timer);
+  }
 }
 
 /**
@@ -373,6 +394,7 @@ async function runToolLoop(
  * empty, synthesize an honest reply from the receipts and tool errors.
  */
 async function recoverEmptyReply(
+  ctx: ToolContext,
   messages: ChatCompletionMessageParam[],
   schemas: ReturnType<typeof toOpenAISchemas>,
   receipts: Receipt[],
@@ -380,21 +402,23 @@ async function recoverEmptyReply(
   pendingChanges: number,
 ): Promise<string> {
   try {
-    const completion = await openrouter.chat.completions.create({
-      model: env.STYLING_MODEL,
-      messages: withCacheBreakpoints([
-        ...messages,
-        {
-          role: 'user',
-          content:
-            "[Your reply came back empty — the user saw nothing. In the user's language, tell them " +
-            'briefly what you just did and what, if anything, failed and why. Never claim success ' +
-            'for something that failed.]',
-        },
-      ]),
-      tools: schemas,
-      tool_choice: 'none',
-    });
+    const completion = await withKeepAlive(ctx, () =>
+      openrouter.chat.completions.create({
+        model: env.STYLING_MODEL,
+        messages: withCacheBreakpoints([
+          ...messages,
+          {
+            role: 'user',
+            content:
+              "[Your reply came back empty — the user saw nothing. In the user's language, tell them " +
+              'briefly what you just did and what, if anything, failed and why. Never claim success ' +
+              'for something that failed.]',
+          },
+        ]),
+        tools: schemas,
+        tool_choice: 'none',
+      }),
+    );
     const reply = (completion.choices[0]?.message?.content ?? '').trim();
     if (reply) return reply;
   } catch (err) {
