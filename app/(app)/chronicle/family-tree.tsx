@@ -50,6 +50,7 @@ import type { Locale } from '@/lib/i18n/config';
 import { relatePeopleAction, removeRelationshipAction } from './actions';
 import { DeletePersonButton } from './delete-person-button';
 import type { AddTarget } from './types';
+import classes from './family-tree.module.css';
 
 const CARD_WIDTH = 150;
 
@@ -577,10 +578,10 @@ export function FamilyTree({
       ) : (
         <Box
           ref={containerRef}
+          className={classes.viewport}
           style={{
             position: 'relative',
             overflow: 'hidden',
-            height: 'clamp(360px, 70vh, 760px)',
             touchAction: 'none',
             cursor: 'grab',
             userSelect: 'none',

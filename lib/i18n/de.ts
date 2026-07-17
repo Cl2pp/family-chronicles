@@ -269,6 +269,8 @@ export const de: Dictionary = {
     tabAccess: 'Zugriff',
     familiesTitle: 'Familien',
     familiesHint: 'Automatisch erkannt aus Nachnamen, Abstammung und Ehen',
+    familiesInteractionHint:
+      'Fahre über eine Familie oder tippe sie an, um sie und alle im Baum mit ihr verbundenen Personen hervorzuheben.',
     familiesToggleAria: 'Familien-Legende ein-/ausblenden',
     addPerson: 'Person hinzufügen',
     emptyTree: 'Noch keine Personen im Baum.',

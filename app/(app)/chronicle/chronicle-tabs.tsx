@@ -193,6 +193,9 @@ export function ChronicleTabs({
                   <Text size="xs" c="dimmed" mt="xs">
                     {t.tree.familiesHint}
                   </Text>
+                  <Text size="xs" c="dimmed" mt={4}>
+                    {t.tree.familiesInteractionHint}
+                  </Text>
                   <Group gap="lg" mt="sm">
                     {familyTags.map(({ tag, count }) => (
                       <UnstyledButton
@@ -202,9 +205,14 @@ export function ChronicleTabs({
                         onMouseLeave={() =>
                           setHoverTag((current) => (current === tag ? null : current))
                         }
-                        onClick={() =>
-                          setPinnedTag((current) => (current === tag ? null : tag))
-                        }
+                        onClick={() => {
+                          setPinnedTag((current) => (current === tag ? null : tag));
+                          // Clearing hover on click makes deselection stick: the
+                          // pointer is still over the row, so without this the
+                          // highlight would linger via hover (which wins over the
+                          // pin) until the pointer left. Hover re-arms on re-entry.
+                          setHoverTag(null);
+                        }}
                         px={6}
                         py={2}
                         style={{
