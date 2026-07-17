@@ -25,6 +25,9 @@ function ResetPasswordForm() {
   const params = useSearchParams();
   const token = params.get('token');
   const [loading, setLoading] = useState(false);
+  // The callback only validates the token at click time; it can still expire
+  // or be consumed (second device, double submit) before the form is sent.
+  const [tokenRejected, setTokenRejected] = useState(false);
 
   const form = useForm({
     initialValues: { password: '', confirmPassword: '' },
@@ -44,6 +47,10 @@ function ResetPasswordForm() {
     });
     setLoading(false);
     if (error) {
+      if (error.code === 'INVALID_TOKEN') {
+        setTokenRejected(true);
+        return;
+      }
       notifications.show({ color: 'red', message: error.message ?? t.auth.resetPasswordFailed });
       return;
     }
@@ -56,7 +63,7 @@ function ResetPasswordForm() {
       <Title order={2} mb="lg">
         {t.auth.resetPasswordTitle}
       </Title>
-      {token ? (
+      {token && !tokenRejected ? (
         <form onSubmit={form.onSubmit(handleSubmit)}>
           <Stack>
             <PasswordInput label={t.auth.newPassword} {...form.getInputProps('password')} />
