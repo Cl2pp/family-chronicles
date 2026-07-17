@@ -37,6 +37,12 @@ export async function ensureOwner(
 
 type ChroniclePerson = Awaited<ReturnType<typeof listChroniclePeople>>[number];
 
+/** "Gisela Koch (b. 1920)" — enough detail to tell same-named candidates apart. */
+function describeCandidate(c: ChroniclePerson): string {
+  const born = c.bornOn ? ` (b. ${new Date(c.bornOn).getUTCFullYear()})` : '';
+  return `${personFullName(c)}${born}`;
+}
+
 /**
  * Case-insensitive lookup of a person by name within a chronicle — exact display name
  * first, then unique forgiving matches ("Ava" → "Ava Naoko", "Clemens Ortlepp" →
@@ -50,8 +56,12 @@ export async function resolvePerson(
   const result = findPersonByName(people, name);
   if ('person' in result) return { person: result.person };
   if (result.error === 'ambiguous') {
-    const names = result.candidates.map((c) => personFullName(c)).join(', ');
-    return { error: `"${name}" could mean several people (${names}) — ask which one is meant.` };
+    const names = result.candidates.map(describeCandidate).join(', ');
+    return {
+      error:
+        `"${name}" could mean several people (${names}) — refer to one as "first name + family ` +
+        'name", or ask the user which one is meant.',
+    };
   }
   return { error: `No one named "${name}" is in this chronicle's tree yet.` };
 }
