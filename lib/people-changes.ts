@@ -1,6 +1,5 @@
 import { getMembership } from '@/lib/chronicles';
 import {
-  addPersonToChronicle,
   connectPeople,
   createPerson,
   deletePerson,
@@ -174,6 +173,7 @@ export async function applyPeopleChanges(
           continue;
         }
 
+        // createPerson also inserts the chronicle_members row when given chronicleId.
         const person = await createPerson({
           firstName: change.firstName,
           familyName: change.familyName,
@@ -186,7 +186,6 @@ export async function applyPeopleChanges(
           createdBy: userId,
           chronicleId: draft.chronicleId,
         });
-        await addPersonToChronicle(draft.chronicleId, person.id);
         stagedIds.set(i, person.id);
 
         let detail: string | undefined;

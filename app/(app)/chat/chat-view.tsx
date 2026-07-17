@@ -365,6 +365,7 @@ export function ChatView({
           receipts: res.receipts,
           storyDraft: res.storyDraft,
           peopleDraft: res.peopleDraft,
+          peopleDraftMessageId: res.peopleDraftMessageId,
         },
       ]);
       setBusyLabel(null);
@@ -443,6 +444,7 @@ export function ChatView({
             receipts: res.receipts,
             storyDraft: res.storyDraft,
             peopleDraft: res.peopleDraft,
+            peopleDraftMessageId: res.peopleDraftMessageId,
           },
         ];
       });
@@ -461,6 +463,10 @@ export function ChatView({
 
   function setResult(index: number, result: Msg['result']) {
     setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, result } : msg)));
+  }
+
+  function setPeopleResult(index: number, peopleResult: Msg['peopleResult']) {
+    setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, peopleResult } : msg)));
   }
 
   /** Clear the view back to a fresh, empty chat. */
@@ -568,6 +574,7 @@ export function ChatView({
                 msg={m}
                 conversationId={conversationId}
                 onResult={(r) => setResult(i, r)}
+                onPeopleResult={(r) => setPeopleResult(i, r)}
               />
             ))}
           </Stack>

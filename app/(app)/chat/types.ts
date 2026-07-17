@@ -17,10 +17,14 @@ export interface Msg {
   storyDraft?: StoryDraft | null;
   /** Staged tree edits awaiting the user's Apply/Discard on this message's card. */
   peopleDraft?: PeopleDraft | null;
-  /** Set once a draft on this message has been resolved. */
-  result?:
-    | { kind: 'story' | 'story-update'; storyId: string; chronicleName: string; title: string }
-    | { kind: 'people'; receipts: Receipt[]; errors: string[] };
+  /** The stored message carrying `peopleDraft` — Apply/Discard target exactly it. */
+  peopleDraftMessageId?: string | null;
+  /** Set once the story draft on this message has been saved (created or updated). */
+  result?: { kind: 'story' | 'story-update'; storyId: string; chronicleName: string; title: string };
+  /** Set once the tree-changes card on this message has been applied. Its own slot —
+   *  one message can carry BOTH cards, and each resolves independently. */
+  peopleResult?: { receipts: Receipt[]; errors: string[] };
 }
 
 export type MsgResult = Msg['result'];
+export type MsgPeopleResult = NonNullable<Msg['peopleResult']>;

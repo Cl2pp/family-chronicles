@@ -6,7 +6,7 @@ import { useI18n } from '@/lib/i18n/client';
 import type { PeopleDraft } from '@/lib/people-changes';
 import { confirmPeopleChanges, discardPeopleChanges } from './actions';
 import { describePersonChange } from './people-change-describe';
-import type { MsgResult } from './types';
+import type { MsgPeopleResult } from './types';
 
 /**
  * The pending tree-changes confirmation card — mirrors StoryDraftCard's shape (one
@@ -18,6 +18,7 @@ import type { MsgResult } from './types';
 export function PeopleChangesCard({
   draft,
   conversationId,
+  messageId,
   busy,
   setBusy,
   onDiscard,
@@ -25,18 +26,20 @@ export function PeopleChangesCard({
 }: {
   draft: PeopleDraft;
   conversationId: string | null;
+  /** The stored message carrying this card — apply/discard resolve exactly it. */
+  messageId: string | null;
   busy: boolean;
   setBusy: (b: boolean) => void;
   onDiscard: () => void;
-  onResult: (r: MsgResult) => void;
+  onResult: (r: MsgPeopleResult) => void;
 }) {
   const { t } = useI18n();
 
   async function discard() {
-    if (conversationId) {
+    if (conversationId && messageId) {
       setBusy(true);
       try {
-        await discardPeopleChanges({ conversationId });
+        await discardPeopleChanges({ conversationId, messageId });
       } catch {
         // best-effort — the local discard still applies
       } finally {
@@ -47,11 +50,17 @@ export function PeopleChangesCard({
   }
 
   async function apply() {
-    if (!conversationId) return;
+    if (!conversationId || !messageId) return;
     setBusy(true);
     try {
-      const { receipts, errors } = await confirmPeopleChanges({ conversationId });
-      onResult({ kind: 'people', receipts, errors });
+      const { receipts, errors, resolvedElsewhere } = await confirmPeopleChanges({
+        conversationId,
+        messageId,
+      });
+      // Resolved on another device / by a chat confirmation — just retire the card;
+      // whatever happened there already produced its own receipts.
+      if (resolvedElsewhere) onDiscard();
+      else onResult({ receipts, errors });
     } finally {
       setBusy(false);
     }
@@ -71,7 +80,7 @@ export function PeopleChangesCard({
         ))}
       </List>
       <Group gap="xs">
-        <Button size="xs" onClick={apply} loading={busy} disabled={!conversationId}>
+        <Button size="xs" onClick={apply} loading={busy} disabled={!conversationId || !messageId}>
           {t.chat.applyChanges}
         </Button>
         <Button size="xs" variant="default" onClick={discard} disabled={busy}>

@@ -407,7 +407,6 @@ export const de: Dictionary = {
     // Karte zur Bestätigung von Stammbaum-Änderungen (gesammelte add/relate/unrelate/edit/delete_person).
     treeChanges: 'Änderungen am Stammbaum',
     applyChanges: 'Übernehmen',
-    changesApplied: (n: number) => (n === 1 ? '1 Änderung übernommen.' : `${n} Änderungen übernommen.`),
     changesPartlyFailed: (n: number) =>
       n === 1
         ? '1 Änderung konnte nicht übernommen werden.'

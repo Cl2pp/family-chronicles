@@ -29,9 +29,11 @@ const relation = z
 
 const gender = z.enum(['male', 'female']).describe("The person's gender, if known.");
 
-/** Get (creating on first use) this turn's staged tree-changes draft. */
+/** Get (creating on first use) this turn's staged tree-changes draft. A draft is bound
+ *  to ONE chronicle — after a mid-conversation switch, staging starts a fresh draft
+ *  rather than appending changes that could never apply to the old card's chronicle. */
 function ensureDraft(ctx: ToolContext, chronicleId: string) {
-  if (!ctx.peopleDraft) {
+  if (!ctx.peopleDraft || ctx.peopleDraft.chronicleId !== chronicleId) {
     ctx.peopleDraft = { chronicleId, chronicleName: ctx.activeChronicleName ?? '', changes: [] };
   }
   return ctx.peopleDraft;

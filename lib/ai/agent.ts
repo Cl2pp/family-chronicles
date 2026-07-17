@@ -288,9 +288,11 @@ async function runToolLoop(
   const byName = new Map(toolset.map((t) => [t.name, t]));
   const receipts: Receipt[] = [];
   let storyDraft: StoryDraft | null = null;
-  // Fresh per turn: the people-mutation tools push staged tree edits here (never write
-  // the DB directly) so this whole turn's changes land on one confirmation card.
-  ctx.peopleDraft = null;
+  // The people-mutation tools push staged tree edits here (never writing the DB
+  // directly) so the turn's changes land on one confirmation card. The caller may
+  // pre-seed it with a still-pending card's changes — then this turn EXTENDS that
+  // card instead of silently superseding it — so only default when unset.
+  ctx.peopleDraft ??= null;
   // Errors from the most recent batch of tool calls only: a failure the model already
   // retried past (a later batch succeeded) must not resurface in a fallback reply.
   let lastToolErrors: string[] = [];
