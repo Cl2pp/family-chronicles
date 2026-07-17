@@ -276,10 +276,14 @@ async function runToolLoop(
   const schemas = toOpenAISchemas(toolset);
   const byName = new Map(toolset.map((t) => [t.name, t]));
   const receipts: Receipt[] = [];
+  const toolErrors: string[] = [];
   let storyDraft: StoryDraft | null = null;
 
   for (let step = 0; step < MAX_STEPS; step++) {
     const lastStep = step === MAX_STEPS - 1;
+    // Long multi-step turns outlive the reply-generation claim's staleness window —
+    // let the caller refresh it so a recovery sync never double-generates a live turn.
+    ctx.keepAlive?.();
     let completion;
     try {
       completion = await openrouter.chat.completions.create({
@@ -308,7 +312,18 @@ async function runToolLoop(
     const toolCalls = msg?.tool_calls ?? [];
 
     if (!toolCalls.length) {
-      const reply = (msg?.content ?? '').trim() || 'Done.';
+      let reply = (msg?.content ?? '').trim();
+      if (!reply) {
+        // Never let an empty reply masquerade as success (the old fallback said
+        // "Done." even when every tool call had failed).
+        console.warn('Agent returned an empty reply:', {
+          finishReason: completion.choices[0]?.finish_reason,
+          step,
+          receipts: receipts.length,
+          toolErrors: toolErrors.length,
+        });
+        reply = await recoverEmptyReply(messages, schemas, receipts, toolErrors);
+      }
       return { reply, receipts, storyDraft };
     }
 
@@ -321,11 +336,59 @@ async function runToolLoop(
         if (r.receipt) receipts.push(r.receipt);
         if (r.storyDraft) storyDraft = r.storyDraft;
       });
+      if (content.startsWith('Error:')) toolErrors.push(content);
       messages.push({ role: 'tool', tool_call_id: call.id, content });
     }
   }
 
-  return { reply: 'Done.', receipts, storyDraft };
+  // MAX_STEPS exhausted and the final forced-text step still yielded no words.
+  return { reply: fallbackReply(receipts, toolErrors), receipts, storyDraft };
+}
+
+/**
+ * The model occasionally ends a turn with no text at all (seen with reasoning models
+ * over OpenRouter). Ask once more — tools shown but disallowed, so the history stays
+ * valid — for a plain-words summary of what actually happened; if even that comes back
+ * empty, synthesize an honest reply from the receipts and tool errors.
+ */
+async function recoverEmptyReply(
+  messages: ChatCompletionMessageParam[],
+  schemas: ReturnType<typeof toOpenAISchemas>,
+  receipts: Receipt[],
+  toolErrors: string[],
+): Promise<string> {
+  try {
+    const completion = await openrouter.chat.completions.create({
+      model: env.STYLING_MODEL,
+      messages: withCacheBreakpoints([
+        ...messages,
+        {
+          role: 'user',
+          content:
+            "[Your reply came back empty — the user saw nothing. In the user's language, tell them " +
+            'briefly what you just did and what, if anything, failed and why. Never claim success ' +
+            'for something that failed.]',
+        },
+      ]),
+      tools: schemas,
+      tool_choice: 'none',
+    });
+    const reply = (completion.choices[0]?.message?.content ?? '').trim();
+    if (reply) return reply;
+  } catch (err) {
+    console.error('Empty-reply recovery call failed:', err);
+  }
+  return fallbackReply(receipts, toolErrors);
+}
+
+/** Last-resort reply when the model stays silent twice: honest, built from what actually happened. */
+function fallbackReply(receipts: Receipt[], toolErrors: string[]): string {
+  const done = receipts.map((r) => r.label).join(', ');
+  const lastError = toolErrors[toolErrors.length - 1]?.replace(/^Error:\s*/, '');
+  if (done && lastError) return `Partly done — ${done}. But one step failed: ${lastError}`;
+  if (done) return `Done: ${done}.`;
+  if (lastError) return `That didn't work: ${lastError}`;
+  return "Sorry — I couldn't finish that. Please try again.";
 }
 
 /** Validate + execute a single tool call, returning the text to feed back to the model. */
