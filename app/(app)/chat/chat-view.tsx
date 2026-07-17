@@ -32,8 +32,12 @@ import { MOBILE_TABBAR_OFFSET } from '@/components/app-shell';
 import { CONVERSATION_IDLE_MS } from '@/lib/chat-idle';
 import { PHOTO_ACCEPT, readDimensions } from '@/lib/uploads';
 import { useI18n } from '@/lib/i18n/client';
+import { MessageMarkdown } from './message-markdown';
 import { MessageRow } from './message-row';
-import { endConversation, presignUpload, sendMessage, sendVoiceMessage, syncChat } from './actions';
+import { endConversation, persistActiveChronicle, presignUpload, syncChat } from './actions';
+import { progressLabel } from './progress-label';
+import type { SendResult } from './respond';
+import type { ChatStreamEvent, ChatStreamRequest } from './stream-events';
 import type { ChatAttachment, Msg } from './types';
 
 // Icons paired by index with t.chat.setupSuggestions / t.chat.familySuggestions.
@@ -116,6 +120,10 @@ export function ChatView({
   const [messages, setMessages] = useState<Msg[]>(initialMessages);
   const [input, setInput] = useState('');
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  // The reply-in-progress, streamed token by token. Mirrored in a ref so stream
+  // events can move it into the status line without a stale-closure read.
+  const [liveText, setLiveText] = useState('');
+  const liveTextRef = useRef('');
   const [photos, setPhotos] = useState<PendingPhoto[]>([]);
   const [recording, setRecording] = useState(false);
   const [recorded, setRecorded] = useState<RecordedAudio | null>(null);
@@ -147,6 +155,8 @@ export function ChatView({
     turnRef.current += 1;
     sendBaselineRef.current = null;
     syncAttemptsRef.current = 0;
+    liveTextRef.current = '';
+    setLiveText('');
     if (syncTimerRef.current) {
       clearTimeout(syncTimerRef.current);
       syncTimerRef.current = null;
@@ -245,7 +255,7 @@ export function ChatView({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, busyLabel, keyboardViewportH]);
+  }, [messages, busyLabel, liveText, keyboardViewportH]);
 
   // iOS never resizes the layout viewport for the keyboard (no `interactive-widget`
   // support in WebKit) — it pans the whole app upward to reveal the focused input,
@@ -330,6 +340,95 @@ export function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPrompt]);
 
+  /** Server-state side effects of a settled turn the streaming route can't do itself:
+   *  persist a chronicle switch (cookies can't be set mid-stream) and refresh the
+   *  router cache so the tree/stories pages reflect applied actions. */
+  function applyResultSideEffects(res: SendResult) {
+    if (res.activeChronicleChanged) {
+      void persistActiveChronicle(res.activeChronicleChanged).catch(() => {});
+    }
+    if (res.receipts.length || res.activeChronicleChanged) router.refresh();
+  }
+
+  /**
+   * POST the turn to the streaming endpoint and fold its events into the view:
+   * status lines while tools run, live token deltas for the reply, then the
+   * authoritative `result`. Events for a superseded turn are dropped.
+   */
+  async function streamTurn(
+    body: ChatStreamRequest,
+    turn: number,
+    onTranscript?: (transcript: string) => void,
+  ): Promise<SendResult> {
+    const res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok || !res.body) throw new Error(t.chat.somethingWentWrong);
+
+    let result: SendResult | null = null;
+    let serverError: string | null = null;
+    const handle = (event: ChatStreamEvent) => {
+      if (turn !== turnRef.current) return;
+      switch (event.type) {
+        case 'transcript':
+          onTranscript?.(event.text);
+          break;
+        case 'text':
+          liveTextRef.current += event.text;
+          setLiveText(liveTextRef.current);
+          break;
+        case 'step':
+          // Pre-tool prose ("Let me check the tree…") is a status line, not part of
+          // the reply; the final step's text stays and is replaced by the canonical
+          // reply when `result` lands.
+          if (event.kind === 'tools') {
+            const note = liveTextRef.current.trim();
+            if (note) setBusyLabel(note.length > 140 ? `${note.slice(0, 140)}…` : note);
+            liveTextRef.current = '';
+            setLiveText('');
+          }
+          break;
+        case 'tool':
+          setBusyLabel(progressLabel(t.chat, event.name, event.args));
+          break;
+        case 'result':
+          result = event.result;
+          break;
+        case 'error':
+          serverError = event.message;
+          break;
+      }
+    };
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          handle(JSON.parse(line) as ChatStreamEvent);
+        }
+      }
+    } finally {
+      // A parse error mid-loop must not leave the connection dangling until the
+      // server finishes the whole turn. Cancel after normal completion is a no-op.
+      void reader.cancel().catch(() => {});
+    }
+    if (serverError) throw new Error(serverError);
+    // A stream that ended without a result died mid-turn — throw so the caller
+    // reconciles with the server instead of going silently mute.
+    if (!result) throw new Error(t.chat.somethingWentWrong);
+    return result;
+  }
+
   /** A fresh tree-changes card replaces any older pending one (the server already
    *  superseded it) — retire stale cards from view instead of leaving two live. */
   function withoutSupersededCards(msgs: Msg[]): Msg[] {
@@ -348,18 +447,22 @@ export function ChatView({
     setMessages((m) => [...m, { role: 'user', content: trimmed, attachments }]);
     setBusyLabel(t.chat.thinking);
     try {
-      const res = await sendMessage({
-        conversationId,
-        text: trimmed,
-        attachments: pendingPhotos.map((p) => ({
-          kind: 'photo',
-          s3Key: p.s3Key,
-          mimeType: p.mimeType,
-          bytes: p.bytes,
-          width: p.width,
-          height: p.height,
-        })),
-      });
+      const res = await streamTurn(
+        {
+          kind: 'text',
+          conversationId,
+          text: trimmed,
+          attachments: pendingPhotos.map((p) => ({
+            kind: 'photo',
+            s3Key: p.s3Key,
+            mimeType: p.mimeType,
+            bytes: p.bytes,
+            width: p.width,
+            height: p.height,
+          })),
+        },
+        turn,
+      );
       if (turn !== turnRef.current) return; // a reconcile already settled this turn
       advanceTurn();
       adoptConversation(res.conversationId);
@@ -375,10 +478,19 @@ export function ChatView({
         },
       ]);
       setBusyLabel(null);
-    } catch {
+      applyResultSideEffects(res);
+    } catch (err) {
       // The request may have died mid-flight (a backgrounded mobile tab) while the
-      // server finished — or can redo — the turn. Reconcile before declaring failure.
+      // server finished — or can redo — the turn. Reconcile before declaring failure —
+      // and drop any half-streamed reply so it can't sit frozen (and hide the busy
+      // label) for the whole regeneration.
       if (turn !== turnRef.current) return;
+      liveTextRef.current = '';
+      setLiveText('');
+      setBusyLabel(t.chat.thinking);
+      if (sendBaselineRef.current?.turn === turn) {
+        sendBaselineRef.current.errorText = err instanceof Error ? err.message : null;
+      }
       void syncNow();
     }
   }
@@ -423,43 +535,52 @@ export function ChatView({
     setBusyLabel(t.chat.transcribing);
     // Show the voice note straight away — uploading + transcribing takes seconds, and
     // without a bubble a fresh chat would sit on its empty state as if nothing was sent.
-    // The transcript fills this same bubble in once the server returns it.
+    // The transcript event fills this same bubble in while the agent is still thinking.
     const pending: Msg = { role: 'user', content: '', attachments: [{ kind: 'audio', url: previewUrl }] };
     setMessages((m) => [...m, pending]);
     try {
       const { s3Key, mimeType } = await uploadBlob('audio', audio.blob, audio.mimeType);
-      const res = await sendVoiceMessage({
-        conversationId,
-        s3Key,
-        mimeType,
-        bytes: audio.blob.size,
-        durationSec: audio.durationSec,
-      });
+      const res = await streamTurn(
+        {
+          kind: 'voice',
+          conversationId,
+          s3Key,
+          mimeType,
+          bytes: audio.blob.size,
+          durationSec: audio.durationSec,
+        },
+        turn,
+        (transcript) => {
+          setBusyLabel(t.chat.thinking);
+          setMessages((m) =>
+            m.map((msg) => (msg === pending ? { ...pending, content: transcript } : msg)),
+          );
+        },
+      );
       if (turn !== turnRef.current) return; // a reconcile already settled this turn
       advanceTurn();
       adoptConversation(res.conversationId);
-      setMessages((m) => {
-        const next = [...m];
-        const i = next.lastIndexOf(pending);
-        if (i !== -1) next[i] = { ...pending, content: res.transcript };
-        return [
-          ...(res.peopleDraft ? withoutSupersededCards(next) : next),
-          {
-            role: 'assistant',
-            content: res.reply,
-            receipts: res.receipts,
-            storyDraft: res.storyDraft,
-            peopleDraft: res.peopleDraft,
-            peopleDraftMessageId: res.peopleDraftMessageId,
-          },
-        ];
-      });
+      setMessages((m) => [
+        ...(res.peopleDraft ? withoutSupersededCards(m) : m),
+        {
+          role: 'assistant',
+          content: res.reply,
+          receipts: res.receipts,
+          storyDraft: res.storyDraft,
+          peopleDraft: res.peopleDraft,
+          peopleDraftMessageId: res.peopleDraftMessageId,
+        },
+      ]);
       setBusyLabel(null);
+      applyResultSideEffects(res);
     } catch (err) {
       // Real failures (e.g. "couldn't transcribe") carry a message worth showing —
       // but a killed request does not mean failure: the server may have stored the
       // message and finished the reply. Reconcile decides which case this is.
       if (turn !== turnRef.current) return;
+      liveTextRef.current = '';
+      setLiveText('');
+      setBusyLabel(t.chat.thinking);
       if (sendBaselineRef.current?.turn === turn) {
         sendBaselineRef.current.errorText = err instanceof Error ? err.message : null;
       }
@@ -585,9 +706,19 @@ export function ChatView({
             ))}
           </Stack>
         )}
+        {/* The reply forming, token by token — replaced by the canonical message when
+            the turn's result lands. */}
+        {liveText && (
+          <Stack gap="xs" align="flex-start" maw="80%" mt="md">
+            <Paper bg="slate.1" p="sm" radius="md">
+              <MessageMarkdown content={liveText} />
+            </Paper>
+          </Stack>
+        )}
         {/* Outside the empty/non-empty branch: a send that hasn't produced a bubble yet
-            must still show progress rather than leave the welcome screen looking idle. */}
-        {busyLabel && (
+            must still show progress rather than leave the welcome screen looking idle.
+            Hidden while reply tokens are streaming — the forming bubble IS the status. */}
+        {busyLabel && !liveText && (
           <Group justify="flex-start" mt="md">
             <Paper bg="slate.1" p="sm" radius="md">
               <Text size="sm" c="dimmed">
