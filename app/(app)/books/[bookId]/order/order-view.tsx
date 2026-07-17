@@ -222,7 +222,10 @@ export function OrderView({
             component="a"
             href={mailtoHref}
             leftSection={<IconMail size={18} />}
-            onClick={() => posthog.capture('book_order_email_opened', { book_id: book.id, format: book.format })}
+            onClick={() =>
+              posthog.__loaded &&
+              posthog.capture('book_order_email_opened', { book_id: book.id, format: book.format })
+            }
           >
             {to.emailCta}
           </Button>

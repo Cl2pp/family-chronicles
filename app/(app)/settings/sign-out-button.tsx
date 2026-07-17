@@ -15,8 +15,10 @@ export function SignOutButton() {
 
   async function signOut() {
     setLoading(true);
-    posthog.capture('user_signed_out');
-    posthog.reset();
+    if (posthog.__loaded) {
+      posthog.capture('user_signed_out');
+      posthog.reset();
+    }
     await authClient.signOut();
     router.push('/login');
     router.refresh();

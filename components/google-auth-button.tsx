@@ -14,17 +14,34 @@ import { useI18n } from '@/lib/i18n/client';
  * in lib/auth.ts). Clicking hands off to better-auth's social sign-in, which
  * redirects to Google and back to `next` on success.
  */
-export function GoogleAuthButton({ next }: { next: string }) {
+export function GoogleAuthButton({
+  next,
+  beforeStart,
+  requestSignUp,
+}: {
+  next: string;
+  /** Gate the redirect (e.g. the signup page's privacy-consent checkbox); return false to abort. */
+  beforeStart?: () => boolean;
+  /**
+   * Allow creating a new account for this Google identity. Only the signup
+   * page sets this (after its consent checkbox) — the Google provider has
+   * disableImplicitSignUp, so without it unknown users are bounced back to
+   * login with ?error=signup_disabled.
+   */
+  requestSignUp?: boolean;
+}) {
   const { t } = useI18n();
   const [loading, setLoading] = useState(false);
 
   if (process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED !== 'true') return null;
 
   async function handleClick() {
+    if (beforeStart && !beforeStart()) return;
     setLoading(true);
     const { error } = await authClient.signIn.social({
       provider: 'google',
       callbackURL: next,
+      requestSignUp,
     });
     // On success the browser is redirected to Google, so we only get here on error.
     if (error) {
