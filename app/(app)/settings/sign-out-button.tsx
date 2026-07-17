@@ -6,6 +6,7 @@ import { Button } from '@mantine/core';
 import { IconLogout } from '@tabler/icons-react';
 import { authClient } from '@/lib/auth-client';
 import { useI18n } from '@/lib/i18n/client';
+import posthog from 'posthog-js';
 
 export function SignOutButton() {
   const router = useRouter();
@@ -14,6 +15,8 @@ export function SignOutButton() {
 
   async function signOut() {
     setLoading(true);
+    posthog.capture('user_signed_out');
+    posthog.reset();
     await authClient.signOut();
     router.push('/login');
     router.refresh();

@@ -20,6 +20,7 @@ import type { PeopleDraft } from '@/lib/people-changes';
 import { getObjectBuffer, presignGet } from '@/lib/s3';
 import { transcribeAudio } from '@/lib/ai/groq';
 import { enqueueTranscode } from '@/lib/queue';
+import { captureServerEvent } from '@/lib/posthog-server';
 
 /**
  * The chat turn pipeline, shared by the streaming route (app/api/chat/stream) and the
@@ -291,6 +292,10 @@ export async function runVoiceTurn(
     } catch (err) {
       console.error(`Failed to enqueue transcode for ${input.s3Key}:`, err);
     }
+
+    captureServerEvent(user.id, 'voice_message_sent', {
+      duration_sec: input.durationSec ?? null,
+    });
 
     const result = await respondAndStore(conversationId, ctx, previousChronicleId, emit);
     return { ...result, transcript };

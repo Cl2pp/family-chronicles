@@ -24,6 +24,28 @@ const nextConfig: NextConfig = {
   },
   outputFileTracingRoot: __dirname,
   deploymentId: readDeploymentId(),
+  // Reverse-proxy PostHog through /ingest so ad-blockers don't eat events and
+  // the browser only ever talks to our own origin.
+  async rewrites() {
+    return [
+      {
+        source: '/ingest/static/:path*',
+        destination: 'https://eu-assets.i.posthog.com/static/:path*',
+      },
+      {
+        source: '/ingest/array/:path*',
+        destination: 'https://eu-assets.i.posthog.com/array/:path*',
+      },
+      {
+        source: '/ingest/:path*',
+        destination: 'https://eu.i.posthog.com/:path*',
+      },
+    ];
+  },
+  // Required by the PostHog proxy (its API paths carry trailing slashes that
+  // must pass through untouched). NOTE: this is app-wide — Next no longer
+  // 308-redirects /foo/ to /foo anywhere, so trailing-slash URLs now 404.
+  skipTrailingSlashRedirect: true,
 };
 
 export default nextConfig;

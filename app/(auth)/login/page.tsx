@@ -18,6 +18,7 @@ import { notifications } from '@mantine/notifications';
 import { authClient } from '@/lib/auth-client';
 import { GoogleAuthButton } from '@/components/google-auth-button';
 import { useI18n } from '@/lib/i18n/client';
+import posthog from 'posthog-js';
 
 function LoginForm() {
   const router = useRouter();
@@ -39,7 +40,7 @@ function LoginForm() {
 
   async function handleSubmit(values: typeof form.values) {
     setLoading(true);
-    const { error } = await authClient.signIn.email({
+    const { error, data } = await authClient.signIn.email({
       email: values.email,
       password: values.password,
     });
@@ -47,6 +48,11 @@ function LoginForm() {
     if (error) {
       notifications.show({ color: 'red', message: error.message ?? t.auth.signInFailed });
       return;
+    }
+    // The user_signed_in event is captured server-side (lib/auth.ts hooks);
+    // identify here just ties the anonymous browser session to the account.
+    if (data?.user) {
+      posthog.identify(data.user.id, { name: data.user.name, email: data.user.email });
     }
     router.push(next);
     router.refresh();

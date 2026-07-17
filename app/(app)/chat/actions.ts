@@ -32,6 +32,7 @@ import { validateUpload } from '@/lib/uploads';
 import { makeContext, respondAndStore } from './respond';
 import { buildChatMessages } from './messages';
 import type { Msg } from './types';
+import { captureServerEvent } from '@/lib/posthog-server';
 
 /** Throw unless the user can contribute to the chronicle (create stories / tree). */
 async function assertContributor(chronicleId: string, userId: string) {
@@ -199,6 +200,11 @@ export async function acceptStory(input: {
   });
   if (saved.alreadySaved) return { storyId: saved.storyId };
 
+  captureServerEvent(user.id, 'story_accepted', {
+    story_id: saved.storyId,
+    chronicle_id: input.chronicleId,
+  });
+
   if (conversationId) {
     // The receipt on the note renders as a persistent ✓ chip in the chat.
     const chronicle = await getChronicle(input.chronicleId);
@@ -241,6 +247,8 @@ export async function applyStoryUpdate(input: {
     appendSource: p.sourceText ?? null,
   });
   if (!result.ok) throw new Error(result.error);
+
+  captureServerEvent(user.id, 'story_updated', { story_id: input.storyId });
 
   // Only write the note if the conversation belongs to the caller.
   const convo = input.conversationId ? await getConversation(input.conversationId) : null;
