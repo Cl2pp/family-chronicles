@@ -53,11 +53,12 @@ export async function resumableConversation(userId: string) {
 
 /**
  * A generation claim older than this is considered dead (the request that took it
- * crashed without releasing). A live agent run re-asserts its claim before every
- * think→act step (see respondAndStore's keepAlive), so even a turn far longer than
- * this window is never shadowed by a second run — while an orphaned claim is retaken
- * and the reply regenerated while the client's reconcile-polling (chat-view's
- * MAX_SYNC_ATTEMPTS × SYNC_RETRY_MS) is still asking.
+ * crashed without releasing). A live agent run re-asserts its claim every minute
+ * while a model call is in flight (the loop's withKeepAlive, wired up in
+ * respondAndStore), so even a turn with one very slow step is never shadowed by a
+ * second run — while an orphaned claim is retaken and the reply regenerated while
+ * the client's reconcile-polling (chat-view's MAX_SYNC_ATTEMPTS × SYNC_RETRY_MS)
+ * is still asking.
  */
 const REPLY_CLAIM_STALE_MS = 3 * 60 * 1000;
 
