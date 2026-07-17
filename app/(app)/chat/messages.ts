@@ -1,6 +1,7 @@
 import { attachmentsByMessage, listMessages } from '@/lib/conversations';
 import { presignGet } from '@/lib/s3';
 import type { Receipt, StoryDraft } from '@/lib/ai/tools';
+import type { PeopleDraft } from '@/lib/people-changes';
 import type { Msg } from './types';
 
 /** What `messages.metadata` can hold, as written by the chat server actions. */
@@ -9,6 +10,9 @@ export type MessageMetadata = {
   storyDraft?: StoryDraft;
   /** Set once the user saved or discarded this message's draft card. */
   draftResolved?: boolean;
+  peopleDraft?: PeopleDraft;
+  /** Set once the user applied or discarded this message's tree-changes card. */
+  peopleDraftResolved?: boolean;
 } | null;
 
 /**
@@ -39,6 +43,9 @@ export async function buildChatMessages(conversationId: string): Promise<Msg[]> 
         // A card the user never saved or discarded is still live — re-render it so a
         // reload (or the PWA being backgrounded) doesn't silently drop the story.
         storyDraft: meta?.storyDraft && !meta.draftResolved ? meta.storyDraft : undefined,
+        peopleDraft: meta?.peopleDraft && !meta.peopleDraftResolved ? meta.peopleDraft : undefined,
+        peopleDraftMessageId:
+          meta?.peopleDraft && !meta.peopleDraftResolved ? m.id : undefined,
         attachments: await Promise.all(
           (attachMap.get(m.id) ?? []).map(async (a) => ({
             kind: a.kind,

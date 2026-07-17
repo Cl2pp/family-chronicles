@@ -330,6 +330,12 @@ export function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPrompt]);
 
+  /** A fresh tree-changes card replaces any older pending one (the server already
+   *  superseded it) — retire stale cards from view instead of leaving two live. */
+  function withoutSupersededCards(msgs: Msg[]): Msg[] {
+    return msgs.map((m) => (m.peopleDraft && !m.peopleResult ? { ...m, peopleDraft: null } : m));
+  }
+
   async function send(text: string) {
     const trimmed = text.trim();
     if ((!trimmed && photos.length === 0) || sending) return;
@@ -358,8 +364,15 @@ export function ChatView({
       advanceTurn();
       adoptConversation(res.conversationId);
       setMessages((m) => [
-        ...m,
-        { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
+        ...(res.peopleDraft ? withoutSupersededCards(m) : m),
+        {
+          role: 'assistant',
+          content: res.reply,
+          receipts: res.receipts,
+          storyDraft: res.storyDraft,
+          peopleDraft: res.peopleDraft,
+          peopleDraftMessageId: res.peopleDraftMessageId,
+        },
       ]);
       setBusyLabel(null);
     } catch {
@@ -430,8 +443,15 @@ export function ChatView({
         const i = next.lastIndexOf(pending);
         if (i !== -1) next[i] = { ...pending, content: res.transcript };
         return [
-          ...next,
-          { role: 'assistant', content: res.reply, receipts: res.receipts, storyDraft: res.storyDraft },
+          ...(res.peopleDraft ? withoutSupersededCards(next) : next),
+          {
+            role: 'assistant',
+            content: res.reply,
+            receipts: res.receipts,
+            storyDraft: res.storyDraft,
+            peopleDraft: res.peopleDraft,
+            peopleDraftMessageId: res.peopleDraftMessageId,
+          },
         ];
       });
       setBusyLabel(null);
@@ -449,6 +469,10 @@ export function ChatView({
 
   function setResult(index: number, result: Msg['result']) {
     setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, result } : msg)));
+  }
+
+  function setPeopleResult(index: number, peopleResult: Msg['peopleResult']) {
+    setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, peopleResult } : msg)));
   }
 
   /** Clear the view back to a fresh, empty chat. */
@@ -556,6 +580,7 @@ export function ChatView({
                 msg={m}
                 conversationId={conversationId}
                 onResult={(r) => setResult(i, r)}
+                onPeopleResult={(r) => setPeopleResult(i, r)}
               />
             ))}
           </Stack>
