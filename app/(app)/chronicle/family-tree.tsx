@@ -498,7 +498,7 @@ export function FamilyTree({
     rows.sort(
       (a, b) =>
         (order[a.key] ?? 9) - (order[b.key] ?? 9) ||
-        a.other.displayName.localeCompare(b.other.displayName),
+        personFullName(a.other).localeCompare(personFullName(b.other)),
     );
     return rows;
   }, [selectedId, validEdges, peopleById]);

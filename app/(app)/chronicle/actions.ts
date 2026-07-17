@@ -50,7 +50,7 @@ export async function createChronicleAction(formData: FormData) {
 
 export interface AddPersonInput {
   chronicleId: string;
-  displayName: string;
+  firstName: string;
   familyName?: string;
   birthFamilyName?: string;
   gender?: Gender | null;
@@ -64,16 +64,16 @@ export async function addPersonAction(input: AddPersonInput) {
   const user = await requireUser();
   await requireContributor(input.chronicleId, user.id);
 
-  const displayName = input.displayName.trim();
-  if (!displayName) {
-    throw new Error('A name is required.');
+  const firstName = input.firstName.trim();
+  if (!firstName) {
+    throw new Error('A first name is required.');
   }
 
   const born = partsToEventDate(input.born ?? {});
   const died = partsToEventDate(input.died ?? {});
 
   const person = await createPerson({
-    displayName,
+    firstName,
     familyName: input.familyName?.trim() || null,
     birthFamilyName: input.birthFamilyName?.trim() || null,
     gender: input.gender ?? null,
@@ -105,7 +105,7 @@ export async function addPersonAction(input: AddPersonInput) {
 export async function editPersonAction(input: {
   chronicleId: string;
   personId: string;
-  displayName: string;
+  firstName: string;
   familyName?: string | null;
   birthFamilyName?: string | null;
   gender?: Gender | null;
@@ -115,8 +115,8 @@ export async function editPersonAction(input: {
   const user = await requireUser();
   await requireContributor(input.chronicleId, user.id);
 
-  const displayName = input.displayName.trim();
-  if (!displayName) throw new Error('A name is required.');
+  const firstName = input.firstName.trim();
+  if (!firstName) throw new Error('A first name is required.');
   if (!(await isPersonInChronicle(input.chronicleId, input.personId))) {
     throw new Error('That person is not in this chronicle.');
   }
@@ -125,7 +125,7 @@ export async function editPersonAction(input: {
   const died = partsToEventDate(input.died ?? {});
 
   await updatePerson(input.personId, {
-    displayName,
+    firstName,
     familyName: input.familyName?.trim() || null,
     birthFamilyName: input.birthFamilyName?.trim() || null,
     gender: input.gender ?? null,

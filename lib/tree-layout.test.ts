@@ -5,7 +5,7 @@ const CARD = 150;
 const GAP = 24;
 
 function person(id: string, born?: string): LayoutPerson {
-  return { id, displayName: id, bornOn: born ?? null };
+  return { id, firstName: id, bornOn: born ?? null };
 }
 
 function parent(from: string, to: string): LayoutEdge {

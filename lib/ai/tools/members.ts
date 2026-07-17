@@ -3,6 +3,7 @@ import { env } from '@/lib/env';
 import { createInvitation } from '@/lib/invitations';
 import { listChroniclePeople } from '@/lib/people';
 import { findPersonByName } from '@/lib/person-match';
+import { personFullName } from '@/lib/person-name';
 import { defineTool } from './types';
 import { ensureOwner } from './util';
 
@@ -47,13 +48,13 @@ export const inviteMemberTool = defineTool({
           error:
             match.error === 'ambiguous'
               ? `"${args.person}" could mean several unlinked tree people (${match.candidates
-                  .map((c) => c.displayName)
+                  .map((c) => personFullName(c))
                   .join(', ')}) — ask which one is meant.`
               : `No unlinked tree person named "${args.person}" was found — they may not be in the tree yet, or already have an account.`,
         };
       }
       personId = match.person.id;
-      personName = match.person.displayName;
+      personName = personFullName(match.person);
     }
 
     const invite = await createInvitation({

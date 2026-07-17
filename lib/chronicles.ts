@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { chronicles, chronicleMembers, memberships, people, user } from '@/db/schema';
 import { type AccessRole, canContribute, canManage } from '@/lib/permissions';
 import { ensurePersonForUser } from '@/lib/people';
+import { personFullName } from '@/lib/person-name';
 import { isLocale, type Locale } from '@/lib/i18n/config';
 
 /**
@@ -105,7 +106,7 @@ export async function requireOwner(chronicleId: string, userId: string) {
 
 /** Access members of a chronicle (user accounts + role + their linked tree person). */
 export async function listMembers(chronicleId: string) {
-  return db
+  const rows = await db
     .select({
       userId: user.id,
       name: user.name,
@@ -113,13 +114,21 @@ export async function listMembers(chronicleId: string) {
       role: memberships.accessRole,
       joinedAt: memberships.createdAt,
       personId: people.id,
-      personName: people.displayName,
+      personFirstName: people.firstName,
+      personFamilyName: people.familyName,
     })
     .from(memberships)
     .innerJoin(user, eq(memberships.userId, user.id))
     .leftJoin(people, eq(people.userId, user.id))
     .where(eq(memberships.chronicleId, chronicleId))
     .orderBy(memberships.createdAt);
+
+  return rows.map(({ personFirstName, personFamilyName, ...m }) => ({
+    ...m,
+    personName: personFirstName
+      ? personFullName({ firstName: personFirstName, familyName: personFamilyName })
+      : null,
+  }));
 }
 
 export async function updateChronicle(

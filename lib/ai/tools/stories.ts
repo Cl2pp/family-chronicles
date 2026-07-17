@@ -3,6 +3,7 @@ import { listChroniclesForUser } from '@/lib/chronicles';
 import { addMessage, resolveDraftCard } from '@/lib/conversations';
 import { listChroniclePeople } from '@/lib/people';
 import { matchPeopleByName } from '@/lib/person-match';
+import { personFullName } from '@/lib/person-name';
 import {
   addPeopleToStory,
   applyStoryEdit,
@@ -249,7 +250,7 @@ export const getStoryTool = defineTool({
         eventMonth: parts.month,
         eventDay: parts.day,
         status: s.status,
-        people: tagged.map((p) => p.displayName),
+        people: tagged.map((p) => personFullName(p)),
         familyTags: s.familyTags,
       }),
     };
@@ -530,7 +531,7 @@ export const tagStoryPeopleTool = defineTool({
     if ('error' in gate) return { ok: false, error: gate.error };
     const { story, chronicleId } = gate;
 
-    const matched: { id: string; displayName: string }[] = [];
+    const matched: { id: string; firstName: string; familyName: string | null }[] = [];
     const problems: string[] = [];
     for (const name of args.people) {
       const found = await resolvePerson(chronicleId, name);
@@ -542,7 +543,7 @@ export const tagStoryPeopleTool = defineTool({
     }
 
     await addPeopleToStory(story.id, matched.map((p) => p.id));
-    const names = matched.map((p) => p.displayName).join(', ');
+    const names = matched.map((p) => personFullName(p)).join(', ');
     return {
       ok: true,
       message:
@@ -580,7 +581,7 @@ export const untagStoryPeopleTool = defineTool({
     }
 
     await removePeopleFromStory(story.id, matched.map((p) => p.id));
-    const names = matched.map((p) => p.displayName).join(', ');
+    const names = matched.map((p) => personFullName(p)).join(', ');
     return {
       ok: true,
       message:

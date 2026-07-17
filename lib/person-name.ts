@@ -4,13 +4,16 @@
  */
 
 interface NamedPerson {
-  displayName: string;
+  firstName: string;
   familyName: string | null;
 }
 
-/** "First Last" — appends the surname unless the display name already contains it. */
+/**
+ * "First Last" — the first name(s) plus the surname. Legacy rows may still hold a
+ * full name in firstName, so the surname is only appended when it isn't already there.
+ */
 export function personFullName(p: NamedPerson): string {
-  const name = p.displayName.trim();
+  const name = p.firstName.trim();
   const surname = p.familyName?.trim();
   if (!surname) return name;
   return name.toLowerCase().includes(surname.toLowerCase()) ? name : `${name} ${surname}`;

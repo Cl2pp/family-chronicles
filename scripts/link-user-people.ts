@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import { chronicleMembers, memberships, people, user } from '@/db/schema';
 import { linkUserToPersonIfFree } from '@/lib/people';
+import { personFullName } from '@/lib/person-name';
 
 /**
  * Backfill user ↔ tree-person links (docs/STORY_ACCESS_PLAN.md, phase 1). Family-mode
@@ -33,7 +34,11 @@ async function chronicleIdsForUser(userId: string): Promise<string[]> {
 async function unlinkedTreePeople(chronicleIds: string[]) {
   if (chronicleIds.length === 0) return [];
   return db
-    .selectDistinctOn([people.id], { id: people.id, displayName: people.displayName })
+    .selectDistinctOn([people.id], {
+      id: people.id,
+      firstName: people.firstName,
+      familyName: people.familyName,
+    })
     .from(chronicleMembers)
     .innerJoin(people, eq(chronicleMembers.personId, people.id))
     .where(and(inArray(chronicleMembers.chronicleId, chronicleIds), isNull(people.userId)))
@@ -57,7 +62,7 @@ async function suggest() {
 
     const candidates = await unlinkedTreePeople(await chronicleIdsForUser(u.id));
     const byName = candidates.filter(
-      (p) => p.displayName.trim().toLowerCase() === u.name.trim().toLowerCase(),
+      (p) => personFullName(p).trim().toLowerCase() === u.name.trim().toLowerCase(),
     );
     const list = byName.length > 0 ? byName : candidates;
     const marker = byName.length > 0 ? '' : ' (no name match — all unlinked tree members)';
@@ -66,7 +71,7 @@ async function suggest() {
       continue;
     }
     for (const p of list) {
-      console.log(`${u.email} → ${p.displayName} (${p.id})${marker}`);
+      console.log(`${u.email} → ${personFullName(p)} (${p.id})${marker}`);
     }
   }
   console.log(`\n${unlinkedUsers} membership user(s) without a linked person.`);
@@ -80,16 +85,16 @@ async function link(email: string, personId: string) {
 
   // Idempotency + clear errors before the guarded UPDATE.
   if (person.userId === u.id) {
-    console.log(`Already linked: ${u.email} ↔ ${person.displayName} (${person.id}) — nothing to do.`);
+    console.log(`Already linked: ${u.email} ↔ ${personFullName(person)} (${person.id}) — nothing to do.`);
     return;
   }
   if (person.userId) {
-    throw new Error(`${person.displayName} (${person.id}) is already linked to another account.`);
+    throw new Error(`${personFullName(person)} (${person.id}) is already linked to another account.`);
   }
   const existing = await db.query.people.findFirst({ where: eq(people.userId, u.id) });
   if (existing) {
     throw new Error(
-      `${u.email} is already linked to ${existing.displayName} (${existing.id}) — unlink first.`,
+      `${u.email} is already linked to ${personFullName(existing)} (${existing.id}) — unlink first.`,
     );
   }
 
@@ -109,13 +114,13 @@ async function link(email: string, personId: string) {
     : [];
   if (inTree.length === 0) {
     throw new Error(
-      `${person.displayName} (${person.id}) is not a tree member of any of ${u.email}'s chronicles.`,
+      `${personFullName(person)} (${person.id}) is not a tree member of any of ${u.email}'s chronicles.`,
     );
   }
 
   const linked = await linkUserToPersonIfFree(personId, u.id);
   if (!linked) throw new Error('Could not link — the person or account was claimed meanwhile.');
-  console.log(`Linked ${u.email} ↔ ${person.displayName} (${person.id}).`);
+  console.log(`Linked ${u.email} ↔ ${personFullName(person)} (${person.id}).`);
 }
 
 async function main() {

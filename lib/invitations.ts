@@ -4,6 +4,7 @@ import { db } from '@/db';
 import { chronicles, invitations, memberships, people } from '@/db/schema';
 import { getMembership } from '@/lib/chronicles';
 import { isPersonInChronicle, linkUserToPersonIfFree } from '@/lib/people';
+import { personFullName } from '@/lib/person-name';
 import type { AccessRole } from '@/lib/permissions';
 
 const INVITE_TTL_DAYS = 14;
@@ -54,17 +55,25 @@ export async function createInvitation(input: {
  * shareable link once, from `createInvitation`'s return value.
  */
 export async function listPendingInvitations(chronicleId: string) {
-  return db
+  const rows = await db
     .select({
       id: invitations.id,
       email: invitations.email,
       accessRole: invitations.accessRole,
       personId: invitations.personId,
-      personName: people.displayName,
+      personFirstName: people.firstName,
+      personFamilyName: people.familyName,
     })
     .from(invitations)
     .leftJoin(people, eq(invitations.personId, people.id))
     .where(and(eq(invitations.chronicleId, chronicleId), isNull(invitations.acceptedAt)));
+
+  return rows.map(({ personFirstName, personFamilyName, ...i }) => ({
+    ...i,
+    personName: personFirstName
+      ? personFullName({ firstName: personFirstName, familyName: personFamilyName })
+      : null,
+  }));
 }
 
 export type InvitePreview =
@@ -88,7 +97,8 @@ export async function getInvitationByToken(token: string): Promise<InvitePreview
       acceptedAt: invitations.acceptedAt,
       expiresAt: invitations.expiresAt,
       chronicleName: chronicles.name,
-      personName: people.displayName,
+      personFirstName: people.firstName,
+      personFamilyName: people.familyName,
     })
     .from(invitations)
     .innerJoin(chronicles, eq(invitations.chronicleId, chronicles.id))
@@ -99,7 +109,10 @@ export async function getInvitationByToken(token: string): Promise<InvitePreview
   if (!row) return { status: 'not_found' };
   if (row.acceptedAt) return { status: 'used' };
   if (row.expiresAt.getTime() < Date.now()) return { status: 'expired' };
-  return { status: 'ok', chronicleName: row.chronicleName, personName: row.personName };
+  const personName = row.personFirstName
+    ? personFullName({ firstName: row.personFirstName, familyName: row.personFamilyName })
+    : null;
+  return { status: 'ok', chronicleName: row.chronicleName, personName };
 }
 
 export type AcceptResult =
