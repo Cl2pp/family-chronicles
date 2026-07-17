@@ -5,7 +5,7 @@
 //  - /api/* and cross-origin: never intercepted
 // Bump this whenever unhashed static assets change (icons, manifest, fonts) —
 // they are served cache-first, so old clients keep stale copies until the name changes.
-const CACHE = 'fc-v4';
+const CACHE = 'fc-v5';
 const OFFLINE_URL = '/offline';
 const PRECACHE = [OFFLINE_URL];
 
