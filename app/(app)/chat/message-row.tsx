@@ -21,7 +21,15 @@ export function MessageRow({
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  const [discarded, setDiscarded] = useState(false);
+  // One message can carry BOTH a story card and a tree-changes card (a turn that
+  // drafts a story and stages people edits) — each card resolves independently.
+  const [storyDiscarded, setStoryDiscarded] = useState(false);
+  const [peopleDiscarded, setPeopleDiscarded] = useState(false);
+
+  // A story result settles the story card, a people result the people card — never
+  // each other. `msg.result` only holds the most recent one; the other card stays live.
+  const storySettled = (msg.result && msg.result.kind !== 'people') || storyDiscarded;
+  const peopleSettled = msg.result?.kind === 'people' || peopleDiscarded;
 
   if (msg.role === 'user') {
     return (
@@ -76,24 +84,24 @@ export function MessageRow({
         </>
       )}
 
-      {msg.storyDraft && !msg.result && !discarded && (
+      {msg.storyDraft && !storySettled && (
         <StoryDraftCard
           draft={msg.storyDraft}
           conversationId={conversationId}
           busy={busy}
           setBusy={setBusy}
-          onDiscard={() => setDiscarded(true)}
+          onDiscard={() => setStoryDiscarded(true)}
           onResult={onResult}
         />
       )}
 
-      {msg.peopleDraft && !msg.result && !discarded && (
+      {msg.peopleDraft && !peopleSettled && (
         <PeopleChangesCard
           draft={msg.peopleDraft}
           conversationId={conversationId}
           busy={busy}
           setBusy={setBusy}
-          onDiscard={() => setDiscarded(true)}
+          onDiscard={() => setPeopleDiscarded(true)}
           onResult={onResult}
         />
       )}
