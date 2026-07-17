@@ -21,6 +21,7 @@ import { useI18n } from '@/lib/i18n/client';
 import type { BookQuote } from '@/lib/gelato';
 import type { BookStatus } from '@/lib/books';
 import { renderPreviewAction } from '../../actions';
+import posthog from 'posthog-js';
 
 interface OrderBook {
   id: string;
@@ -215,7 +216,13 @@ export function OrderView({
             <Text fz={13}>{to.howToOrderBody(contactEmail)}</Text>
           </Alert>
 
-          <Button size="lg" component="a" href={mailtoHref} leftSection={<IconMail size={18} />}>
+          <Button
+            size="lg"
+            component="a"
+            href={mailtoHref}
+            leftSection={<IconMail size={18} />}
+            onClick={() => posthog.capture('book_order_email_opened', { bookId: book.id, format: book.formatLabel })}
+          >
             {to.emailCta}
           </Button>
           <Text fz={12} c="dimmed" ta="center">

@@ -4,6 +4,7 @@ import { imageTypeForKey } from '@/lib/uploads';
 import { AppChrome } from '@/components/app-shell';
 import { InstallPrompt } from '@/components/install-prompt';
 import { VerifyEmailBanner } from '@/components/verify-email-banner';
+import { PostHogIdentify } from '@/components/posthog-identify';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
@@ -11,6 +12,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <AppChrome user={{ name: user.name, email: user.email, avatarUrl }}>
+      <PostHogIdentify userId={user.id} name={user.name} email={user.email} />
       {/* Only logged-in users get the home-screen nudge — never login/landing. */}
       <InstallPrompt />
       {!user.emailVerified && <VerifyEmailBanner email={user.email} />}
