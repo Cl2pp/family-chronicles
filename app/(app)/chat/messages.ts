@@ -44,6 +44,8 @@ export async function buildChatMessages(conversationId: string): Promise<Msg[]> 
         // reload (or the PWA being backgrounded) doesn't silently drop the story.
         storyDraft: meta?.storyDraft && !meta.draftResolved ? meta.storyDraft : undefined,
         peopleDraft: meta?.peopleDraft && !meta.peopleDraftResolved ? meta.peopleDraft : undefined,
+        peopleDraftMessageId:
+          meta?.peopleDraft && !meta.peopleDraftResolved ? m.id : undefined,
         attachments: await Promise.all(
           (attachMap.get(m.id) ?? []).map(async (a) => ({
             kind: a.kind,

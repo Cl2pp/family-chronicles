@@ -8,28 +8,29 @@ import { MessageAttachments } from './message-attachments';
 import { MessageMarkdown } from './message-markdown';
 import { PeopleChangesCard } from './people-changes-card';
 import { StoryDraftCard } from './story-draft-card';
-import type { Msg, MsgResult } from './types';
+import type { Msg, MsgPeopleResult, MsgResult } from './types';
 
 export function MessageRow({
   msg,
   conversationId,
   onResult,
+  onPeopleResult,
 }: {
   msg: Msg;
   conversationId: string | null;
   onResult: (r: MsgResult) => void;
+  onPeopleResult: (r: MsgPeopleResult) => void;
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   // One message can carry BOTH a story card and a tree-changes card (a turn that
-  // drafts a story and stages people edits) — each card resolves independently.
+  // drafts a story and stages people edits) — each card has its own result slot and
+  // discard flag, so resolving one never hides or resurrects the other.
   const [storyDiscarded, setStoryDiscarded] = useState(false);
   const [peopleDiscarded, setPeopleDiscarded] = useState(false);
 
-  // A story result settles the story card, a people result the people card — never
-  // each other. `msg.result` only holds the most recent one; the other card stays live.
-  const storySettled = (msg.result && msg.result.kind !== 'people') || storyDiscarded;
-  const peopleSettled = msg.result?.kind === 'people' || peopleDiscarded;
+  const storySettled = Boolean(msg.result) || storyDiscarded;
+  const peopleSettled = Boolean(msg.peopleResult) || peopleDiscarded;
 
   if (msg.role === 'user') {
     return (
@@ -58,7 +59,7 @@ export function MessageRow({
 
       {msg.receipts?.length ? <ActionReceipts receipts={msg.receipts} /> : null}
 
-      {msg.result && msg.result.kind !== 'people' && (
+      {msg.result && (
         <ActionReceipts
           receipts={[
             {
@@ -73,12 +74,14 @@ export function MessageRow({
         />
       )}
 
-      {msg.result && msg.result.kind === 'people' && (
+      {msg.peopleResult && (
         <>
-          {msg.result.receipts.length ? <ActionReceipts receipts={msg.result.receipts} /> : null}
-          {msg.result.errors.length ? (
+          {msg.peopleResult.receipts.length ? (
+            <ActionReceipts receipts={msg.peopleResult.receipts} />
+          ) : null}
+          {msg.peopleResult.errors.length ? (
             <Text size="xs" c="dimmed">
-              {t.chat.changesPartlyFailed(msg.result.errors.length)}
+              {t.chat.changesPartlyFailed(msg.peopleResult.errors.length)}
             </Text>
           ) : null}
         </>
@@ -99,10 +102,11 @@ export function MessageRow({
         <PeopleChangesCard
           draft={msg.peopleDraft}
           conversationId={conversationId}
+          messageId={msg.peopleDraftMessageId ?? null}
           busy={busy}
           setBusy={setBusy}
           onDiscard={() => setPeopleDiscarded(true)}
-          onResult={onResult}
+          onResult={onPeopleResult}
         />
       )}
     </Stack>

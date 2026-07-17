@@ -6,6 +6,7 @@ import {
   addMessage,
   claimPendingReply,
   createConversation,
+  findPendingPeopleDraft,
   getConversation,
   listMessages,
   photosByMessage,
@@ -33,6 +34,8 @@ export interface SendResult {
   receipts: Receipt[];
   storyDraft: StoryDraft | null;
   peopleDraft: PeopleDraft | null;
+  /** The message carrying `peopleDraft` — Apply/Discard target exactly this card. */
+  peopleDraftMessageId: string | null;
 }
 
 /** Build the mutable per-turn tool context from the resolved active chronicle. */
@@ -110,10 +113,28 @@ export async function respondAndStore(
     })),
   );
 
+  // Seed the turn with the still-pending card, if any: this turn's staging EXTENDS
+  // that changeset (and a fresh, complete card replaces it) instead of silently
+  // dropping the not-yet-confirmed changes — the model is told never to re-stage them.
+  const pendingCard = await findPendingPeopleDraft(conversationId);
+  if (pendingCard) {
+    ctx.peopleDraft = { ...pendingCard.draft, changes: [...pendingCard.draft.changes] };
+  }
+  const seededChanges = pendingCard?.draft.changes.length ?? 0;
+
   const result = await runAgent(history, ctx, emit);
-  const peopleDraft = result.peopleDraft?.changes.length ? result.peopleDraft : null;
-  // A fresh card supersedes any earlier one still pending — only one tree-changes card
-  // is ever live at a time, so an older, un-acted-on card can't be confused for this one.
+  // Persist a card only when this turn actually changed the set: same count as the
+  // seed means the old card (if any) is untouched and stays the live one — storing it
+  // again every turn would litter the chat with duplicates. The confirm/cancel tools
+  // null the draft after consuming it, so their turns fall through to "no card" here.
+  const draftNow = result.peopleDraft?.changes.length ? result.peopleDraft : null;
+  const peopleDraft =
+    draftNow &&
+    (draftNow.changes.length !== seededChanges ||
+      draftNow.chronicleId !== pendingCard?.draft.chronicleId)
+      ? draftNow
+      : null;
+  // The fresh, complete card supersedes the earlier one — only one is ever live.
   if (peopleDraft) await supersedePendingPeopleDrafts(conversationId);
   // Persist receipts and any draft card on the assistant message so the ✓ chips and the
   // reviewable card both survive a reload (a phone backgrounding the PWA, say).
@@ -125,7 +146,7 @@ export async function respondAndStore(
           ...(peopleDraft ? { peopleDraft } : {}),
         }
       : undefined;
-  await addMessage(conversationId, 'assistant', result.reply, metadata);
+  const assistantMessage = await addMessage(conversationId, 'assistant', result.reply, metadata);
   // Record the draft card as a system event so later turns know it exists and
   // that only the user can act on it (prevents "should I save it?" re-drafts).
   if (result.storyDraft) {
@@ -142,9 +163,10 @@ export async function respondAndStore(
       conversationId,
       'system',
       `[A tree-changes card with ${peopleDraft.changes.length} staged change` +
-        `${peopleDraft.changes.length === 1 ? '' : 's'} is now showing. Only the user can apply or ` +
-        'discard it on the card (or say so explicitly in chat); a note will appear here once they do. ' +
-        'Nothing has been applied yet — do not claim it has, and do not stage the same changes again.]',
+        `${peopleDraft.changes.length === 1 ? '' : 's'} is now showing — the COMPLETE set, replacing ` +
+        'any earlier card. Only the user can apply or discard it on the card (or say so explicitly ' +
+        'in chat); a note will appear here once they do. Nothing has been applied yet — do not claim ' +
+        'it has, and do not stage the same changes again.]',
     );
   }
 
@@ -164,6 +186,7 @@ export async function respondAndStore(
     receipts: result.receipts,
     storyDraft: result.storyDraft,
     peopleDraft,
+    peopleDraftMessageId: peopleDraft ? assistantMessage.id : null,
   };
 }
 

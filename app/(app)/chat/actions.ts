@@ -6,13 +6,14 @@ import { requireUser } from '@/lib/session';
 import { resolveActiveChronicle, getChronicle, getMembership } from '@/lib/chronicles';
 import {
   addMessage,
+  claimPeopleCard,
   closeConversation,
   findPendingPeopleDraft,
   getConversation,
+  getPeopleDraftMessage,
   listMessages,
   releasePendingReply,
   resolveDraftCard,
-  resolvePeopleCard,
   resumableConversation,
   tryClaimPendingReply,
 } from '@/lib/conversations';
@@ -280,16 +281,25 @@ export async function discardStoryDraft(input: {
  */
 export async function confirmPeopleChanges(input: {
   conversationId: string;
-}): Promise<{ receipts: Receipt[]; errors: string[] }> {
+  messageId: string;
+}): Promise<{ receipts: Receipt[]; errors: string[]; resolvedElsewhere?: boolean }> {
   const user = await requireUser();
   const convo = await getConversation(input.conversationId);
   if (!convo || convo.userId !== user.id) throw new Error('Conversation not found');
 
-  const pending = await findPendingPeopleDraft(input.conversationId);
-  if (!pending) return { receipts: [], errors: [] }; // already resolved — nothing to do
+  // Bound to the exact card message the user tapped — never "the newest one", which
+  // could be a different changeset than the card on their screen (stale tab, replaced
+  // card). The atomic claim is the only license to apply; losing it means another
+  // path (second device, the confirm_people_changes tool) already resolved this card.
+  const card = await getPeopleDraftMessage(input.messageId);
+  if (!card || card.conversationId !== input.conversationId) {
+    throw new Error('Card not found');
+  }
+  if (card.resolved || !(await claimPeopleCard(input.messageId))) {
+    return { receipts: [], errors: [], resolvedElsewhere: true };
+  }
 
-  const { receipts, errors } = await applyPeopleChanges(pending.draft, user.id);
-  await resolvePeopleCard(pending.messageId);
+  const { receipts, errors } = await applyPeopleChanges(card.draft, user.id);
 
   const applied = receipts.length
     ? `Applied ${receipts.length} change${receipts.length === 1 ? '' : 's'} from the card.`
@@ -303,15 +313,18 @@ export async function confirmPeopleChanges(input: {
   return { receipts, errors };
 }
 
-/** Discard the newest pending tree-changes card via its own Discard button — nothing is applied. */
-export async function discardPeopleChanges(input: { conversationId: string }): Promise<void> {
+/** Discard one tree-changes card via its own Discard button — nothing is applied. */
+export async function discardPeopleChanges(input: {
+  conversationId: string;
+  messageId: string;
+}): Promise<void> {
   const user = await requireUser();
   const convo = await getConversation(input.conversationId);
   if (!convo || convo.userId !== user.id) return;
 
-  const pending = await findPendingPeopleDraft(input.conversationId);
-  if (!pending) return;
-  await resolvePeopleCard(pending.messageId);
+  const card = await getPeopleDraftMessage(input.messageId);
+  if (!card || card.conversationId !== input.conversationId) return;
+  if (!(await claimPeopleCard(input.messageId))) return; // already applied or discarded
   await addMessage(
     input.conversationId,
     'system',

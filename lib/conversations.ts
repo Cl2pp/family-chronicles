@@ -175,16 +175,41 @@ export async function findPendingPeopleDraft(
   return { messageId: pending.id, draft: meta.peopleDraft };
 }
 
-/** Mark one message's people-changes card resolved (applied or discarded), so a reload
- *  renders it as history instead of re-offering a live card. */
-export async function resolvePeopleCard(messageId: string) {
+/** One message's people-changes card, bound to its exact message — the server actions
+ *  resolve the card the user actually SAW, never just "the newest one". */
+export async function getPeopleDraftMessage(
+  messageId: string,
+): Promise<{ conversationId: string; draft: PeopleDraft; resolved: boolean } | null> {
   const row = await db.query.messages.findFirst({ where: eq(messages.id, messageId) });
-  if (!row) return;
-  const meta = (row.metadata ?? {}) as Record<string, unknown>;
-  await db
+  const meta = row?.metadata as { peopleDraft?: PeopleDraft; peopleDraftResolved?: boolean } | null;
+  if (!row || !meta?.peopleDraft) return null;
+  return {
+    conversationId: row.conversationId,
+    draft: meta.peopleDraft,
+    resolved: Boolean(meta.peopleDraftResolved),
+  };
+}
+
+/**
+ * Atomically claim one message's people-changes card for resolution (apply OR
+ * discard). Returns false when someone else already resolved it — the ONLY way a card
+ * may be applied is having won this claim, so two appliers (Apply button on two
+ * devices, the button racing the confirm_people_changes tool, a crash-replayed turn)
+ * can never run the changeset twice and duplicate people.
+ */
+export async function claimPeopleCard(messageId: string): Promise<boolean> {
+  const rows = await db
     .update(messages)
-    .set({ metadata: { ...meta, peopleDraftResolved: true } })
-    .where(eq(messages.id, messageId));
+    .set({ metadata: sql`${messages.metadata} || '{"peopleDraftResolved": true}'::jsonb` })
+    .where(
+      and(
+        eq(messages.id, messageId),
+        sql`coalesce(${messages.metadata} ->> 'peopleDraftResolved', 'false') <> 'true'`,
+        sql`${messages.metadata} ? 'peopleDraft'`,
+      ),
+    )
+    .returning({ id: messages.id });
+  return rows.length > 0;
 }
 
 /** Resolve every still-pending people-changes card in a conversation — called right

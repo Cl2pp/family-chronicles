@@ -396,7 +396,6 @@ export const en = {
     // Tree-changes confirmation card (staged add/relate/unrelate/edit/delete_person).
     treeChanges: 'Tree changes',
     applyChanges: 'Apply',
-    changesApplied: (n: number) => (n === 1 ? '1 change applied.' : `${n} changes applied.`),
     changesPartlyFailed: (n: number) =>
       n === 1 ? '1 change could not be applied.' : `${n} changes could not be applied.`,
     relationWord: (r: 'parent' | 'child' | 'partner'): string =>

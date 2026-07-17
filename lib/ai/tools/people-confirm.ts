@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { findPendingPeopleDraft, resolvePeopleCard } from '@/lib/conversations';
+import { claimPeopleCard, findPendingPeopleDraft } from '@/lib/conversations';
 import { applyPeopleChanges } from '@/lib/people-changes';
-import { defineTool } from './types';
+import { defineTool, type ToolContext, type ToolResult } from './types';
 
 /**
  * The five people-mutation tools only STAGE changes onto a confirmation card — the
@@ -10,62 +10,70 @@ import { defineTool } from './types';
  * discardPeopleChanges server actions). These two tools exist ONLY for when the user
  * says so in words instead of tapping ("ja, übernimm das" / "never mind, forget that") —
  * BASE_SYSTEM tells the model when to reach for them.
+ *
+ * Note on state: at the start of every turn, ctx.peopleDraft is SEEDED with the
+ * still-pending card's changes (see respondAndStore), and same-turn staging appends to
+ * it. So ctx.peopleDraft here is always the complete set the user has been shown —
+ * apply/discard means resolving the persisted card AND consuming the in-turn draft.
  */
 
-/** confirm_people_changes — apply the pending tree-changes card because the user said so in chat. */
+/** Resolve the pending persisted card exclusively, or explain why not. `null` means
+ *  there simply is no persisted card (a same-turn-only draft is still fine to act on). */
+async function claimPendingCard(
+  ctx: ToolContext,
+): Promise<{ claimed: boolean } | { error: string }> {
+  if (!ctx.conversationId) return { claimed: false };
+  const pending = await findPendingPeopleDraft(ctx.conversationId);
+  if (!pending) return { claimed: false };
+  if (!(await claimPeopleCard(pending.messageId))) {
+    return { error: 'The pending card was just applied or discarded by the user — check the conversation notes.' };
+  }
+  return { claimed: true };
+}
+
+/** confirm_people_changes — apply the staged tree changes because the user said so in chat. */
 export const confirmPeopleChangesTool = defineTool({
   name: 'confirm_people_changes',
   description:
-    'Apply the pending tree-changes confirmation card, or the changes staged earlier in THIS turn ' +
-    'when the user already told you to apply them without a confirmation step. Only call this on the ' +
-    "user's EXPLICIT say-so in chat words (e.g. \"yes, apply that\", \"add them, no need to ask\") — " +
-    "not needed when they use the card's own Apply button.",
+    'Apply the pending tree-changes card (including anything staged earlier in THIS turn). Only ' +
+    'call this on the user\'s EXPLICIT say-so in chat words (e.g. "yes, apply that", "add them, ' +
+    "no need to ask\") — not needed when they use the card's own Apply button.",
   schema: z.object({}),
-  async execute(_args, ctx) {
-    // Changes staged earlier in this same turn take priority: they exist only in the
-    // turn's collector (nothing is persisted until the turn ends), and applying an
-    // OLDER pending card here instead would silently do the wrong thing.
-    if (ctx.peopleDraft?.changes.length) {
-      const { receipts, errors } = await applyPeopleChanges(ctx.peopleDraft, ctx.userId);
-      ctx.peopleDraft = null; // applied — the turn must not also emit a card for it
-      return { ok: true, message: appliedSummary(receipts.length, errors), receipts };
-    }
+  async execute(_args, ctx): Promise<ToolResult> {
+    const draft = ctx.peopleDraft;
+    if (!draft?.changes.length) return { ok: false, error: 'There are no staged tree changes to apply.' };
 
-    if (!ctx.conversationId) return { ok: false, error: 'No active conversation.' };
-    const pending = await findPendingPeopleDraft(ctx.conversationId);
-    if (!pending) return { ok: false, error: 'There is no pending tree-changes card to confirm.' };
+    const card = await claimPendingCard(ctx);
+    if ('error' in card) return { ok: false, error: card.error };
 
-    const { receipts, errors } = await applyPeopleChanges(pending.draft, ctx.userId);
-    await resolvePeopleCard(pending.messageId);
-    return { ok: true, message: appliedSummary(receipts.length, errors), receipts };
+    const { receipts, errors } = await applyPeopleChanges(draft, ctx.userId);
+    ctx.peopleDraft = null; // applied — the turn must not also emit a card for it
+
+    const applied = receipts.length
+      ? `Applied ${receipts.length} change${receipts.length === 1 ? '' : 's'}.`
+      : 'Nothing could be applied.';
+    const failed = errors.length ? ` ${errors.length} failed: ${errors.join('; ')}` : '';
+    return { ok: true, message: `${applied}${failed}`, receipts };
   },
 });
 
-function appliedSummary(applied: number, errors: string[]): string {
-  const ok = applied ? `Applied ${applied} change${applied === 1 ? '' : 's'}.` : 'Nothing could be applied.';
-  const failed = errors.length ? ` ${errors.length} failed: ${errors.join('; ')}` : '';
-  return `${ok}${failed}`;
-}
-
-/** cancel_people_changes — discard the pending tree-changes card because the user said so in chat. */
+/** cancel_people_changes — discard the staged tree changes because the user said so in chat. */
 export const cancelPeopleChangesTool = defineTool({
   name: 'cancel_people_changes',
   description:
-    'Discard the pending tree-changes confirmation card (or the changes staged earlier in THIS turn) ' +
-    'without applying anything. Only call this when the user EXPLICITLY rejects the changes in chat ' +
+    'Discard the pending tree-changes card (and anything staged earlier in THIS turn) without ' +
+    'applying anything. Only call this when the user EXPLICITLY rejects the changes in chat ' +
     "words — not needed when they use the card's own Discard button.",
   schema: z.object({}),
-  async execute(_args, ctx) {
-    if (ctx.peopleDraft?.changes.length) {
-      ctx.peopleDraft = null;
-      return { ok: true, message: 'Dropped the changes staged this turn — nothing was applied.' };
+  async execute(_args, ctx): Promise<ToolResult> {
+    const hadDraft = Boolean(ctx.peopleDraft?.changes.length);
+    const card = await claimPendingCard(ctx);
+    if ('error' in card) return { ok: false, error: card.error };
+    if (!hadDraft && !card.claimed) {
+      return { ok: false, error: 'There are no staged tree changes to cancel.' };
     }
 
-    if (!ctx.conversationId) return { ok: false, error: 'No active conversation.' };
-    const pending = await findPendingPeopleDraft(ctx.conversationId);
-    if (!pending) return { ok: false, error: 'There is no pending tree-changes card to cancel.' };
-
-    await resolvePeopleCard(pending.messageId);
-    return { ok: true, message: 'Discarded the pending tree-changes card — nothing was applied.' };
+    ctx.peopleDraft = null;
+    return { ok: true, message: 'Discarded the staged tree changes — nothing was applied.' };
   },
 });
