@@ -78,6 +78,11 @@ function LoginForm() {
             {...form.getInputProps('email')}
           />
           <PasswordInput label={t.auth.password} {...form.getInputProps('password')} />
+          <Text size="sm" ta="right" mt={-8}>
+            <Anchor href="/forgot-password" size="sm">
+              {t.auth.forgotPassword}
+            </Anchor>
+          </Text>
           <Button type="submit" loading={loading} fullWidth>
             {t.auth.signIn}
           </Button>

@@ -162,6 +162,22 @@ export const en = {
     verificationSent: 'Confirmation email sent',
     accountNotLinked:
       'An account with this email already exists, but its address has not been confirmed yet. Sign in with your password and confirm your email first — then Google sign-in will work.',
+    forgotPassword: 'Forgot password?',
+    resetPasswordTitle: 'Reset password',
+    forgotPasswordIntro:
+      'Enter your email address and we will send you a link to choose a new password.',
+    sendResetLink: 'Send reset link',
+    resetLinkSent:
+      'If an account exists for this email, we sent a link to reset the password. Check your inbox.',
+    backToSignIn: 'Back to sign in',
+    newPassword: 'New password',
+    confirmNewPassword: 'Confirm new password',
+    resetLinkInvalid:
+      'This reset link is invalid or has expired. Request a new one below.',
+    requestNewLink: 'Request a new link',
+    setNewPassword: 'Set new password',
+    passwordResetSuccess: 'Password changed. You can sign in now.',
+    resetPasswordFailed: 'Could not reset the password',
   },
   account: {
     title: 'Account',

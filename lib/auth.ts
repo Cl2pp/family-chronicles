@@ -35,6 +35,38 @@ export const auth = betterAuth({
   }),
   emailAndPassword: {
     enabled: true,
+    // "Forgot password" flow: /forgot-password requests the mail, the link's
+    // token lands on /reset-password. The endpoint answers identically whether
+    // the email exists or not, so the mail is the only signal.
+    sendResetPassword: async ({ user, url }) => {
+      await sendEmail({
+        to: user.email,
+        subject: 'Passwort zurücksetzen — Familienwerk',
+        text: [
+          `Hallo ${user.name || ''}`.trim() + ',',
+          '',
+          'du (oder jemand anderes) hast angefordert, dein Familienwerk-Passwort',
+          'zurückzusetzen. Über diesen Link kannst du ein neues wählen:',
+          '',
+          url,
+          '',
+          'Der Link ist 1 Stunde gültig. Wenn du das nicht warst, kannst du',
+          'diese E-Mail ignorieren — dein Passwort bleibt unverändert.',
+          '',
+          '— Familienwerk',
+          '',
+          '---',
+          '',
+          'A password reset was requested for your Familienwerk account. Use the',
+          'link above to choose a new password. It is valid for 1 hour. If this',
+          "wasn't you, you can ignore this email — your password stays unchanged.",
+        ].join('\n'),
+      });
+    },
+    onPasswordReset: async ({ user }) => {
+      captureServerEvent(user.id, 'password_reset');
+    },
+    revokeSessionsOnPasswordReset: true,
   },
   // Verification is "soft": login never requires it (requireEmailVerification
   // stays off so pre-existing accounts keep working), but a verified email is
