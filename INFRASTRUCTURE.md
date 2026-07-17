@@ -23,7 +23,7 @@ and keep full traceability (who submitted what + the raw inputs).
                      Internet (family members)
                               │  HTTPS
                               ▼
-   Hetzner VPS (cx23, Nuremberg)  ── Coolify (Docker) ──┐
+   Hetzner VPS (cx33, Nuremberg)  ── Coolify (Docker) ──┐
      ├─ Traefik (coolify-proxy)  :80/:443  TLS + routing │
      ├─ web     app  (Next.js)   :3000  ← UI + server actions + API   (ROLE unset)
      ├─ worker  app  (same image):       ← transcribe + style jobs    (ROLE=worker)
@@ -50,13 +50,13 @@ and keep full traceability (who submitted what + the raw inputs).
 | | |
 |---|---|
 | Provider/project | Hetzner Cloud, project `15154790` |
-| Server | name `family-chronicle`, id `145962441`, type **cx23** (x86, 2 vCPU / 4 GB / 40 GB) |
-| Why cx23 (not ARM cax) | ARM (cax) was sold out in all EU regions at provision time; the image is multi-arch so x86 was a drop-in, and it's ~€0.50/mo cheaper |
+| Server | name `family-chronicle`, id `145962441`, type **cx33** (x86, 4 vCPU / 8 GB / 80 GB) — resized from cx23 on 2026-07-17 after repeated disk-full incidents (§11); the disk grow is irreversible (CPU/RAM could scale back down, disk can't) |
+| Why x86 (not ARM cax) | ARM (cax) was sold out in all EU regions at provision time; the image is multi-arch so x86 was a drop-in |
 | Location | `nbg1` (Nuremberg, DE) |
 | OS | Ubuntu 24.04 |
-| Swap | 4 GB swapfile (added via cloud-init) so the 4 GB box can build Next.js |
+| Swap | 4 GB swapfile (added via cloud-init when the box had 4 GB RAM; kept as headroom) |
 | Public IPv4 | `157.90.165.169` |
-| Cost | ~€5.49/mo |
+| Cost | ~€8.49/mo (+ ~€0.60/mo primary IPv4) |
 | SSH | `ssh -i ~/.ssh/family_chronicle_ed25519 root@157.90.165.169` (key-only; passwords disabled) |
 
 The SSH **private key lives on the operator's Mac** at `~/.ssh/family_chronicle_ed25519`
@@ -266,9 +266,10 @@ done (the creds never leave the box).
     prune can kill the build — it instead fires within 5 min of the build finishing); if still ≥90%
     also prune all unused images (sacrifices rollback tags); ≥95% act even mid-build (at 100% the
     build dies anyway and takes coolify-db/redis with it). Logs to syslog as `docker-disk-guard`
-    (`journalctl -t docker-disk-guard`). One deploy burst writes ~16 GB (steady state after deep
-    clean is ~56%, peaks hit 98%), so the box lives close to the edge — the durable fix remains the
-    cx33 resize (§12).
+    (`journalctl -t docker-disk-guard`). One deploy burst writes ~16 GB; on the old 40 GB disk
+    (steady state ~56%, peaks 98–100%) the box lived on the edge — verified working in production
+    on 2026-07-17 (deferred during builds; emergency-pruned 96%→52% mid-burst). The 2026-07-17
+    cx33 resize (80 GB disk, §12) gives the durable headroom; the guard stays as the safety net.
   - **Concurrent app+worker builds** were the trigger — a push auto-deploys both apps, and with
     Coolify's default `concurrent_builds=2` they built simultaneously, doubling the RAM/disk spike.
     **Fixed** by setting `server_settings.concurrent_builds = 1` (serialises all builds, §9).
@@ -292,9 +293,9 @@ done (the creds never leave the box).
   same time. (An earlier attempt to sequence them with a web→worker `post_deployment_command`
   chain was removed once we found the real lever — per-app `is_auto_deploy_enabled` doesn't gate
   GitHub-App pushes, but the server-wide build limit does.)
-- **Scale the box**: the 40 GB disk / 4 GB RAM is the underlying ceiling — layers creep back toward
-  full and concurrent builds starve each other for RAM. A one-step `hcloud server resize` to **cx33**
-  (4 vCPU / 8 GB / 80 GB, ~€10/mo) gives durable headroom and faster builds. Requires a brief reboot.
+- **Scale the box — done** (2026-07-17): resized cx23 → **cx33** (4 vCPU / 8 GB / 80 GB, €8.49/mo)
+  via graceful poweroff → `hcloud server change-type family-chronicle cx33` (disk grow, irreversible)
+  → poweron; ~2 min downtime, root FS auto-grew to 75 GB (37% used), all containers came back clean.
 - **PWA over HTTPS** now works (we're on a real domain) — verify install/offline on devices.
 
 ## 13. Pointers
