@@ -8,7 +8,6 @@ import {
   addMessage,
   claimPeopleCard,
   closeConversation,
-  findPendingPeopleDraft,
   getConversation,
   getPeopleDraftMessage,
   listMessages,
