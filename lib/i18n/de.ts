@@ -161,6 +161,22 @@ export const de: Dictionary = {
     verificationSent: 'Bestätigungs-E-Mail gesendet',
     accountNotLinked:
       'Es gibt bereits ein Konto mit dieser E-Mail-Adresse, aber sie ist noch nicht bestätigt. Melde dich mit deinem Passwort an und bestätige zuerst deine E-Mail – danach funktioniert die Google-Anmeldung.',
+    forgotPassword: 'Passwort vergessen?',
+    resetPasswordTitle: 'Passwort zurücksetzen',
+    forgotPasswordIntro:
+      'Gib deine E-Mail-Adresse ein und wir schicken dir einen Link, um ein neues Passwort zu wählen.',
+    sendResetLink: 'Link senden',
+    resetLinkSent:
+      'Falls ein Konto mit dieser E-Mail existiert, haben wir dir einen Link zum Zurücksetzen geschickt. Sieh in deinem Postfach nach.',
+    backToSignIn: 'Zurück zur Anmeldung',
+    newPassword: 'Neues Passwort',
+    confirmNewPassword: 'Neues Passwort bestätigen',
+    resetLinkInvalid:
+      'Dieser Link ist ungültig oder abgelaufen. Fordere unten einen neuen an.',
+    requestNewLink: 'Neuen Link anfordern',
+    setNewPassword: 'Neues Passwort speichern',
+    passwordResetSuccess: 'Passwort geändert. Du kannst dich jetzt anmelden.',
+    resetPasswordFailed: 'Passwort konnte nicht zurückgesetzt werden',
     consentIntro: 'Ich habe die',
     consentPrivacyPolicy: 'Datenschutzerklärung',
     consentOutro:

@@ -9,6 +9,25 @@ import {
 export const analyticsConfigured = Boolean(process.env.NEXT_PUBLIC_POSTHOG_KEY);
 
 /**
+ * The password-reset link lands on /reset-password?token=… — a live,
+ * account-takeover-grade credential. PostHog's auto-captured pageviews record
+ * full URLs ($current_url, $initial_current_url, $referrer, …) before any
+ * React code runs, so the scrub has to happen inside the capture pipeline.
+ */
+function scrubTokens(props: unknown): void {
+  if (!props || typeof props !== 'object') return;
+  const rec = props as Record<string, unknown>;
+  for (const key of Object.keys(rec)) {
+    const value = rec[key];
+    if (typeof value === 'string' && value.includes('token=')) {
+      rec[key] = value.replace(/([?&#]|^)token=[^&#\s]*/g, '$1token=redacted');
+    } else if (value && typeof value === 'object') {
+      scrubTokens(value);
+    }
+  }
+}
+
+/**
  * Browser-side PostHog bootstrap. Called from instrumentation-client.ts (page
  * load with stored consent) and from the consent UI the moment consent is
  * granted. Never call it without consent — initializing is what sets PostHog's
@@ -24,6 +43,14 @@ export function startAnalytics(): void {
     defaults: '2026-01-30',
     capture_exceptions: true,
     debug: process.env.NODE_ENV === 'development',
+    before_send: (event) => {
+      if (event) {
+        scrubTokens(event.properties);
+        scrubTokens(event.$set);
+        scrubTokens(event.$set_once);
+      }
+      return event;
+    },
   });
   // A user who previously withdrew consent left PostHog's own opt-out flag in
   // this browser; granting again must clear it or events stay suppressed.
