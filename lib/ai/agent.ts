@@ -6,7 +6,7 @@ import type {
 } from 'openai/resources/chat/completions';
 import { env } from '@/lib/env';
 import type { PeopleDraft } from '@/lib/people-changes';
-import { openrouter } from './client';
+import { openrouter, OPENROUTER_ROUTING } from './client';
 import {
   toOpenAISchemas,
   tools,
@@ -423,7 +423,10 @@ interface StepRequest {
  */
 async function completeStep(request: StepRequest, emit?: AgentEmit): Promise<StepResult> {
   if (!emit) {
-    const completion = await openrouter.chat.completions.create(request);
+    const completion = await openrouter.chat.completions.create({
+      ...request,
+      ...OPENROUTER_ROUTING,
+    });
     const choice = completion.choices[0];
     return {
       content: choice?.message?.content ?? '',
@@ -432,7 +435,11 @@ async function completeStep(request: StepRequest, emit?: AgentEmit): Promise<Ste
     };
   }
 
-  const stream = await openrouter.chat.completions.create({ ...request, stream: true });
+  const stream = await openrouter.chat.completions.create({
+    ...request,
+    stream: true,
+    ...OPENROUTER_ROUTING,
+  });
   let content = '';
   let finishReason: string | null = null;
   const toolCalls: ChatCompletionMessageFunctionToolCall[] = [];
@@ -529,6 +536,7 @@ async function recoverEmptyReply(
         ]),
         tools: schemas,
         tool_choice: 'none',
+        ...OPENROUTER_ROUTING,
       }),
     );
     const reply = (completion.choices[0]?.message?.content ?? '').trim();

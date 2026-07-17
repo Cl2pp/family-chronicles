@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 import type { ChatCompletionContentPart, ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { env } from '@/lib/env';
-import { openrouter } from '@/lib/ai/client';
+import { openrouter, OPENROUTER_ROUTING } from '@/lib/ai/client';
 import { getObjectBuffer } from '@/lib/s3';
 import {
   backfillDimensionsFromOriginals,
@@ -308,6 +308,7 @@ export async function proposeLayoutPlan(bookId: string): Promise<LayoutPlan | nu
     const completion = await openrouter.chat.completions.create({
       model: env.STYLING_MODEL,
       messages,
+      ...OPENROUTER_ROUTING,
     });
 
     const text = completion.choices[0]?.message?.content;

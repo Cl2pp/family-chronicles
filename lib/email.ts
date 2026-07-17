@@ -17,10 +17,15 @@ export async function sendEmail(input: {
   text: string;
 }): Promise<{ sent: boolean }> {
   if (!transporter) {
-    console.log(
-      `[email] SMTP_URL not set — would have sent to ${input.to}:\n` +
-        `Subject: ${input.subject}\n${input.text}`,
-    );
+    if (env.NODE_ENV === 'production') {
+      // Don't write addresses + full bodies (verification links!) into prod logs.
+      console.log(`[email] SMTP_URL not set — dropped "${input.subject}"`);
+    } else {
+      console.log(
+        `[email] SMTP_URL not set — would have sent to ${input.to}:\n` +
+          `Subject: ${input.subject}\n${input.text}`,
+      );
+    }
     return { sent: false };
   }
   await transporter.sendMail({

@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { Center, Container } from '@mantine/core';
+import { Anchor, Center, Container, Group } from '@mantine/core';
 import { getSession } from '@/lib/session';
 
 export default async function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -12,6 +12,15 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
     <Center mih="100dvh">
       <Container size={420} w="100%" py="xl">
         {children}
+        {/* Art. 13 DSGVO: the privacy notice must be reachable where data is collected. */}
+        <Group justify="center" gap="lg" mt="md">
+          <Anchor href="/impressum" fz="xs" c="dimmed">
+            Impressum
+          </Anchor>
+          <Anchor href="/datenschutz" fz="xs" c="dimmed">
+            Datenschutz
+          </Anchor>
+        </Group>
       </Container>
     </Center>
   );

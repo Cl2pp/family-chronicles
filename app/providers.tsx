@@ -2,6 +2,7 @@
 
 import { MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
+import { ConsentBanner } from '@/components/consent-banner';
 import { DeploymentGuard } from '@/components/deployment-guard';
 import { ServiceWorkerRegister } from '@/components/sw-register';
 import { I18nProvider } from '@/lib/i18n/client';
@@ -26,6 +27,7 @@ export function Providers({ locale, children }: { locale: Locale; children: Reac
         <Notifications />
         <ServiceWorkerRegister />
         <DeploymentGuard />
+        <ConsentBanner />
         {children}
       </MantineProvider>
     </I18nProvider>

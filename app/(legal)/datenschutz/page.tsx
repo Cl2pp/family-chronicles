@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Stack, Title, Text, Anchor } from '@mantine/core';
 import { Section, P, Bullets } from '../legal-parts';
+import { AnalyticsConsentSettings } from '@/components/analytics-consent-settings';
 
 export const metadata: Metadata = {
   title: 'Datenschutzerklärung',
@@ -65,7 +66,17 @@ export default function DatenschutzPage() {
           Für die Nutzung ist ein Nutzerkonto erforderlich. Dabei verarbeiten wir die von dir
           angegebenen Daten (Name, E-Mail-Adresse sowie das Passwort in ausschließlich gehashter
           Form). Zur Aufrechterhaltung der Anmeldung wird ein technisch notwendiges Sitzungs-Cookie
-          gesetzt. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (Erfüllung des Nutzungsvertrags).
+          gesetzt; zur Absicherung deines Kontos speichern wir je Sitzung außerdem IP-Adresse und
+          Browser-Kennung. Rechtsgrundlage ist Art. 6
+          Abs. 1 lit. b DSGVO (Erfüllung des Nutzungsvertrags). Bestätigungs-E-Mails (z. B. zur
+          Verifizierung deiner Adresse) versenden wir über den Dienstleister Resend (siehe Ziffer 7).
+        </P>
+        <P>
+          Optional kannst du dich über dein Google-Konto anmelden („Sign in with Google“, Anbieter:
+          Google Ireland Ltd., Irland). Dabei erhalten wir von Google deinen Namen, deine
+          E-Mail-Adresse und ggf. dein Profilbild; Google erfährt, dass du dich bei Familienwerk
+          anmeldest. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO; die Nutzung ist freiwillig —
+          alternativ steht die Anmeldung per E-Mail und Passwort zur Verfügung.
         </P>
       </Section>
 
@@ -110,6 +121,8 @@ export default function DatenschutzPage() {
             'Cloudflare, Inc. (USA) / Cloudflare Germany GmbH – Objektspeicher (R2, EU-Jurisdiktion) für Audio- und Bilddateien.',
             'OpenRouter, Inc. (USA) – Textveredelung mittels Sprachmodell.',
             'Groq, Inc. (USA) – Transkription von Sprachaufnahmen.',
+            'Resend, Inc. (USA) – Versand von System-E-Mails (z. B. E-Mail-Bestätigung, Einladungen).',
+            'PostHog, Inc. (USA) – Nutzungsanalyse, ausschließlich nach deiner Einwilligung und ausschließlich auf EU-Servern (Frankfurt); siehe Ziffer 9.',
           ]}
         />
         <P>Eine Weitergabe deiner Daten zu Werbezwecken findet nicht statt.</P>
@@ -124,13 +137,25 @@ export default function DatenschutzPage() {
         </P>
       </Section>
 
-      <Section title="9. Cookies">
+      <Section title="9. Cookies und Nutzungsanalyse">
         <P>
-          Die Anwendung verwendet ausschließlich technisch notwendige Cookies: ein Sitzungs-Cookie zur
-          Aufrechterhaltung deiner Anmeldung sowie ein Cookie zum Speichern deiner Spracheinstellung.
-          Es werden keine Analyse-, Tracking- oder Werbe-Cookies eingesetzt. Rechtsgrundlage für das
-          Setzen technisch notwendiger Cookies ist § 25 Abs. 2 Nr. 2 TDDDG.
+          <strong>Technisch notwendige Cookies:</strong> ein Sitzungs-Cookie zur Aufrechterhaltung
+          deiner Anmeldung, ein Cookie zum Speichern deiner Spracheinstellung sowie ein Cookie, das
+          deine Entscheidung zur Nutzungsanalyse speichert. Rechtsgrundlage ist § 25 Abs. 2 Nr. 2
+          TDDDG. Werbe-Cookies oder Tracking zu Werbezwecken setzen wir nicht ein.
         </P>
+        <P>
+          <strong>Nutzungsanalyse (nur mit Einwilligung):</strong> Um zu verstehen, wie Familienwerk
+          genutzt wird, und die Anwendung zu verbessern, setzen wir PostHog ein — ausschließlich,
+          wenn du beim ersten Besuch (oder unten auf dieser Seite) eingewilligt hast. Erst nach
+          deiner Einwilligung werden Analyse-Cookies gesetzt und Nutzungsereignisse (z. B.
+          aufgerufene Funktionen, Fehlerberichte) erfasst; bei angemeldeten Nutzern werden diese
+          deinem Konto (Name, E-Mail-Adresse) zugeordnet. Die Verarbeitung erfolgt ausschließlich
+          auf EU-Servern (Frankfurt). Rechtsgrundlage ist deine Einwilligung (Art. 6 Abs. 1 lit. a
+          DSGVO, § 25 Abs. 1 TDDDG). Du kannst deine Einwilligung hier jederzeit mit Wirkung für
+          die Zukunft erteilen, ablehnen oder widerrufen:
+        </P>
+        <AnalyticsConsentSettings />
       </Section>
 
       <Section title="10. Speicherdauer">

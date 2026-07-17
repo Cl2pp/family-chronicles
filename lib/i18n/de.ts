@@ -177,6 +177,20 @@ export const de: Dictionary = {
     setNewPassword: 'Neues Passwort speichern',
     passwordResetSuccess: 'Passwort geändert. Du kannst dich jetzt anmelden.',
     resetPasswordFailed: 'Passwort konnte nicht zurückgesetzt werden',
+    consentIntro: 'Ich habe die',
+    consentPrivacyPolicy: 'Datenschutzerklärung',
+    consentOutro:
+      ' gelesen und willige in die dort beschriebene Verarbeitung ein – einschließlich der Verarbeitung meiner Beiträge durch KI-Dienste in den USA.',
+    consentRequired: 'Bitte stimme der Datenschutzerklärung zu',
+    googleNeedsSignup:
+      'Für dieses Google-Konto gibt es noch kein Familienwerk-Konto. Bitte registriere dich zuerst – auf der Registrierungsseite bestätigst du auch unsere Datenschutzerklärung.',
+  },
+  consent: {
+    title: 'Dürfen wir die Nutzung analysieren?',
+    body: 'Wir verwenden PostHog (EU-Server), um zu verstehen, wie Familienwerk genutzt wird, und es zu verbessern. Nur mit deiner Einwilligung – Details in der',
+    privacyLink: 'Datenschutzerklärung.',
+    accept: 'Einwilligen',
+    decline: 'Ablehnen',
   },
   account: {
     title: 'Konto',
@@ -271,6 +285,8 @@ export const de: Dictionary = {
     tabAccess: 'Zugriff',
     familiesTitle: 'Familien',
     familiesHint: 'Automatisch erkannt aus Nachnamen, Abstammung und Ehen',
+    familiesInteractionHint:
+      'Fahre über eine Familie oder tippe sie an, um sie und alle im Baum mit ihr verbundenen Personen hervorzuheben.',
     familiesToggleAria: 'Familien-Legende ein-/ausblenden',
     addPerson: 'Person hinzufügen',
     emptyTree: 'Noch keine Personen im Baum.',

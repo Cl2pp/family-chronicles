@@ -178,6 +178,20 @@ export const en = {
     setNewPassword: 'Set new password',
     passwordResetSuccess: 'Password changed. You can sign in now.',
     resetPasswordFailed: 'Could not reset the password',
+    consentIntro: 'I have read the',
+    consentPrivacyPolicy: 'privacy policy',
+    consentOutro:
+      ' and consent to the processing described there — including the processing of my contributions by AI services in the USA.',
+    consentRequired: 'Please accept the privacy policy',
+    googleNeedsSignup:
+      'There is no Familienwerk account for this Google account yet. Please sign up first — the signup page is where you accept our privacy policy.',
+  },
+  consent: {
+    title: 'May we analyze usage?',
+    body: 'We use PostHog (EU servers) to understand how Familienwerk is used and to improve it. Only with your consent — details in the',
+    privacyLink: 'privacy policy.',
+    accept: 'Accept',
+    decline: 'Decline',
   },
   account: {
     title: 'Account',
@@ -270,6 +284,8 @@ export const en = {
     tabAccess: 'Access',
     familiesTitle: 'Families',
     familiesHint: 'Detected automatically from last names, ancestry, and marriages',
+    familiesInteractionHint:
+      'Hover or tap a family to highlight it and everyone connected to it in the tree.',
     familiesToggleAria: 'Toggle families legend',
     addPerson: 'Add person',
     emptyTree: 'No people in the tree yet.',
