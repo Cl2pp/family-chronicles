@@ -11,8 +11,10 @@ export const ANALYTICS_CONSENT_COOKIE = 'fw_analytics_consent';
 export type AnalyticsConsent = 'granted' | 'denied';
 
 /**
- * Fired on `window` when consent is granted mid-session, so components that
- * mounted before analytics started (e.g. PostHogIdentify) can catch up.
+ * Fired on `window` by `startAnalytics()` once PostHog is actually running
+ * after a mid-session grant, so components that mounted before analytics
+ * started (e.g. PostHogIdentify) can catch up. Dispatched AFTER init on
+ * purpose — listeners check `posthog.__loaded`.
  */
 export const ANALYTICS_CONSENT_GRANTED_EVENT = 'fw:analytics-consent-granted';
 
@@ -35,8 +37,5 @@ export function writeAnalyticsConsent(value: AnalyticsConsent): void {
   const secure = window.location.protocol === 'https:' ? '; Secure' : '';
   document.cookie = `${ANALYTICS_CONSENT_COOKIE}=${value}; Max-Age=${MAX_AGE_SECONDS}; Path=/; SameSite=Lax${secure}`;
   window.dispatchEvent(new Event(ANALYTICS_CONSENT_CHANGED_EVENT));
-  if (value === 'granted') {
-    window.dispatchEvent(new Event(ANALYTICS_CONSENT_GRANTED_EVENT));
-  }
 }
 

@@ -67,7 +67,9 @@ function LoginForm() {
         <Alert color="yellow" mb="md">
           {oauthError === 'account_not_linked'
             ? t.auth.accountNotLinked
-            : t.auth.signInFailed}
+            : oauthError === 'signup_disabled'
+              ? t.auth.googleNeedsSignup
+              : t.auth.signInFailed}
         </Alert>
       )}
       <form onSubmit={form.onSubmit(handleSubmit)}>

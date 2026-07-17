@@ -167,6 +167,8 @@ export const en = {
     consentOutro:
       ' and consent to the processing described there — including the processing of my contributions by AI services in the USA.',
     consentRequired: 'Please accept the privacy policy',
+    googleNeedsSignup:
+      'There is no Familienwerk account for this Google account yet. Please sign up first — the signup page is where you accept our privacy policy.',
   },
   consent: {
     title: 'May we analyze usage?',

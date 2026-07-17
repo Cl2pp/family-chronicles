@@ -88,6 +88,12 @@ export const auth = betterAuth({
           google: {
             clientId: env.GOOGLE_CLIENT_ID,
             clientSecret: env.GOOGLE_CLIENT_SECRET,
+            // No implicit account creation from the LOGIN page: signup must go
+            // through the signup form's privacy consent (DSGVO). The signup
+            // page's Google button opts back in via `requestSignUp: true`;
+            // a first-time Google click on /login redirects there with
+            // ?error=signup_disabled instead.
+            disableImplicitSignUp: true,
           },
         },
       }

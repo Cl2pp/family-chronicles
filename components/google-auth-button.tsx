@@ -17,10 +17,18 @@ import { useI18n } from '@/lib/i18n/client';
 export function GoogleAuthButton({
   next,
   beforeStart,
+  requestSignUp,
 }: {
   next: string;
   /** Gate the redirect (e.g. the signup page's privacy-consent checkbox); return false to abort. */
   beforeStart?: () => boolean;
+  /**
+   * Allow creating a new account for this Google identity. Only the signup
+   * page sets this (after its consent checkbox) — the Google provider has
+   * disableImplicitSignUp, so without it unknown users are bounced back to
+   * login with ?error=signup_disabled.
+   */
+  requestSignUp?: boolean;
 }) {
   const { t } = useI18n();
   const [loading, setLoading] = useState(false);
@@ -33,6 +41,7 @@ export function GoogleAuthButton({
     const { error } = await authClient.signIn.social({
       provider: 'google',
       callbackURL: next,
+      requestSignUp,
     });
     // On success the browser is redirected to Google, so we only get here on error.
     if (error) {

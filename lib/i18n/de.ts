@@ -166,6 +166,8 @@ export const de: Dictionary = {
     consentOutro:
       ' gelesen und willige in die dort beschriebene Verarbeitung ein – einschließlich der Verarbeitung meiner Beiträge durch KI-Dienste in den USA.',
     consentRequired: 'Bitte stimme der Datenschutzerklärung zu',
+    googleNeedsSignup:
+      'Für dieses Google-Konto gibt es noch kein Familienwerk-Konto. Bitte registriere dich zuerst – auf der Registrierungsseite bestätigst du auch unsere Datenschutzerklärung.',
   },
   consent: {
     title: 'Dürfen wir die Nutzung analysieren?',

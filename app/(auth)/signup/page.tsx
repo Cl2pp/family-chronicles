@@ -112,6 +112,7 @@ function SignupForm() {
           <GoogleAuthButton
             next={next}
             beforeStart={() => !form.validateField('acceptPrivacy').hasError}
+            requestSignUp
           />
         </Stack>
       </form>

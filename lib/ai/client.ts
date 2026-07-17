@@ -17,12 +17,15 @@ export const openrouter = new OpenAI({
 });
 
 /**
- * OpenRouter routing preferences, spread into EVERY completion request.
- * `data_collection: 'deny'` restricts routing to upstream providers that
- * neither log nor train on prompts — these requests carry family stories and
- * photos (DSGVO, potentially Art. 9 content). `provider` is an OpenRouter
- * extension the OpenAI SDK doesn't type; spreading it in keeps call sites
- * type-checked for everything else.
+ * OpenRouter routing preferences, spread into every completion request that
+ * carries user content (styling, chat agent, book design — i.e. all app/worker
+ * call sites). `data_collection: 'deny'` restricts routing to upstream
+ * providers that neither log nor train on prompts — these requests carry
+ * family stories and photos (DSGVO, potentially Art. 9 content). The demo-seed
+ * script's image calls are deliberately excluded: purely fictional prompts,
+ * and `deny` would narrow image-model availability. `provider` is an
+ * OpenRouter extension the OpenAI SDK doesn't type; spreading it in keeps
+ * call sites type-checked for everything else.
  */
 export const OPENROUTER_ROUTING = {
   provider: { data_collection: 'deny' },
