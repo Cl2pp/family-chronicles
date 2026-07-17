@@ -327,31 +327,33 @@ export function layoutFamilyTree<E extends LayoutEdge>(
     return path;
   };
 
-  let state: Block[][] = sortedGens.map((g) => {
-    const members = people
-      .filter((p) => gen.get(p.id) === g)
-      .map((p) => p.id)
-      .sort(personCmp);
-    const memberSet = new Set(members);
-    const visited = new Set<string>();
-    const blocks: Block[] = [];
-    for (const id of members) {
-      if (visited.has(id)) continue;
-      const comp: string[] = [];
-      const stack = [id];
-      while (stack.length) {
-        const c = stack.pop()!;
-        if (visited.has(c)) continue;
-        visited.add(c);
-        comp.push(c);
-        for (const s of spousesOf.get(c) ?? []) {
-          if (memberSet.has(s) && !visited.has(s)) stack.push(s);
+  const buildBlocks = (): Block[][] =>
+    sortedGens.map((g) => {
+      const members = people
+        .filter((p) => gen.get(p.id) === g)
+        .map((p) => p.id)
+        .sort(personCmp);
+      const memberSet = new Set(members);
+      const visited = new Set<string>();
+      const blocks: Block[] = [];
+      for (const id of members) {
+        if (visited.has(id)) continue;
+        const comp: string[] = [];
+        const stack = [id];
+        while (stack.length) {
+          const c = stack.pop()!;
+          if (visited.has(c)) continue;
+          visited.add(c);
+          comp.push(c);
+          for (const s of spousesOf.get(c) ?? []) {
+            if (memberSet.has(s) && !visited.has(s)) stack.push(s);
+          }
         }
+        blocks.push({ members: orderPath(comp) });
       }
-      blocks.push({ members: orderPath(comp) });
-    }
-    return blocks;
-  });
+      return blocks;
+    });
+  let state: Block[][] = buildBlocks();
 
   const flatPositions = (s: Block[][]): Map<string, number> => {
     const pos = new Map<string, number>();
@@ -390,24 +392,6 @@ export function layoutFamilyTree<E extends LayoutEdge>(
       if (arr) arr.push(child);
       else childrenTouchingRow.set(r, [child]);
     }
-  }
-
-  // Pull stub blocks out of the search state (rowOf keeps everyone). Spouse
-  // edges never cross a stub boundary (a stub spouse tied to the core would
-  // be a second connection, contradicting pendant-ness), so blocks partition
-  // cleanly; rows keep their index, possibly becoming empty for now.
-  const stubBlocksOf = new Map<string, { r: number; block: Block }[]>();
-  if (stubAnchor.size) {
-    state = state.map((row, r) =>
-      row.filter((b) => {
-        const anchor = stubAnchor.get(b.members[0]);
-        if (!anchor) return true;
-        const arr = stubBlocksOf.get(anchor) ?? [];
-        arr.push({ r, block: b });
-        stubBlocksOf.set(anchor, arr);
-        return false;
-      }),
-    );
   }
 
   // ---- Ordering objective over parent connectors, matching what the
@@ -616,7 +600,7 @@ export function layoutFamilyTree<E extends LayoutEdge>(
   // row-local score — same accept decisions for plain moves, none of the
   // clone + full-rescore cost.
   const RELOCATE_WINDOW = 2; // probe target block index ± this many slots
-  const relocate = (s: Block[][], reflow = true): boolean => {
+  const relocate = (s: Block[][], reflow = true, probeSettled = true): boolean => {
     let improved = false;
     let current = reflow ? scoreOf(s) : { crossings: 0, span: 0 };
     for (let r = 0; r < s.length; r++) {
@@ -644,12 +628,13 @@ export function layoutFamilyTree<E extends LayoutEdge>(
         const center =
           b.members.reduce((acc, id) => acc + pos.get(id)!, 0) / b.members.length;
         // In fast mode only off-barycenter blocks are worth a probe. Reflow
-        // mode must probe settled blocks too: a clan can sit exactly at its
-        // barycenter (a local optimum) while a coordinated multi-row move —
-        // the couple relocating AND its descendants following — is strictly
-        // better, e.g. a pendant family hopping out of another family's
-        // sibling run.
-        if (!reflow && Math.abs(center - target) < 1) continue;
+        // mode (with probeSettled) probes settled blocks too: a clan can sit
+        // exactly at its barycenter (a local optimum) while a coordinated
+        // multi-row move — the couple relocating AND its descendants
+        // following — is strictly better, e.g. a pendant family hopping out
+        // of another family's sibling run. The classic candidate keeps the
+        // old unconditional skip so it reproduces the pre-stub engine.
+        if ((!reflow || !probeSettled) && Math.abs(center - target) < 1) continue;
         // Member-coordinate target -> block index in this row.
         let tIdx = row.length - 1;
         let seen = 0;
@@ -717,30 +702,61 @@ export function layoutFamilyTree<E extends LayoutEdge>(
   const clone = (s: Block[][]): Block[][] =>
     s.map((row) => row.map((b) => ({ members: [...b.members] })));
 
-  let best = clone(state);
-  let bestScore = scoreOf(state);
-  for (let it = 0; it < ORDER_SWEEPS; it++) {
-    const downChanged = sweep(state, 'down');
-    const upChanged = sweep(state, 'up');
-    const c = scoreOf(state);
-    if (scoreBetter(c, bestScore)) {
-      bestScore = c;
-      best = clone(state);
-    }
-    if (!downChanged && !upChanged) break;
-  }
-  state = best;
-  for (let it = 0; it < TRANSPOSE_ROUNDS; it++) {
-    const t = transpose(state);
-    const r = relocate(state);
-    if (!t && !r) break;
-  }
+  // ---- One full ordering pipeline: barycenter sweeps, transpose/relocate,
+  // and (for the stub-anchored candidate) stub re-insertion plus polish.
+  // `withStubs: false, probeSettled: false` reproduces the classic pre-stub
+  // engine on the same helpers.
+  const runOrdering = (
+    s0: Block[][],
+    withStubs: boolean,
+    probeSettled: boolean,
+  ): Block[][] => {
+    let s = s0;
 
-  // ---- Stub re-insertion. The core order is settled without any stub
-  // pulling on its marry-in; hang each pendant unit back in, block by block
-  // from the anchor outward, each block at the barycenter slot of its
-  // already-placed kin — the core order itself is never permuted.
-  if (stubBlocksOf.size) {
+    // Pull stub blocks out of the search state (rowOf keeps everyone).
+    // Spouse edges never cross a stub boundary (a stub spouse tied to the
+    // core would be a second connection, contradicting pendant-ness), so
+    // blocks partition cleanly; rows keep their index, possibly empty for
+    // now.
+    const stubBlocksOf = new Map<string, { r: number; block: Block }[]>();
+    if (withStubs && stubAnchor.size) {
+      s = s.map((row, r) =>
+        row.filter((b) => {
+          const anchor = stubAnchor.get(b.members[0]);
+          if (!anchor) return true;
+          const arr = stubBlocksOf.get(anchor) ?? [];
+          arr.push({ r, block: b });
+          stubBlocksOf.set(anchor, arr);
+          return false;
+        }),
+      );
+    }
+
+    let best = clone(s);
+    let bestScore = scoreOf(s);
+    for (let it = 0; it < ORDER_SWEEPS; it++) {
+      const downChanged = sweep(s, 'down');
+      const upChanged = sweep(s, 'up');
+      const c = scoreOf(s);
+      if (scoreBetter(c, bestScore)) {
+        bestScore = c;
+        best = clone(s);
+      }
+      if (!downChanged && !upChanged) break;
+    }
+    s = best;
+    for (let it = 0; it < TRANSPOSE_ROUNDS; it++) {
+      const t = transpose(s);
+      const r = relocate(s, true, probeSettled);
+      if (!t && !r) break;
+    }
+
+    // ---- Stub re-insertion. The core order is settled without any stub
+    // pulling on its marry-in; hang each pendant unit back in, block by
+    // block from the anchor outward, each block at the barycenter slot of
+    // its already-placed kin — the core order itself is never permuted.
+    if (!stubBlocksOf.size) return s;
+    const state = s;
     const pos0 = flatPositions(state);
     const anchors = [...stubBlocksOf.keys()].sort(
       (a, b) => cmpNum(pos0.get(a) ?? 0, pos0.get(b) ?? 0) || (a < b ? -1 : 1),
@@ -874,15 +890,20 @@ export function layoutFamilyTree<E extends LayoutEdge>(
     };
     fastConverge();
     for (let round = 0; round < 3; round++) {
-      if (!relocate(state)) break;
+      if (!relocate(state, true, probeSettled)) break;
       fastConverge();
     }
-  }
+    return state;
+  };
 
-  // Final orientation pass against the settled neighbours, keyed by parents.
-  {
-    const pos = flatPositions(state);
-    for (const row of state) {
+  // Final orientation pass against the settled neighbours, keyed by
+  // parents. Runs per candidate (inside the pipeline, not after selection):
+  // reversing a block's members moves individual child positions, so
+  // orientation shifts the crossing count — candidates must be compared on
+  // what will actually be drawn.
+  const orientState = (s: Block[][]) => {
+    const pos = flatPositions(s);
+    for (const row of s) {
       const mKey = new Map<string, number | null>();
       for (const b of row) {
         for (const id of b.members) {
@@ -897,6 +918,23 @@ export function layoutFamilyTree<E extends LayoutEdge>(
       }
       orientBlocks(row, mKey);
     }
+  };
+
+  // ---- Candidate selection. The stub-anchored pipeline wins on the shapes
+  // it was built for, but on ~5% of arbitrary trees the core-without-stubs
+  // order settles into a basin the bounded re-insertion windows cannot fix,
+  // ending worse than the classic joint search. Where trees are small
+  // enough that a second full ordering is cheap, run the classic pipeline
+  // too and keep the better result (ties keep classic) — layouts are then
+  // never worse than the pre-stub engine. Above the cap the stub pipeline
+  // consistently beat the classic one on the benchmark, so it stands alone.
+  const DUAL_ORDERING_MAX_PEOPLE = 300;
+  state = runOrdering(state, true, true);
+  orientState(state);
+  if (people.length <= DUAL_ORDERING_MAX_PEOPLE) {
+    const classic = runOrdering(buildBlocks(), false, false);
+    orientState(classic);
+    if (!scoreBetter(scoreOf(state), scoreOf(classic))) state = classic;
   }
 
   // ---- X placement. Blocks get a left edge; iterate: desired position =
