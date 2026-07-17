@@ -15,3 +15,15 @@ export const openrouter = new OpenAI({
     'X-Title': 'Familienwerk',
   },
 });
+
+/**
+ * OpenRouter routing preferences, spread into EVERY completion request.
+ * `data_collection: 'deny'` restricts routing to upstream providers that
+ * neither log nor train on prompts — these requests carry family stories and
+ * photos (DSGVO, potentially Art. 9 content). `provider` is an OpenRouter
+ * extension the OpenAI SDK doesn't type; spreading it in keeps call sites
+ * type-checked for everything else.
+ */
+export const OPENROUTER_ROUTING = {
+  provider: { data_collection: 'deny' },
+} as const;

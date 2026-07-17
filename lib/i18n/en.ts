@@ -162,6 +162,18 @@ export const en = {
     verificationSent: 'Confirmation email sent',
     accountNotLinked:
       'An account with this email already exists, but its address has not been confirmed yet. Sign in with your password and confirm your email first — then Google sign-in will work.',
+    consentIntro: 'I have read the',
+    consentPrivacyPolicy: 'privacy policy',
+    consentOutro:
+      ' and consent to the processing described there — including the processing of my contributions by AI services in the USA.',
+    consentRequired: 'Please accept the privacy policy',
+  },
+  consent: {
+    title: 'May we analyze usage?',
+    body: 'We use PostHog (EU servers) to understand how Familienwerk is used and to improve it. Only with your consent — details in the',
+    privacyLink: 'privacy policy.',
+    accept: 'Accept',
+    decline: 'Decline',
   },
   account: {
     title: 'Account',

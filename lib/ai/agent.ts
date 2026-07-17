@@ -3,7 +3,7 @@ import type {
   ChatCompletionMessageParam,
 } from 'openai/resources/chat/completions';
 import { env } from '@/lib/env';
-import { openrouter } from './client';
+import { openrouter, OPENROUTER_ROUTING } from './client';
 import {
   toOpenAISchemas,
   tools,
@@ -291,6 +291,7 @@ async function runToolLoop(
           messages: withCacheBreakpoints(messages),
           tools: schemas,
           tool_choice: lastStep ? 'none' : 'auto',
+          ...OPENROUTER_ROUTING,
         }),
       );
     } catch (err) {
@@ -395,6 +396,7 @@ async function recoverEmptyReply(
         ]),
         tools: schemas,
         tool_choice: 'none',
+        ...OPENROUTER_ROUTING,
       }),
     );
     const reply = (completion.choices[0]?.message?.content ?? '').trim();

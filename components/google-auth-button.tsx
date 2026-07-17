@@ -14,13 +14,21 @@ import { useI18n } from '@/lib/i18n/client';
  * in lib/auth.ts). Clicking hands off to better-auth's social sign-in, which
  * redirects to Google and back to `next` on success.
  */
-export function GoogleAuthButton({ next }: { next: string }) {
+export function GoogleAuthButton({
+  next,
+  beforeStart,
+}: {
+  next: string;
+  /** Gate the redirect (e.g. the signup page's privacy-consent checkbox); return false to abort. */
+  beforeStart?: () => boolean;
+}) {
   const { t } = useI18n();
   const [loading, setLoading] = useState(false);
 
   if (process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED !== 'true') return null;
 
   async function handleClick() {
+    if (beforeStart && !beforeStart()) return;
     setLoading(true);
     const { error } = await authClient.signIn.social({
       provider: 'google',

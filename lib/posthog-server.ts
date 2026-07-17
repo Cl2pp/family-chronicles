@@ -1,5 +1,7 @@
+import { cookies } from 'next/headers';
 import { PostHog } from 'posthog-node';
 import { env } from '@/lib/env';
+import { ANALYTICS_CONSENT_COOKIE } from '@/lib/analytics-consent';
 
 let posthogClient: PostHog | null = null;
 
@@ -22,15 +24,28 @@ function getClient(): PostHog {
  * the user action that emits it: `capture` only enqueues (with flushAt: 1 the
  * client kicks off its own error-swallowed background flush), so nothing here
  * awaits the network — do NOT add a `flush()` to the call path.
+ *
+ * Consent-gated (Art. 6 Abs. 1 lit. a DSGVO): an event is only captured when
+ * the request carries the granted-consent cookie set by the consent banner.
+ * Outside a request scope there is no consent signal, so the event is dropped.
  */
 export function captureServerEvent(
   distinctId: string,
   event: string,
   properties?: Record<string, unknown>,
 ): void {
-  try {
-    getClient().capture({ distinctId, event, properties });
-  } catch (err) {
-    console.error(`PostHog capture failed for ${event}:`, err);
-  }
+  void (async () => {
+    let consent: string | undefined;
+    try {
+      consent = (await cookies()).get(ANALYTICS_CONSENT_COOKIE)?.value;
+    } catch {
+      return; // no request scope → treat as "no consent"
+    }
+    if (consent !== 'granted') return;
+    try {
+      getClient().capture({ distinctId, event, properties });
+    } catch (err) {
+      console.error(`PostHog capture failed for ${event}:`, err);
+    }
+  })();
 }

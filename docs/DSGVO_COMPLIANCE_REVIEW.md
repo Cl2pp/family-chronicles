@@ -276,9 +276,9 @@ section — standard practice).
 
 | # | Item | Effort |
 |---|---|---|
-| 1 | C1: decide consent banner vs. cookieless PostHog; implement; fix policy §7/§9 (until then: unset key in prod) | S–M |
-| 2 | C3: privacy link + explicit consent checkbox at signup | S |
-| 3 | H2: OpenRouter `data_collection: 'deny'` + account-level logging off; Groq retention check | S |
+| 1 | C1: consent banner chosen and **✅ implemented** (opt-in banner, consent cookie honored client- and server-side, withdrawal widget on /datenschutz, policy §4/§7/§9 updated) | S–M |
+| 2 | C3: **✅ implemented** (signup consent checkbox gating email and Google signup, legal links on auth pages) | S |
+| 3 | H2: OpenRouter `data_collection: 'deny'` **✅ implemented** on all completion calls; still open: account-level logging off (admin), Groq retention check | S |
 | 4 | C2: account deletion routine (incl. FK strategy, R2 cleanup, PostHog erasure) + chronicle/person deletion | M–L |
 | 5 | H1: collect/sign all DPAs (Hetzner, Cloudflare, PostHog, Resend, OpenRouter, Groq); update policy processor list | S (admin) |
 | 6 | H3: EU representative for the Swiss AG; add to policy | S (admin) |

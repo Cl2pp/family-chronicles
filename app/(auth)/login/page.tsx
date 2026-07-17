@@ -51,7 +51,7 @@ function LoginForm() {
     }
     // The user_signed_in event is captured server-side (lib/auth.ts hooks);
     // identify here just ties the anonymous browser session to the account.
-    if (data?.user) {
+    if (data?.user && posthog.__loaded) {
       posthog.identify(data.user.id, { name: data.user.name, email: data.user.email });
     }
     router.push(next);

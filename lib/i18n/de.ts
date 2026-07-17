@@ -161,6 +161,18 @@ export const de: Dictionary = {
     verificationSent: 'Bestätigungs-E-Mail gesendet',
     accountNotLinked:
       'Es gibt bereits ein Konto mit dieser E-Mail-Adresse, aber sie ist noch nicht bestätigt. Melde dich mit deinem Passwort an und bestätige zuerst deine E-Mail – danach funktioniert die Google-Anmeldung.',
+    consentIntro: 'Ich habe die',
+    consentPrivacyPolicy: 'Datenschutzerklärung',
+    consentOutro:
+      ' gelesen und willige in die dort beschriebene Verarbeitung ein – einschließlich der Verarbeitung meiner Beiträge durch KI-Dienste in den USA.',
+    consentRequired: 'Bitte stimme der Datenschutzerklärung zu',
+  },
+  consent: {
+    title: 'Dürfen wir die Nutzung analysieren?',
+    body: 'Wir verwenden PostHog (EU-Server), um zu verstehen, wie Familienwerk genutzt wird, und es zu verbessern. Nur mit deiner Einwilligung – Details in der',
+    privacyLink: 'Datenschutzerklärung.',
+    accept: 'Einwilligen',
+    decline: 'Ablehnen',
   },
   account: {
     title: 'Konto',
