@@ -68,6 +68,16 @@ const schema = z.object({
   /** System Chromium for the book renderer (set in Docker; empty = puppeteer's own). */
   PUPPETEER_EXECUTABLE_PATH: z.string().optional(),
 
+  // Analytics (PostHog, EU project). Optional: without the key both the
+  // browser and server clients disable themselves into no-ops. NEXT_PUBLIC_
+  // because the browser bundle needs the key inlined at build time
+  // (instrumentation-client.ts must reference process.env directly for that);
+  // the server reads both through here.
+  NEXT_PUBLIC_POSTHOG_KEY: z.string().min(1).optional(),
+  // Explicit EU default — posthog-node would otherwise fall back to the US
+  // ingestion host and server events would silently land in the wrong region.
+  NEXT_PUBLIC_POSTHOG_HOST: z.string().url().default('https://eu.i.posthog.com'),
+
   // Object storage (S3-compatible)
   S3_ENDPOINT: z.string().url(),
   S3_REGION: z.string().default('auto'),

@@ -18,13 +18,15 @@ import {
 import { IconArrowLeft, IconInfoCircle, IconMail } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
-import type { BookQuote } from '@/lib/gelato';
+import type { BookFormat, BookQuote } from '@/lib/gelato';
 import type { BookStatus } from '@/lib/books';
 import { renderPreviewAction } from '../../actions';
+import posthog from 'posthog-js';
 
 interface OrderBook {
   id: string;
   title: string;
+  format: BookFormat;
   formatLabel: string;
   pageCount: number;
   storyCount: number;
@@ -215,7 +217,13 @@ export function OrderView({
             <Text fz={13}>{to.howToOrderBody(contactEmail)}</Text>
           </Alert>
 
-          <Button size="lg" component="a" href={mailtoHref} leftSection={<IconMail size={18} />}>
+          <Button
+            size="lg"
+            component="a"
+            href={mailtoHref}
+            leftSection={<IconMail size={18} />}
+            onClick={() => posthog.capture('book_order_email_opened', { book_id: book.id, format: book.format })}
+          >
             {to.emailCta}
           </Button>
           <Text fz={12} c="dimmed" ta="center">

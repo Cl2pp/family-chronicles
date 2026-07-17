@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { getSession } from '@/lib/session';
 import { acceptInvitation } from '@/lib/invitations';
+import { captureServerEvent } from '@/lib/posthog-server';
 
 /** Explicit accept from the confirmation screen — the only place a token is redeemed. */
 export async function acceptInviteAction(token: string) {
@@ -14,6 +15,9 @@ export async function acceptInviteAction(token: string) {
   const result = await acceptInvitation(token, session.user.id);
   // Failures re-render the invite page, which re-reads the state (used/expired).
   if (!result.ok) redirect(`/invite/${token}`);
+
+  captureServerEvent(session.user.id, 'invite_accepted');
+
   if (result.personLinked) redirect(`/invite/${token}?outcome=linked`);
   if (result.personLinkFailed) redirect(`/invite/${token}?outcome=link-failed`);
   redirect('/chronicle');

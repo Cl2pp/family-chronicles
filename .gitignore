@@ -43,3 +43,4 @@ next-env.d.ts
 # deployment stamp (generated in the Docker build; never committed)
 .deployment-id
 seed-demo-images/
+.env.local

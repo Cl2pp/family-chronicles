@@ -36,6 +36,7 @@ import { transcribeAudio } from '@/lib/ai/groq';
 import { enqueueTranscode } from '@/lib/queue';
 import { buildChatMessages } from './messages';
 import type { Msg } from './types';
+import { captureServerEvent } from '@/lib/posthog-server';
 
 /** Throw unless the user can contribute to the chronicle (create stories / tree). */
 async function assertContributor(chronicleId: string, userId: string) {
@@ -333,6 +334,10 @@ export async function sendVoiceMessage(input: {
       console.error(`Failed to enqueue transcode for ${input.s3Key}:`, err);
     }
 
+    captureServerEvent(user.id, 'voice_message_sent', {
+      duration_sec: input.durationSec ?? null,
+    });
+
     const result = await respondAndStore(conversationId, ctx, previousChronicleId);
     return { ...result, transcript };
   } finally {
@@ -399,6 +404,11 @@ export async function acceptStory(input: {
   });
   if (saved.alreadySaved) return { storyId: saved.storyId };
 
+  captureServerEvent(user.id, 'story_accepted', {
+    story_id: saved.storyId,
+    chronicle_id: input.chronicleId,
+  });
+
   if (conversationId) {
     // The receipt on the note renders as a persistent ✓ chip in the chat.
     const chronicle = await getChronicle(input.chronicleId);
@@ -441,6 +451,8 @@ export async function applyStoryUpdate(input: {
     appendSource: p.sourceText ?? null,
   });
   if (!result.ok) throw new Error(result.error);
+
+  captureServerEvent(user.id, 'story_updated', { story_id: input.storyId });
 
   // Only write the note if the conversation belongs to the caller.
   const convo = input.conversationId ? await getConversation(input.conversationId) : null;
