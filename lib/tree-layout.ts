@@ -9,6 +9,15 @@
  *   components are aligned by birth year (~30 years per generation).
  * - Couples stay adjacent: each row is a sequence of "blocks" (spouse-connected
  *   groups); ordering and placement move blocks, never split them.
+ * - Ancestor stubs are anchored, not searched: a subtree whose only tie to
+ *   the rest of the graph is one parent edge into a marry-in (the marry-in's
+ *   own parents, grandparents, …) is pulled out before ordering and, once the
+ *   dense core has settled, re-inserted directly above its single descendant.
+ *   Left inside the search, the stub gives the marry-in an upward anchor that
+ *   the barycenter sweeps chase across the whole interlocked row — the local
+ *   move set (adjacent swaps, ±2 relocation) can never walk a multi-row unit
+ *   back over its anchor, so the search parks in crossing-heavy minima
+ *   (see docs/TREE_LAYOUT_CROSSINGS_PLAN.md for the full diagnosis).
  * - Row order comes from iterated down/up barycenter sweeps followed by a
  *   transpose pass (adjacent swaps) and a relocation pass (a block may jump
  *   anywhere in its row). Both accept a move on the lexicographic objective
@@ -231,6 +240,68 @@ export function layoutFamilyTree<E extends LayoutEdge>(
     return false;
   };
 
+  // ---- Ancestor stubs. For each person with recorded parents AND their own
+  // spouse/children, walk the kinship graph from the parents without stepping
+  // onto that person: if the walk never reaches their spouse or children, the
+  // ancestor side hangs off them alone (a pendant) and is extracted from the
+  // ordering search, to be re-inserted directly above its anchor once the
+  // core order has settled. Nested pendants collapse into the outermost one.
+  // Only pendants that live entirely ABOVE the anchor qualify: a pendant
+  // carrying the anchor's siblings and their descendants is a real clan the
+  // main search handles well (and needs to see) — the pathological case is
+  // purely upward pull, which the local move set cannot walk back.
+  const stubAnchor = new Map<string, string>(); // stub member -> anchor id
+  {
+    const kinOf = (id: string): string[] => [
+      ...(parentsOf.get(id) ?? []),
+      ...(childrenOf.get(id) ?? []),
+      ...(spousesOf.get(id) ?? []),
+    ];
+    const reaches: { m: string; reach: Set<string> }[] = [];
+    for (const m of [...ids].sort()) {
+      const ps = parentsOf.get(m) ?? [];
+      const stop = [...(spousesOf.get(m) ?? []), ...(childrenOf.get(m) ?? [])];
+      if (!ps.length || !stop.length) continue;
+      const stopSet = new Set(stop);
+      const reach = new Set<string>();
+      const queue = [...ps];
+      let pendant = true;
+      while (queue.length) {
+        const cur = queue.pop()!;
+        if (cur === m || reach.has(cur)) continue;
+        if (stopSet.has(cur)) {
+          pendant = false;
+          break;
+        }
+        reach.add(cur);
+        for (const n of kinOf(cur)) if (n !== m && !reach.has(n)) queue.push(n);
+      }
+      if (!pendant || !reach.size) continue;
+      const gm = gen.get(m)!;
+      let above = true;
+      for (const p of reach) {
+        if ((gen.get(p) ?? gm) >= gm) {
+          above = false;
+          break;
+        }
+      }
+      if (above) reaches.push({ m, reach });
+    }
+    reaches.sort((a, b) => b.reach.size - a.reach.size || (a.m < b.m ? -1 : 1));
+    for (const { m, reach } of reaches) {
+      if (stubAnchor.has(m)) continue; // inside a larger stub already
+      let overlaps = false;
+      for (const p of reach) {
+        if (stubAnchor.has(p)) {
+          overlaps = true;
+          break;
+        }
+      }
+      if (overlaps) continue;
+      for (const p of reach) stubAnchor.set(p, m);
+    }
+  }
+
   // ---- Rows and blocks. A block is a spouse-connected component within a
   // row, arranged as a path so married partners are always adjacent.
   const sortedGens = [...new Set(gen.values())].sort((a, b) => a - b);
@@ -296,6 +367,49 @@ export function layoutFamilyTree<E extends LayoutEdge>(
     row.forEach((b) => b.members.forEach((id) => rowOf.set(id, r))),
   );
 
+  // Person -> block. Blocks never split or merge during the search (only
+  // their order changes, and orientation reverses members in place), so this
+  // is computed once; presence in the current search state is tested via the
+  // position map instead.
+  const blockOfAll = new Map<string, Block>();
+  for (const row of state) for (const b of row) for (const id of b.members) blockOfAll.set(id, b);
+
+  // Row -> children whose connector touches it (as child side or via a
+  // parent's row) — lets the row-local score visit only relevant edges.
+  const childrenTouchingRow = new Map<number, string[]>();
+  for (const [child, ps] of parentsOf) {
+    const rc = rowOf.get(child);
+    if (rc === undefined) continue;
+    const rs = new Set([rc]);
+    for (const p of ps) {
+      const rp = rowOf.get(p);
+      if (rp !== undefined) rs.add(rp);
+    }
+    for (const r of rs) {
+      const arr = childrenTouchingRow.get(r);
+      if (arr) arr.push(child);
+      else childrenTouchingRow.set(r, [child]);
+    }
+  }
+
+  // Pull stub blocks out of the search state (rowOf keeps everyone). Spouse
+  // edges never cross a stub boundary (a stub spouse tied to the core would
+  // be a second connection, contradicting pendant-ness), so blocks partition
+  // cleanly; rows keep their index, possibly becoming empty for now.
+  const stubBlocksOf = new Map<string, { r: number; block: Block }[]>();
+  if (stubAnchor.size) {
+    state = state.map((row, r) =>
+      row.filter((b) => {
+        const anchor = stubAnchor.get(b.members[0]);
+        if (!anchor) return true;
+        const arr = stubBlocksOf.get(anchor) ?? [];
+        arr.push({ r, block: b });
+        stubBlocksOf.set(anchor, arr);
+        return false;
+      }),
+    );
+  }
+
   // ---- Ordering objective over parent connectors, matching what the
   // renderer draws: parents in the same couple block emit ONE union edge from
   // their midpoint (two per-parent edges to two children would otherwise
@@ -317,31 +431,43 @@ export function layoutFamilyTree<E extends LayoutEdge>(
     a.crossings !== b.crossings
       ? a.crossings < b.crossings
       : a.span < b.span - SPAN_EPSILON;
-  const scoreOf = (s: Block[][]): OrderScore => {
+  // With `onlyRow`, only connector groups touching that row (as parent or
+  // child side) are scored: a move within one row leaves every other group
+  // untouched, so comparing local scores compares the global ones — at a
+  // fraction of the cost on wide trees.
+  const scoreOf = (s: Block[][], onlyRow?: number): OrderScore => {
     const pos = flatPositions(s);
-    const blockOf = new Map<string, Block>();
-    for (const row of s) for (const b of row) for (const id of b.members) blockOf.set(id, b);
     const groups = new Map<string, [number, number][]>();
     let span = 0;
-    for (const [child, ps] of parentsOf) {
+    const childList =
+      onlyRow === undefined
+        ? parentsOf.keys()
+        : (childrenTouchingRow.get(onlyRow) ?? []);
+    for (const child of childList) {
+      const ps = parentsOf.get(child)!;
       const rc = rowOf.get(child);
       if (rc === undefined) continue;
       // One union source per (parent block, child): midpoint of the parents
-      // of this child that share the block.
+      // of this child that share the block. Trial states carry copied Block
+      // objects, but membership is what groups parents — the original block
+      // identity from blockOfAll works for copies too.
       const perBlock = new Map<Block, number[]>();
       for (const p of ps) {
-        const b = blockOf.get(p);
-        if (!b || rowOf.get(p) === undefined) continue;
+        const px = pos.get(p);
+        if (px === undefined) continue; // extracted stub member
+        const b = blockOfAll.get(p)!;
         const arr = perBlock.get(b) ?? [];
-        arr.push(pos.get(p)!);
+        arr.push(px);
         perBlock.set(b, arr);
       }
+      const cx = pos.get(child);
+      if (cx === undefined) continue; // extracted stub member
       for (const [b, xs] of perBlock) {
         const rp = rowOf.get(b.members[0])!;
+        if (onlyRow !== undefined && rp !== onlyRow && rc !== onlyRow) continue;
         const key = `${rp}:${rc}`;
         const arr = groups.get(key) ?? [];
         const ux = xs.reduce((sum, v) => sum + v, 0) / xs.length;
-        const cx = pos.get(child)!;
         arr.push([ux, cx]);
         groups.set(key, arr);
         span += 2 ** Math.min(s.length - 1 - rc, 32) * Math.abs(ux - cx);
@@ -455,15 +581,19 @@ export function layoutFamilyTree<E extends LayoutEdge>(
   };
 
   // ---- Transpose: swap adjacent blocks while the score strictly improves.
+  // A swap only perturbs connector groups touching its own row, so the
+  // accept test runs on the row-local score.
   const transpose = (s: Block[][]): boolean => {
     let improved = false;
-    let current = scoreOf(s);
-    for (const row of s) {
+    for (let r = 0; r < s.length; r++) {
+      const row = s[r];
+      if (row.length < 2) continue;
+      let rowScore = scoreOf(s, r);
       for (let bi = 0; bi + 1 < row.length; bi++) {
         [row[bi], row[bi + 1]] = [row[bi + 1], row[bi]];
-        const c = scoreOf(s);
-        if (scoreBetter(c, current)) {
-          current = c;
+        const c = scoreOf(s, r);
+        if (scoreBetter(c, rowScore)) {
+          rowScore = c;
           improved = true;
         } else {
           [row[bi], row[bi + 1]] = [row[bi + 1], row[bi]];
@@ -481,10 +611,14 @@ export function layoutFamilyTree<E extends LayoutEdge>(
   // below re-flowed by a top-down barycenter pass — moving a couple only
   // pays off once their descendants follow, which no single-row move can
   // express.
+  // With `reflow: false` (the post-insertion polish), the expensive cloned
+  // reflow trial is skipped and plain moves are tested in place against the
+  // row-local score — same accept decisions for plain moves, none of the
+  // clone + full-rescore cost.
   const RELOCATE_WINDOW = 2; // probe target block index ± this many slots
-  const relocate = (s: Block[][]): boolean => {
+  const relocate = (s: Block[][], reflow = true): boolean => {
     let improved = false;
-    let current = scoreOf(s);
+    let current = reflow ? scoreOf(s) : { crossings: 0, span: 0 };
     for (let r = 0; r < s.length; r++) {
       const row = s[r];
       for (let bi = 0; bi < row.length; bi++) {
@@ -509,7 +643,13 @@ export function layoutFamilyTree<E extends LayoutEdge>(
         const target = sum / n;
         const center =
           b.members.reduce((acc, id) => acc + pos.get(id)!, 0) / b.members.length;
-        if (Math.abs(center - target) < 1) continue;
+        // In fast mode only off-barycenter blocks are worth a probe. Reflow
+        // mode must probe settled blocks too: a clan can sit exactly at its
+        // barycenter (a local optimum) while a coordinated multi-row move —
+        // the couple relocating AND its descendants following — is strictly
+        // better, e.g. a pendant family hopping out of another family's
+        // sibling run.
+        if (!reflow && Math.abs(center - target) < 1) continue;
         // Member-coordinate target -> block index in this row.
         let tIdx = row.length - 1;
         let seen = 0;
@@ -520,13 +660,34 @@ export function layoutFamilyTree<E extends LayoutEdge>(
             break;
           }
         }
-        let bestState: Block[][] | null = null;
-        let bestScore = current;
         const lo = Math.max(0, tIdx - RELOCATE_WINDOW);
         const hi = Math.min(row.length - 1, tIdx + RELOCATE_WINDOW);
+        if (!reflow) {
+          let local = scoreOf(s, r);
+          let bestAt = -1;
+          const [moved] = row.splice(bi, 1);
+          for (let bj = lo; bj <= hi; bj++) {
+            if (bj === bi) continue;
+            row.splice(bj, 0, moved);
+            const sc = scoreOf(s, r);
+            row.splice(bj, 1);
+            if (scoreBetter(sc, local)) {
+              local = sc;
+              bestAt = bj;
+            }
+          }
+          row.splice(bestAt >= 0 ? bestAt : bi, 0, moved);
+          if (bestAt >= 0) improved = true;
+          continue;
+        }
+        let bestState: Block[][] | null = null;
+        let bestScore = current;
         for (let bj = lo; bj <= hi; bj++) {
           if (bj === bi) continue;
-          const trial = clone(s);
+          // Rows above r are only read by the trial — share them.
+          const trial = s.map((rw, q) =>
+            q < r ? rw : rw.map((b) => ({ members: [...b.members] })),
+          );
           const [moved] = trial[r].splice(bi, 1);
           trial[r].splice(bj, 0, moved);
           const plain = scoreOf(trial);
@@ -573,6 +734,149 @@ export function layoutFamilyTree<E extends LayoutEdge>(
     const t = transpose(state);
     const r = relocate(state);
     if (!t && !r) break;
+  }
+
+  // ---- Stub re-insertion. The core order is settled without any stub
+  // pulling on its marry-in; hang each pendant unit back in, block by block
+  // from the anchor outward, each block at the barycenter slot of its
+  // already-placed kin — the core order itself is never permuted.
+  if (stubBlocksOf.size) {
+    const pos0 = flatPositions(state);
+    const anchors = [...stubBlocksOf.keys()].sort(
+      (a, b) => cmpNum(pos0.get(a) ?? 0, pos0.get(b) ?? 0) || (a < b ? -1 : 1),
+    );
+    const inserted: { r: number; block: Block }[] = [];
+    // Mean placed-kin position of a block, ignoring same-row kin.
+    const kinKey = (block: Block, r: number, pos: Map<string, number>): number | null => {
+      let sum = 0;
+      let n = 0;
+      for (const id of block.members) {
+        for (const k of [...(parentsOf.get(id) ?? []), ...(childrenOf.get(id) ?? [])]) {
+          if (rowOf.get(k) === r) continue;
+          const p = pos.get(k);
+          if (p !== undefined) {
+            sum += p;
+            n++;
+          }
+        }
+      }
+      return n ? sum / n : null;
+    };
+    for (const anchor of anchors) {
+      const ar = rowOf.get(anchor)!;
+      const pending = [...stubBlocksOf.get(anchor)!].sort(
+        (a, b) =>
+          cmpNum(Math.abs(a.r - ar), Math.abs(b.r - ar)) ||
+          personCmp(a.block.members[0], b.block.members[0]),
+      );
+      while (pending.length) {
+        const pos = flatPositions(state);
+        let pick = 0;
+        let desired: number | null = null;
+        for (let i = 0; i < pending.length; i++) {
+          desired = kinKey(pending[i].block, pending[i].r, pos);
+          if (desired !== null) {
+            pick = i;
+            break;
+          }
+        }
+        const { r, block } = pending.splice(pick, 1)[0];
+        const row = state[r];
+        // Estimate: before the first keyed core block whose kin barycenter
+        // exceeds ours (unkeyed blocks are skipped for the comparison) —
+        // then let the real objective pick among the slots around it, so
+        // stubs hanging near the same anchor don't stack in arbitrary order.
+        let insertAt = row.length;
+        let lastKeyed = -1;
+        if (desired !== null) {
+          for (let bi = 0; bi < row.length; bi++) {
+            const key = kinKey(row[bi], r, pos);
+            if (key === null) continue;
+            if (key > desired) {
+              insertAt = bi;
+              break;
+            }
+            lastKeyed = bi;
+          }
+          if (insertAt === row.length && lastKeyed >= 0) insertAt = lastKeyed + 1;
+        }
+        // Refine within a window by CROSSINGS only — the span term is
+        // computed against a partially re-inserted state and its 2^depth
+        // top-row weighting misleads deep stubs; crossings are always real.
+        // Ties keep the slot closest to the barycenter estimate.
+        let bestAt = insertAt;
+        if (row.length) {
+          let bestCross = Number.POSITIVE_INFINITY;
+          const lo = Math.max(0, insertAt - RELOCATE_WINDOW);
+          const hi = Math.min(row.length, insertAt + RELOCATE_WINDOW);
+          const slots = [...Array(hi - lo + 1)].map((_, i) => lo + i);
+          slots.sort(
+            (a, b) => cmpNum(Math.abs(a - insertAt), Math.abs(b - insertAt)) || cmpNum(a, b),
+          );
+          for (const at of slots) {
+            row.splice(at, 0, block);
+            const c = scoreOf(state, r).crossings;
+            row.splice(at, 1);
+            if (c < bestCross) {
+              bestCross = c;
+              bestAt = at;
+            }
+          }
+        }
+        row.splice(bestAt, 0, block);
+        inserted.push({ r, block });
+      }
+    }
+
+    // Refine each stub block against the now-complete state: barycenter
+    // insertion is blind to stubs placed after it, so slide every stub
+    // block within a window of its slot and keep strict improvements on
+    // the full objective. Scoring mid-insertion instead is tempting but
+    // biased — later stubs' edges don't exist yet.
+    const STUB_REFINE_ROUNDS = 4;
+    const STUB_REFINE_WINDOW = 2 * RELOCATE_WINDOW;
+    for (let round = 0; round < STUB_REFINE_ROUNDS; round++) {
+      let improved = false;
+      for (const { r, block } of inserted) {
+        const row = state[r];
+        const bi = row.indexOf(block);
+        let current = scoreOf(state, r);
+        row.splice(bi, 1);
+        let bestAt = bi;
+        const lo = Math.max(0, bi - STUB_REFINE_WINDOW);
+        const hi = Math.min(row.length, bi + STUB_REFINE_WINDOW);
+        for (let at = lo; at <= hi; at++) {
+          row.splice(at, 0, block);
+          const sc = scoreOf(state, r);
+          row.splice(at, 1);
+          if (scoreBetter(sc, current)) {
+            current = sc;
+            bestAt = at;
+            improved = true;
+          }
+        }
+        row.splice(bestAt, 0, block);
+      }
+      if (!improved) break;
+    }
+
+    // Then the usual strict-improvement transpose/relocate polish over the
+    // full state.
+    // Cheap in-place rounds burn down the easy wins; a bounded number of
+    // expensive reflow rounds then escape the multi-row minima, each
+    // followed by another cheap converge.
+    const fastConverge = () => {
+      for (let it = 0; it < TRANSPOSE_ROUNDS; it++) {
+        const t = transpose(state);
+        const r = relocate(state, false);
+        if (!t && !r) break;
+      }
+    };
+    fastConverge();
+    for (let round = 0; round < 3; round++) {
+      if (!relocate(state)) break;
+      fastConverge();
+    }
   }
 
   // Final orientation pass against the settled neighbours, keyed by parents.
