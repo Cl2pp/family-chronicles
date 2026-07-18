@@ -2,22 +2,21 @@ import { attachmentsByMessage, listMessages } from '@/lib/conversations';
 import { presignGet } from '@/lib/s3';
 import type { Receipt, StoryDraft } from '@/lib/ai/tools';
 import type { PeopleDraft } from '@/lib/people-changes';
+import type { VoiceTranscriptionMeta } from './respond';
 import type { Msg } from './types';
 
 /** What `messages.metadata` can hold, as written by the chat server actions. */
-export type MessageMetadata = {
-  receipts?: Receipt[];
-  storyDraft?: StoryDraft;
-  /** Set once the user saved or discarded this message's draft card. */
-  draftResolved?: boolean;
-  peopleDraft?: PeopleDraft;
-  /** Set once the user applied or discarded this message's tree-changes card. */
-  peopleDraftResolved?: boolean;
-  /** Voice message whose transcript hasn't been filled in yet (see runVoiceTurn). */
-  transcriptionPending?: boolean;
-  /** Voice message whose transcription failed — the audio stays replayable. */
-  transcriptionFailed?: boolean;
-} | null;
+export type MessageMetadata =
+  | ({
+      receipts?: Receipt[];
+      storyDraft?: StoryDraft;
+      /** Set once the user saved or discarded this message's draft card. */
+      draftResolved?: boolean;
+      peopleDraft?: PeopleDraft;
+      /** Set once the user applied or discarded this message's tree-changes card. */
+      peopleDraftResolved?: boolean;
+    } & NonNullable<VoiceTranscriptionMeta>)
+  | null;
 
 /**
  * The conversation as the client renders it: visible rows only, receipts and any

@@ -122,6 +122,9 @@ export async function syncChat(conversationId: string | null): Promise<SyncChatR
         // transcription unfinished — finish that first, so the regenerated reply
         // answers actual words instead of an empty turn. If it fails (again), the
         // helper settles the turn in place: recording kept, error reply stored.
+        // A THROW from the helper means the turn was NOT settled — let it propagate
+        // to the catch below ('failed'), so the client keeps polling instead of
+        // adopting a conversation that still ends on an unanswered turn.
         const meta = fresh.metadata as VoiceTranscriptionMeta;
         let settled = false;
         if (!fresh.content && (meta?.transcriptionPending || meta?.transcriptionFailed)) {
@@ -129,11 +132,13 @@ export async function syncChat(conversationId: string | null): Promise<SyncChatR
             .get(fresh.id)
             ?.find((a) => a.kind === 'audio');
           if (audio) {
-            try {
-              await transcribeVoiceMessage(convo.id, fresh.id, audio.s3Key, audio.mimeType);
-            } catch {
-              settled = true;
-            }
+            const transcription = await transcribeVoiceMessage(
+              convo.id,
+              fresh.id,
+              audio.s3Key,
+              audio.mimeType,
+            );
+            settled = !transcription.ok;
           }
         }
         if (!settled) {

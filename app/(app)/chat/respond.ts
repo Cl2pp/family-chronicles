@@ -2,8 +2,8 @@ import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { resolveActiveChronicle } from '@/lib/chronicles';
 import {
-  addAttachments,
   addMessage,
+  addMessageWithAttachments,
   claimPendingReply,
   createConversation,
   findPendingPeopleDraft,
@@ -241,8 +241,7 @@ export async function runTextTurn(
   // see an unanswered turn and race this request into a duplicate generation.
   await claimPendingReply(conversationId);
   try {
-    const message = await addMessage(conversationId, 'user', text);
-    if (input.attachments.length) await addAttachments(message.id, input.attachments);
+    await addMessageWithAttachments(conversationId, 'user', text, null, input.attachments);
     return await respondAndStore(conversationId, ctx, previousChronicleId, emit);
   } finally {
     await releasePendingReply(conversationId);
@@ -267,11 +266,13 @@ const TRANSCRIPTION_TOO_LONG_REPLY =
 
 /**
  * Transcribe an already-stored voice message (compressing long recordings below
- * Groq's 25 MB cap first) and fill its transcript in. On failure the turn is settled
- * in place: the message keeps its audio (so the recording is never orphaned and
- * swept), gets marked failed, and an assistant error reply is stored — then the error
- * is rethrown for the transport. Shared by the live send and the `syncChat` recovery
- * path (which retries a transcription a killed request left pending).
+ * Groq's 25 MB cap first) and fill its transcript in. On transcription failure the
+ * turn is settled in place — the message keeps its audio (so the recording is never
+ * orphaned and swept), gets marked failed, and an assistant error reply is stored —
+ * and `{ ok: false }` is returned. A throw means the turn was NOT settled (e.g. the
+ * settling writes themselves failed) and the caller must not treat it as answered.
+ * Shared by the live send and the `syncChat` recovery path (which retries a
+ * transcription a killed request left pending).
  */
 export async function transcribeVoiceMessage(
   conversationId: string,
@@ -279,7 +280,14 @@ export async function transcribeVoiceMessage(
   s3Key: string,
   inputMimeType: string,
   onStage?: (stage: 'compressing' | 'transcribing') => void,
-): Promise<string> {
+): Promise<{ ok: true; transcript: string } | { ok: false; errorReply: string }> {
+  // Download + ffmpeg + Groq can outlast the 3-minute claim staleness on a long
+  // recording — keep re-asserting the generation claim (same cadence as the agent
+  // loop's keepAlive) so a recovery sync can't take it over and transcribe this
+  // message a second time in parallel.
+  const keepAlive = setInterval(() => {
+    claimPendingReply(conversationId).catch(() => {});
+  }, 60_000);
   try {
     let buffer = await getObjectBuffer(s3Key);
     let filename = s3Key.split('/').pop() ?? 'audio';
@@ -296,7 +304,7 @@ export async function transcribeVoiceMessage(
     onStage?.('transcribing');
     const transcript = await transcribeAudio(buffer, filename, mimeType);
     await updateMessage(messageId, { content: transcript, metadata: null });
-    return transcript;
+    return { ok: true, transcript };
   } catch (err) {
     console.error(`Voice transcription failed for ${s3Key}:`, err);
     const tooLarge = (err as { status?: number })?.status === 413;
@@ -307,7 +315,9 @@ export async function transcribeVoiceMessage(
     // Settles the turn: the last stored message is an assistant one, so neither the
     // client's reconcile nor a later syncChat tries to generate a reply to silence.
     await addMessage(conversationId, 'assistant', reply);
-    throw new Error(reply);
+    return { ok: false, errorReply: reply };
+  } finally {
+    clearInterval(keepAlive);
   }
 }
 
@@ -341,18 +351,21 @@ export async function runVoiceTurn(
   // Claim before the user turn is stored — see runTextTurn for why.
   await claimPendingReply(conversationId);
   try {
-    const message = await addMessage(conversationId, 'user', '', {
-      transcriptionPending: true,
-    } satisfies VoiceTranscriptionMeta);
-    await addAttachments(message.id, [
-      {
-        kind: 'audio',
-        s3Key: input.s3Key,
-        mimeType: input.mimeType,
-        bytes: input.bytes ?? null,
-        durationSec: input.durationSec ?? null,
-      },
-    ]);
+    const message = await addMessageWithAttachments(
+      conversationId,
+      'user',
+      '',
+      { transcriptionPending: true } satisfies VoiceTranscriptionMeta,
+      [
+        {
+          kind: 'audio',
+          s3Key: input.s3Key,
+          mimeType: input.mimeType,
+          bytes: input.bytes ?? null,
+          durationSec: input.durationSec ?? null,
+        },
+      ],
+    );
     // WebM/Opus recordings are silent on Safari/iOS — re-encode to AAC in the background.
     // (The job checks the stored MIME type and skips anything already playable.)
     // Enqueued before transcription so the recording is playable even if that fails.
@@ -366,17 +379,20 @@ export async function runVoiceTurn(
       duration_sec: input.durationSec ?? null,
     });
 
-    const transcript = await transcribeVoiceMessage(
+    const transcription = await transcribeVoiceMessage(
       conversationId,
       message.id,
       input.s3Key,
       input.mimeType,
       onStage,
     );
-    onTranscript?.(transcript);
+    // The turn is already settled server-side (error reply stored); the throw just
+    // carries the message to the transport's error event.
+    if (!transcription.ok) throw new Error(transcription.errorReply);
+    onTranscript?.(transcription.transcript);
 
     const result = await respondAndStore(conversationId, ctx, previousChronicleId, emit);
-    return { ...result, transcript };
+    return { ...result, transcript: transcription.transcript };
   } finally {
     await releasePendingReply(conversationId);
   }
