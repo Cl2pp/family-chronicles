@@ -121,6 +121,10 @@ export function ChatView({
   const [messages, setMessages] = useState<Msg[]>(initialMessages);
   const [input, setInput] = useState('');
   const [busyLabel, setBusyLabel] = useState<string | null>(null);
+  // Second line under the busy label. Only the upload phase of a voice send uses it:
+  // the recording exists nowhere but in page memory until the PUT finishes, so the
+  // user must not close the app — once the server has the turn, closing is safe.
+  const [busyHint, setBusyHint] = useState<string | null>(null);
   // The reply-in-progress, streamed token by token. Mirrored in a ref so stream
   // events can move it into the status line without a stale-closure read.
   const [liveText, setLiveText] = useState('');
@@ -172,6 +176,7 @@ export function ChatView({
   /** Start a send: cancel stale reconciles and record the pre-send baseline. */
   function beginSendTurn(): number {
     advanceTurn();
+    setBusyHint(null); // only the voice upload phase re-sets it
     const turn = turnRef.current;
     sendBaselineRef.current = {
       turn,
@@ -538,6 +543,9 @@ export function ChatView({
     setRecording(false);
     setRecorded(null);
     setBusyLabel(t.chat.uploadingRecording);
+    // Short notes upload sub-second — only warn when the transfer is long enough
+    // that pocketing the phone mid-upload is a realistic way to lose the recording.
+    if (audio.blob.size > 2 * 1024 * 1024) setBusyHint(t.chat.keepAppOpen);
     // Show the voice note straight away — uploading + transcribing takes seconds, and
     // without a bubble a fresh chat would sit on its empty state as if nothing was sent.
     // The transcript event fills this same bubble in while the agent is still thinking.
@@ -545,6 +553,8 @@ export function ChatView({
     setMessages((m) => [...m, pending]);
     try {
       const { s3Key, mimeType } = await uploadBlob('audio', audio.blob, audio.mimeType);
+      // Uploaded — from here the server owns the turn and closing the app is safe.
+      setBusyHint(null);
       // The server's `stage` events refine this into compressing/transcribing.
       setBusyLabel(t.chat.transcribing);
       const res = await streamTurn(
@@ -587,6 +597,7 @@ export function ChatView({
       if (turn !== turnRef.current) return;
       liveTextRef.current = '';
       setLiveText('');
+      setBusyHint(null);
       setBusyLabel(t.chat.thinking);
       if (sendBaselineRef.current?.turn === turn) {
         sendBaselineRef.current.errorText = err instanceof Error ? err.message : null;
@@ -614,6 +625,7 @@ export function ChatView({
     setRecording(false);
     setRecorded(null);
     setBusyLabel(null);
+    setBusyHint(null);
     lastActivityRef.current = Date.now();
   }
 
@@ -730,9 +742,16 @@ export function ChatView({
             <Paper bg="slate.1" p="sm" radius="md">
               <Group gap="xs" wrap="nowrap">
                 <Loader type="dots" size="xs" color="gray" />
-                <Text size="sm" c="dimmed">
-                  {busyLabel}
-                </Text>
+                <Stack gap={2}>
+                  <Text size="sm" c="dimmed">
+                    {busyLabel}
+                  </Text>
+                  {busyHint && (
+                    <Text size="xs" c="dimmed">
+                      {busyHint}
+                    </Text>
+                  )}
+                </Stack>
               </Group>
             </Paper>
           </Group>

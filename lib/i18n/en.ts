@@ -404,6 +404,7 @@ export const en = {
       'Tell me about your family and I’ll set up your chronicle, then we can start collecting memories.',
     thinking: 'Thinking…',
     uploadingRecording: 'Uploading recording…',
+    keepAppOpen: 'Keep the app open until the recording has uploaded.',
     compressing: 'Compressing recording…',
     transcribing: 'Transcribing…',
     somethingWentWrong: 'Sorry — something went wrong. Please try again.',

@@ -415,6 +415,7 @@ export const de: Dictionary = {
       'Erzähl mir von deiner Familie und ich richte dein Familienwerk ein — dann können wir anfangen, Erinnerungen zu sammeln.',
     thinking: 'Denke nach…',
     uploadingRecording: 'Lade Aufnahme hoch…',
+    keepAppOpen: 'Lass die App geöffnet, bis die Aufnahme hochgeladen ist.',
     compressing: 'Komprimiere Aufnahme…',
     transcribing: 'Transkribiere…',
     somethingWentWrong: 'Entschuldigung — etwas ist schiefgelaufen. Bitte versuch es noch einmal.',
