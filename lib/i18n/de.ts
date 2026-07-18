@@ -420,6 +420,8 @@ export const de: Dictionary = {
     transcribing: 'Transkribiere…',
     somethingWentWrong: 'Entschuldigung — etwas ist schiefgelaufen. Bitte versuch es noch einmal.',
     voiceMessage: 'Sprachnachricht',
+    showMore: 'Mehr anzeigen',
+    showLess: 'Weniger anzeigen',
     cancelRecordingAria: 'Aufnahme abbrechen',
     sendVoiceMessage: 'Sprachnachricht senden',
     removePhotoAria: 'Foto entfernen',

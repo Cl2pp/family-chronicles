@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Group, Paper, Stack, Text } from '@mantine/core';
+import { Anchor, Group, Paper, Stack, Text } from '@mantine/core';
 import { useI18n } from '@/lib/i18n/client';
 import { ActionReceipts } from './action-receipts';
 import { MessageAttachments } from './message-attachments';
@@ -9,6 +9,48 @@ import { MessageMarkdown } from './message-markdown';
 import { PeopleChangesCard } from './people-changes-card';
 import { StoryDraftCard } from './story-draft-card';
 import type { Msg, MsgPeopleResult, MsgResult } from './types';
+
+/** Transcripts longer than this collapse to a preview — a 20-minute voice note can
+ *  produce ~16k characters, which rendered raw would dominate the whole chat. */
+const TRANSCRIPT_COLLAPSE_CHARS = 600;
+/** Lines visible while collapsed. */
+const TRANSCRIPT_PREVIEW_LINES = 6;
+
+/**
+ * The text of a user voice bubble: long transcripts start clamped to a few lines
+ * with a show more/less toggle. Used for both the persisted message and the pending
+ * bubble the streaming path fills in, so the collapse behaves identically in both.
+ */
+function TranscriptText({ content }: { content: string }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = content.length > TRANSCRIPT_COLLAPSE_CHARS;
+  return (
+    <>
+      <Text
+        size="sm"
+        style={{ whiteSpace: 'pre-wrap' }}
+        lineClamp={collapsible && !expanded ? TRANSCRIPT_PREVIEW_LINES : undefined}
+      >
+        {content}
+      </Text>
+      {collapsible && (
+        <Anchor
+          component="button"
+          type="button"
+          size="sm"
+          fw={600}
+          // The bubble is brand-on-white-text; the default anchor blue would vanish.
+          c="white"
+          underline="always"
+          onClick={() => setExpanded((e) => !e)}
+        >
+          {expanded ? t.chat.showLess : t.chat.showMore}
+        </Anchor>
+      )}
+    </>
+  );
+}
 
 export function MessageRow({
   msg,
@@ -33,14 +75,21 @@ export function MessageRow({
   const peopleSettled = Boolean(msg.peopleResult) || peopleDiscarded;
 
   if (msg.role === 'user') {
+    // Only voice transcriptions collapse — typed messages are as long as the user
+    // deliberately made them.
+    const isTranscription = msg.attachments?.some((a) => a.kind === 'audio') ?? false;
     return (
       <Group justify="flex-end">
         <Stack gap={6} align="flex-end" maw="80%">
           {msg.content && (
             <Paper bg="brand.6" c="white" p="sm" radius="md">
-              <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-                {msg.content}
-              </Text>
+              {isTranscription ? (
+                <TranscriptText content={msg.content} />
+              ) : (
+                <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+                  {msg.content}
+                </Text>
+              )}
             </Paper>
           )}
           {msg.attachments?.length ? <MessageAttachments attachments={msg.attachments} /> : null}

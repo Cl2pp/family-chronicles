@@ -409,6 +409,8 @@ export const en = {
     transcribing: 'Transcribing…',
     somethingWentWrong: 'Sorry — something went wrong. Please try again.',
     voiceMessage: 'Voice message',
+    showMore: 'Show more',
+    showLess: 'Show less',
     cancelRecordingAria: 'Cancel recording',
     sendVoiceMessage: 'Send voice message',
     removePhotoAria: 'Remove photo',
