@@ -2,18 +2,21 @@ import { attachmentsByMessage, listMessages } from '@/lib/conversations';
 import { presignGet } from '@/lib/s3';
 import type { Receipt, StoryDraft } from '@/lib/ai/tools';
 import type { PeopleDraft } from '@/lib/people-changes';
+import type { VoiceTranscriptionMeta } from './respond';
 import type { Msg } from './types';
 
 /** What `messages.metadata` can hold, as written by the chat server actions. */
-export type MessageMetadata = {
-  receipts?: Receipt[];
-  storyDraft?: StoryDraft;
-  /** Set once the user saved or discarded this message's draft card. */
-  draftResolved?: boolean;
-  peopleDraft?: PeopleDraft;
-  /** Set once the user applied or discarded this message's tree-changes card. */
-  peopleDraftResolved?: boolean;
-} | null;
+export type MessageMetadata =
+  | ({
+      receipts?: Receipt[];
+      storyDraft?: StoryDraft;
+      /** Set once the user saved or discarded this message's draft card. */
+      draftResolved?: boolean;
+      peopleDraft?: PeopleDraft;
+      /** Set once the user applied or discarded this message's tree-changes card. */
+      peopleDraftResolved?: boolean;
+    } & NonNullable<VoiceTranscriptionMeta>)
+  | null;
 
 /**
  * The conversation as the client renders it: visible rows only, receipts and any
@@ -46,6 +49,7 @@ export async function buildChatMessages(conversationId: string): Promise<Msg[]> 
         peopleDraft: meta?.peopleDraft && !meta.peopleDraftResolved ? meta.peopleDraft : undefined,
         peopleDraftMessageId:
           meta?.peopleDraft && !meta.peopleDraftResolved ? m.id : undefined,
+        transcriptionFailed: meta?.transcriptionFailed || undefined,
         attachments: await Promise.all(
           (attachMap.get(m.id) ?? []).map(async (a) => ({
             kind: a.kind,

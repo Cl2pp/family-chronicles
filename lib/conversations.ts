@@ -252,21 +252,58 @@ export async function addMessage(
   return created;
 }
 
-/** Attach in-chat uploads (voice/photos) to a message. */
-export async function addAttachments(messageId: string, items: AttachmentInput[]) {
-  if (items.length === 0) return;
-  await db.insert(messageAttachments).values(
-    items.map((a) => ({
-      messageId,
-      kind: a.kind,
-      s3Key: a.s3Key,
-      mimeType: a.mimeType,
-      bytes: a.bytes ?? null,
-      width: a.width ?? null,
-      height: a.height ?? null,
-      durationSec: a.durationSec ?? null,
-    })),
-  );
+/**
+ * Store a message and its attachments in one transaction. A crash between the two
+ * writes would leave the uploads unreferenced — exactly what the orphan sweep deletes —
+ * so every message that carries uploads must land atomically with its attachment rows.
+ */
+export async function addMessageWithAttachments(
+  conversationId: string,
+  role: ChatRole,
+  content: string,
+  metadata: unknown,
+  attachments: AttachmentInput[],
+) {
+  return db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(messages)
+      .values({ conversationId, role, content, metadata: metadata ?? null })
+      .returning();
+    if (attachments.length) {
+      await tx.insert(messageAttachments).values(
+        attachments.map((a) => ({
+          messageId: created.id,
+          kind: a.kind,
+          s3Key: a.s3Key,
+          mimeType: a.mimeType,
+          bytes: a.bytes ?? null,
+          width: a.width ?? null,
+          height: a.height ?? null,
+          durationSec: a.durationSec ?? null,
+        })),
+      );
+    }
+    await tx
+      .update(conversations)
+      .set({ updatedAt: new Date() })
+      .where(eq(conversations.id, conversationId));
+    return created;
+  });
+}
+
+/** Rewrite a stored message's content and metadata in place — used to fill a voice
+ *  message's transcript in (or mark it failed) after the recording is already stored. */
+export async function updateMessage(
+  messageId: string,
+  patch: { content?: string; metadata?: unknown },
+) {
+  await db
+    .update(messages)
+    .set({
+      ...(patch.content !== undefined ? { content: patch.content } : {}),
+      ...(patch.metadata !== undefined ? { metadata: patch.metadata } : {}),
+    })
+    .where(eq(messages.id, messageId));
 }
 
 /** Photo attachments on a set of messages, so the agent can actually see them. */

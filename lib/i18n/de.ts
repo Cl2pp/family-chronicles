@@ -418,6 +418,7 @@ export const de: Dictionary = {
     keepAppOpen: 'Lass die App geöffnet, bis die Aufnahme hochgeladen ist.',
     compressing: 'Komprimiere Aufnahme…',
     transcribing: 'Transkribiere…',
+    transcriptionFailed: 'Konnte nicht transkribiert werden — die Aufnahme ist gespeichert.',
     somethingWentWrong: 'Entschuldigung — etwas ist schiefgelaufen. Bitte versuch es noch einmal.',
     voiceMessage: 'Sprachnachricht',
     showMore: 'Mehr anzeigen',

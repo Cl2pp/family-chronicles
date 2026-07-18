@@ -407,6 +407,7 @@ export const en = {
     keepAppOpen: 'Keep the app open until the recording has uploaded.',
     compressing: 'Compressing recording…',
     transcribing: 'Transcribing…',
+    transcriptionFailed: 'Couldn’t be transcribed — the recording is saved.',
     somethingWentWrong: 'Sorry — something went wrong. Please try again.',
     voiceMessage: 'Voice message',
     showMore: 'Show more',
