@@ -9,6 +9,7 @@ import {
   Card,
   Group,
   Image,
+  Loader,
   Paper,
   Stack,
   Text,
@@ -372,6 +373,10 @@ export function ChatView({
     const handle = (event: ChatStreamEvent) => {
       if (turn !== turnRef.current) return;
       switch (event.type) {
+        case 'stage':
+          // Pre-transcript voice steps — compression only happens for long recordings.
+          setBusyLabel(event.stage === 'compressing' ? t.chat.compressing : t.chat.transcribing);
+          break;
         case 'transcript':
           onTranscript?.(event.text);
           break;
@@ -532,7 +537,7 @@ export function ChatView({
     const turn = beginSendTurn();
     setRecording(false);
     setRecorded(null);
-    setBusyLabel(t.chat.transcribing);
+    setBusyLabel(t.chat.uploadingRecording);
     // Show the voice note straight away — uploading + transcribing takes seconds, and
     // without a bubble a fresh chat would sit on its empty state as if nothing was sent.
     // The transcript event fills this same bubble in while the agent is still thinking.
@@ -540,6 +545,8 @@ export function ChatView({
     setMessages((m) => [...m, pending]);
     try {
       const { s3Key, mimeType } = await uploadBlob('audio', audio.blob, audio.mimeType);
+      // The server's `stage` events refine this into compressing/transcribing.
+      setBusyLabel(t.chat.transcribing);
       const res = await streamTurn(
         {
           kind: 'voice',
@@ -721,9 +728,12 @@ export function ChatView({
         {busyLabel && !liveText && (
           <Group justify="flex-start" mt="md">
             <Paper bg="slate.1" p="sm" radius="md">
-              <Text size="sm" c="dimmed">
-                {busyLabel}
-              </Text>
+              <Group gap="xs" wrap="nowrap">
+                <Loader type="dots" size="xs" color="gray" />
+                <Text size="sm" c="dimmed">
+                  {busyLabel}
+                </Text>
+              </Group>
             </Paper>
           </Group>
         )}

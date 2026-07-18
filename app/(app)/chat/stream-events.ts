@@ -9,6 +9,7 @@ import type { SendResult } from './respond';
  * replaces everything accumulated before it.
  */
 export type ChatStreamEvent =
+  | { type: 'stage'; stage: 'compressing' | 'transcribing' }
   | { type: 'transcript'; text: string }
   | { type: 'text'; text: string }
   | { type: 'step'; kind: 'tools' | 'final' }

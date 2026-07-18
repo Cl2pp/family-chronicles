@@ -21,6 +21,60 @@ function baseType(mimeType: string): string {
 }
 
 /**
+ * Groq rejects audio files over 25 MB (free tier) with a 413 — an iOS recording at
+ * ~184 kbps AAC crosses that around 18 minutes. Anything above this threshold gets
+ * re-encoded before transcription; the margin keeps multipart overhead safely clear
+ * of the limit.
+ */
+export const TRANSCRIBE_COMPRESS_THRESHOLD_BYTES = 18 * 1024 * 1024;
+
+/** ffmpeg sniffs container formats more reliably when the input file has the right extension. */
+const INPUT_EXT: Record<string, string> = {
+  'audio/webm': '.webm',
+  'audio/ogg': '.ogg',
+  'audio/mp4': '.m4a',
+  'audio/x-m4a': '.m4a',
+  'audio/aac': '.aac',
+  'audio/mpeg': '.mp3',
+  'audio/wav': '.wav',
+  'audio/x-wav': '.wav',
+};
+
+/**
+ * Shrink a voice recording to what speech recognition actually consumes: Whisper
+ * downsamples every input to 16 kHz mono internally, so encoding that as ~32 kbps
+ * Opus loses nothing the model would have heard — a 20-minute recording drops from
+ * ~28 MB to ~5 MB, and the ceiling becomes hours of speech instead of ~18 minutes.
+ * Only the transcription request sees this copy; the stored original is untouched.
+ */
+export async function compressForTranscription(
+  buffer: Buffer,
+  mimeType: string,
+): Promise<{ buffer: Buffer; filename: string; mimeType: string }> {
+  const dir = await mkdtemp(join(tmpdir(), 'transcribe-'));
+  try {
+    const inPath = join(dir, `in${INPUT_EXT[baseType(mimeType)] ?? ''}`);
+    const outPath = join(dir, 'out.ogg');
+    await writeFile(inPath, buffer);
+    await execFileAsync('ffmpeg', [
+      '-y',
+      '-i', inPath,
+      '-vn',
+      '-ac', '1',
+      '-ar', '16000',
+      '-c:a', 'libopus',
+      '-b:a', '32k',
+      '-application', 'voip',
+      outPath,
+    ]);
+    const converted = await readFile(outPath);
+    return { buffer: converted, filename: 'audio.ogg', mimeType: 'audio/ogg' };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/**
  * Re-encode one stored voice note as AAC-in-MP4 (`.m4a`) so it plays on every
  * browser — Safari and iOS render WebM/Opus recordings as silence.
  *
