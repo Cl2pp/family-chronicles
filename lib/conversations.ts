@@ -252,6 +252,21 @@ export async function addMessage(
   return created;
 }
 
+/** Rewrite a stored message's content and metadata in place — used to fill a voice
+ *  message's transcript in (or mark it failed) after the recording is already stored. */
+export async function updateMessage(
+  messageId: string,
+  patch: { content?: string; metadata?: unknown },
+) {
+  await db
+    .update(messages)
+    .set({
+      ...(patch.content !== undefined ? { content: patch.content } : {}),
+      ...(patch.metadata !== undefined ? { metadata: patch.metadata } : {}),
+    })
+    .where(eq(messages.id, messageId));
+}
+
 /** Attach in-chat uploads (voice/photos) to a message. */
 export async function addAttachments(messageId: string, items: AttachmentInput[]) {
   if (items.length === 0) return;

@@ -13,6 +13,10 @@ export type MessageMetadata = {
   peopleDraft?: PeopleDraft;
   /** Set once the user applied or discarded this message's tree-changes card. */
   peopleDraftResolved?: boolean;
+  /** Voice message whose transcript hasn't been filled in yet (see runVoiceTurn). */
+  transcriptionPending?: boolean;
+  /** Voice message whose transcription failed — the audio stays replayable. */
+  transcriptionFailed?: boolean;
 } | null;
 
 /**
@@ -46,6 +50,7 @@ export async function buildChatMessages(conversationId: string): Promise<Msg[]> 
         peopleDraft: meta?.peopleDraft && !meta.peopleDraftResolved ? meta.peopleDraft : undefined,
         peopleDraftMessageId:
           meta?.peopleDraft && !meta.peopleDraftResolved ? m.id : undefined,
+        transcriptionFailed: meta?.transcriptionFailed || undefined,
         attachments: await Promise.all(
           (attachMap.get(m.id) ?? []).map(async (a) => ({
             kind: a.kind,

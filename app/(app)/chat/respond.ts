@@ -12,6 +12,7 @@ import {
   photosByMessage,
   releasePendingReply,
   supersedePendingPeopleDrafts,
+  updateMessage,
   type AttachmentInput,
 } from '@/lib/conversations';
 import { runAgent, type AgentEmit, type ChatTurn } from '@/lib/ai/agent';
@@ -112,13 +113,22 @@ export async function respondAndStore(
   // are presigned reads the model's provider fetches server-side.
   const photoKeys = await photosByMessage(turns.filter((m) => m.role === 'user').map((m) => m.id));
   const history: ChatTurn[] = await Promise.all(
-    turns.map(async (m) => ({
-      role: m.role as ChatTurn['role'],
-      content: m.content,
-      imageUrls: await Promise.all(
-        (photoKeys.get(m.id) ?? []).map((p) => presignGet(p.s3Key, p.mimeType)),
-      ),
-    })),
+    turns.map(async (m) => {
+      // A voice message whose transcription never finished has no text — tell the
+      // agent what happened instead of showing it a silently empty turn.
+      const meta = m.metadata as VoiceTranscriptionMeta;
+      const content =
+        !m.content && (meta?.transcriptionPending || meta?.transcriptionFailed)
+          ? '[The user sent a voice message, but it could not be transcribed.]'
+          : m.content;
+      return {
+        role: m.role as ChatTurn['role'],
+        content,
+        imageUrls: await Promise.all(
+          (photoKeys.get(m.id) ?? []).map((p) => presignGet(p.s3Key, p.mimeType)),
+        ),
+      };
+    }),
   );
 
   // Seed the turn with the still-pending card, if any: this turn's staging EXTENDS
@@ -238,9 +248,54 @@ export async function runTextTurn(
   }
 }
 
-/** Transcribe an uploaded voice note, store it as the user's message, then run the agent.
- *  `onTranscript` fires as soon as the words exist — the streaming client fills the
- *  voice bubble with them while the agent is still thinking. */
+/** Transcription state on a stored voice message (`messages.metadata`). */
+export type VoiceTranscriptionMeta = {
+  /** Set while the transcript hasn't been filled in yet (cleared on success). */
+  transcriptionPending?: boolean;
+  /** Set when transcription failed — the recording stays attached and replayable. */
+  transcriptionFailed?: boolean;
+} | null;
+
+const TRANSCRIPTION_FAILED_REPLY =
+  "Sorry — I couldn't transcribe that recording. It's saved here so nothing is lost; " +
+  'you can try sending it again.';
+
+/**
+ * Transcribe an already-stored voice message and fill its transcript in. On failure the
+ * turn is settled in place: the message keeps its audio (so the recording is never
+ * orphaned and swept), gets marked failed, and an assistant error reply is stored —
+ * then the error is rethrown for the transport. Shared by the live send and the
+ * `syncChat` recovery path (which retries a transcription a killed request left pending).
+ */
+export async function transcribeVoiceMessage(
+  conversationId: string,
+  messageId: string,
+  s3Key: string,
+  mimeType: string,
+): Promise<string> {
+  try {
+    const buffer = await getObjectBuffer(s3Key);
+    const filename = s3Key.split('/').pop() ?? 'audio';
+    const transcript = await transcribeAudio(buffer, filename, mimeType);
+    await updateMessage(messageId, { content: transcript, metadata: null });
+    return transcript;
+  } catch (err) {
+    console.error(`Voice transcription failed for ${s3Key}:`, err);
+    await updateMessage(messageId, {
+      metadata: { transcriptionFailed: true } satisfies VoiceTranscriptionMeta,
+    });
+    // Settles the turn: the last stored message is an assistant one, so neither the
+    // client's reconcile nor a later syncChat tries to generate a reply to silence.
+    await addMessage(conversationId, 'assistant', TRANSCRIPTION_FAILED_REPLY);
+    throw new Error(TRANSCRIPTION_FAILED_REPLY);
+  }
+}
+
+/** Store an uploaded voice note as the user's message, transcribe it, then run the
+ *  agent. The message (with its audio attachment) is persisted BEFORE transcription so
+ *  a transcription failure can never strand the recording for the nightly orphan
+ *  sweep. `onTranscript` fires as soon as the words exist — the streaming client fills
+ *  the voice bubble with them while the agent is still thinking. */
 export async function runVoiceTurn(
   user: { id: string; name: string },
   input: {
@@ -255,17 +310,6 @@ export async function runVoiceTurn(
 ): Promise<SendResult & { transcript: string }> {
   assertChatUpload('audio', input.s3Key);
 
-  let transcript: string;
-  try {
-    const buffer = await getObjectBuffer(input.s3Key);
-    const filename = input.s3Key.split('/').pop() ?? 'audio';
-    transcript = await transcribeAudio(buffer, filename, input.mimeType);
-  } catch (err) {
-    console.error(`Voice transcription failed for ${input.s3Key}:`, err);
-    throw new Error("Sorry — I couldn't transcribe that recording. Please try again.");
-  }
-  onTranscript?.(transcript);
-
   const previousChronicleId = (await cookies()).get('activeChronicleId')?.value;
   const { active } = await resolveActiveChronicle(user.id, previousChronicleId);
   const ctx = makeContext(user.id, user.name, active);
@@ -275,7 +319,9 @@ export async function runVoiceTurn(
   // Claim before the user turn is stored — see runTextTurn for why.
   await claimPendingReply(conversationId);
   try {
-    const message = await addMessage(conversationId, 'user', transcript);
+    const message = await addMessage(conversationId, 'user', '', {
+      transcriptionPending: true,
+    } satisfies VoiceTranscriptionMeta);
     await addAttachments(message.id, [
       {
         kind: 'audio',
@@ -287,6 +333,7 @@ export async function runVoiceTurn(
     ]);
     // WebM/Opus recordings are silent on Safari/iOS — re-encode to AAC in the background.
     // (The job checks the stored MIME type and skips anything already playable.)
+    // Enqueued before transcription so the recording is playable even if that fails.
     try {
       await enqueueTranscode({ s3Key: input.s3Key });
     } catch (err) {
@@ -296,6 +343,14 @@ export async function runVoiceTurn(
     captureServerEvent(user.id, 'voice_message_sent', {
       duration_sec: input.durationSec ?? null,
     });
+
+    const transcript = await transcribeVoiceMessage(
+      conversationId,
+      message.id,
+      input.s3Key,
+      input.mimeType,
+    );
+    onTranscript?.(transcript);
 
     const result = await respondAndStore(conversationId, ctx, previousChronicleId, emit);
     return { ...result, transcript };

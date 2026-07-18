@@ -6,6 +6,7 @@ import { requireUser } from '@/lib/session';
 import { resolveActiveChronicle, getChronicle, getMembership } from '@/lib/chronicles';
 import {
   addMessage,
+  attachmentsByMessage,
   claimPeopleCard,
   closeConversation,
   getConversation,
@@ -29,7 +30,12 @@ import { applyPeopleChanges } from '@/lib/people-changes';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { buildKey, presignPut } from '@/lib/s3';
 import { validateUpload } from '@/lib/uploads';
-import { makeContext, respondAndStore } from './respond';
+import {
+  makeContext,
+  respondAndStore,
+  transcribeVoiceMessage,
+  type VoiceTranscriptionMeta,
+} from './respond';
 import { buildChatMessages } from './messages';
 import type { Msg } from './types';
 import { captureServerEvent } from '@/lib/posthog-server';
@@ -112,11 +118,31 @@ export async function syncChat(conversationId: string | null): Promise<SyncChatR
         .reverse()
         .find((m) => m.role === 'user' || m.role === 'assistant');
       if (fresh?.role === 'user') {
-        const previousChronicleId = (await cookies()).get('activeChronicleId')?.value;
-        const { active } = await resolveActiveChronicle(user.id, previousChronicleId);
-        const ctx = makeContext(user.id, user.name, active);
-        ctx.conversationId = convo.id;
-        await respondAndStore(convo.id, ctx, previousChronicleId);
+        // A killed voice send may have died with the recording stored but its
+        // transcription unfinished — finish that first, so the regenerated reply
+        // answers actual words instead of an empty turn. If it fails (again), the
+        // helper settles the turn in place: recording kept, error reply stored.
+        const meta = fresh.metadata as VoiceTranscriptionMeta;
+        let settled = false;
+        if (!fresh.content && (meta?.transcriptionPending || meta?.transcriptionFailed)) {
+          const audio = (await attachmentsByMessage([fresh.id]))
+            .get(fresh.id)
+            ?.find((a) => a.kind === 'audio');
+          if (audio) {
+            try {
+              await transcribeVoiceMessage(convo.id, fresh.id, audio.s3Key, audio.mimeType);
+            } catch {
+              settled = true;
+            }
+          }
+        }
+        if (!settled) {
+          const previousChronicleId = (await cookies()).get('activeChronicleId')?.value;
+          const { active } = await resolveActiveChronicle(user.id, previousChronicleId);
+          const ctx = makeContext(user.id, user.name, active);
+          ctx.conversationId = convo.id;
+          await respondAndStore(convo.id, ctx, previousChronicleId);
+        }
       }
     } catch (err) {
       console.error(`Reply recovery failed for conversation ${convo.id}:`, err);

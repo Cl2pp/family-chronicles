@@ -415,6 +415,7 @@ export const de: Dictionary = {
       'Erzähl mir von deiner Familie und ich richte dein Familienwerk ein — dann können wir anfangen, Erinnerungen zu sammeln.',
     thinking: 'Denke nach…',
     transcribing: 'Transkribiere…',
+    transcriptionFailed: 'Konnte nicht transkribiert werden — die Aufnahme ist gespeichert.',
     somethingWentWrong: 'Entschuldigung — etwas ist schiefgelaufen. Bitte versuch es noch einmal.',
     voiceMessage: 'Sprachnachricht',
     cancelRecordingAria: 'Aufnahme abbrechen',

@@ -11,6 +11,8 @@ export interface Msg {
   role: 'user' | 'assistant' | 'system';
   content: string;
   attachments?: ChatAttachment[];
+  /** Voice message whose transcription failed — the audio is kept and replayable. */
+  transcriptionFailed?: boolean;
   /** Actions the assistant applied this turn (shown as ✓ chips). */
   receipts?: Receipt[];
   /** A story draft awaiting the user's review + save. */

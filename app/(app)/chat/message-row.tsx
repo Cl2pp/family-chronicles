@@ -44,6 +44,11 @@ export function MessageRow({
             </Paper>
           )}
           {msg.attachments?.length ? <MessageAttachments attachments={msg.attachments} /> : null}
+          {msg.transcriptionFailed && (
+            <Text size="xs" c="dimmed">
+              {t.chat.transcriptionFailed}
+            </Text>
+          )}
         </Stack>
       </Group>
     );
