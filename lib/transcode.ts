@@ -56,17 +56,25 @@ export async function compressForTranscription(
     const inPath = join(dir, `in${INPUT_EXT[baseType(mimeType)] ?? ''}`);
     const outPath = join(dir, 'out.ogg');
     await writeFile(inPath, buffer);
-    await execFileAsync('ffmpeg', [
-      '-y',
-      '-i', inPath,
-      '-vn',
-      '-ac', '1',
-      '-ar', '16000',
-      '-c:a', 'libopus',
-      '-b:a', '32k',
-      '-application', 'voip',
-      outPath,
-    ]);
+    // Unlike the worker's transcode job this runs in the web request path, and the
+    // input bytes are whatever the client uploaded — a corrupt container must reject
+    // (landing in the caller's send-the-original fallback), never hang the turn.
+    await execFileAsync(
+      'ffmpeg',
+      [
+        '-y',
+        '-hide_banner', '-nostats', '-loglevel', 'error',
+        '-i', inPath,
+        '-vn',
+        '-ac', '1',
+        '-ar', '16000',
+        '-c:a', 'libopus',
+        '-b:a', '32k',
+        '-application', 'voip',
+        outPath,
+      ],
+      { timeout: 120_000, killSignal: 'SIGKILL' },
+    );
     const converted = await readFile(outPath);
     return { buffer: converted, filename: 'audio.ogg', mimeType: 'audio/ogg' };
   } finally {
