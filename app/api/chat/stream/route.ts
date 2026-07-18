@@ -74,8 +74,12 @@ export async function POST(req: Request): Promise<Response> {
                 },
                 send,
               )
-            : await runVoiceTurn(user, input, send, (transcript) =>
-                send({ type: 'transcript', text: transcript }),
+            : await runVoiceTurn(
+                user,
+                input,
+                send,
+                (transcript) => send({ type: 'transcript', text: transcript }),
+                (stage) => send({ type: 'stage', stage }),
               );
         send({ type: 'result', result });
       } catch (err) {

@@ -20,6 +20,7 @@ import type { Receipt, StoryDraft, ToolContext } from '@/lib/ai/tools';
 import type { PeopleDraft } from '@/lib/people-changes';
 import { getObjectBuffer, presignGet } from '@/lib/s3';
 import { transcribeAudio } from '@/lib/ai/groq';
+import { compressForTranscription, TRANSCRIBE_COMPRESS_THRESHOLD_BYTES } from '@/lib/transcode';
 import { enqueueTranscode } from '@/lib/queue';
 import { captureServerEvent } from '@/lib/posthog-server';
 
@@ -259,35 +260,54 @@ export type VoiceTranscriptionMeta = {
 const TRANSCRIPTION_FAILED_REPLY =
   "Sorry — I couldn't transcribe that recording. It's saved here so nothing is lost; " +
   'you can try sending it again.';
+// Even compressed to 32 kbps Opus, Groq's 25 MB cap is ~2 hours of speech.
+const TRANSCRIPTION_TOO_LONG_REPLY =
+  "Sorry — that recording is too long to transcribe. It's saved here so nothing is " +
+  'lost; please try a shorter one.';
 
 /**
- * Transcribe an already-stored voice message and fill its transcript in. On failure the
- * turn is settled in place: the message keeps its audio (so the recording is never
- * orphaned and swept), gets marked failed, and an assistant error reply is stored —
- * then the error is rethrown for the transport. Shared by the live send and the
- * `syncChat` recovery path (which retries a transcription a killed request left pending).
+ * Transcribe an already-stored voice message (compressing long recordings below
+ * Groq's 25 MB cap first) and fill its transcript in. On failure the turn is settled
+ * in place: the message keeps its audio (so the recording is never orphaned and
+ * swept), gets marked failed, and an assistant error reply is stored — then the error
+ * is rethrown for the transport. Shared by the live send and the `syncChat` recovery
+ * path (which retries a transcription a killed request left pending).
  */
 export async function transcribeVoiceMessage(
   conversationId: string,
   messageId: string,
   s3Key: string,
-  mimeType: string,
+  inputMimeType: string,
+  onStage?: (stage: 'compressing' | 'transcribing') => void,
 ): Promise<string> {
   try {
-    const buffer = await getObjectBuffer(s3Key);
-    const filename = s3Key.split('/').pop() ?? 'audio';
+    let buffer = await getObjectBuffer(s3Key);
+    let filename = s3Key.split('/').pop() ?? 'audio';
+    let mimeType = inputMimeType;
+    if (buffer.length > TRANSCRIBE_COMPRESS_THRESHOLD_BYTES) {
+      onStage?.('compressing');
+      try {
+        ({ buffer, filename, mimeType } = await compressForTranscription(buffer, mimeType));
+      } catch (err) {
+        // Send the original and let Groq decide — worst case is the 413 we'd have hit anyway.
+        console.error(`Audio compression failed for ${s3Key} — sending original:`, err);
+      }
+    }
+    onStage?.('transcribing');
     const transcript = await transcribeAudio(buffer, filename, mimeType);
     await updateMessage(messageId, { content: transcript, metadata: null });
     return transcript;
   } catch (err) {
     console.error(`Voice transcription failed for ${s3Key}:`, err);
+    const tooLarge = (err as { status?: number })?.status === 413;
+    const reply = tooLarge ? TRANSCRIPTION_TOO_LONG_REPLY : TRANSCRIPTION_FAILED_REPLY;
     await updateMessage(messageId, {
       metadata: { transcriptionFailed: true } satisfies VoiceTranscriptionMeta,
     });
     // Settles the turn: the last stored message is an assistant one, so neither the
     // client's reconcile nor a later syncChat tries to generate a reply to silence.
-    await addMessage(conversationId, 'assistant', TRANSCRIPTION_FAILED_REPLY);
-    throw new Error(TRANSCRIPTION_FAILED_REPLY);
+    await addMessage(conversationId, 'assistant', reply);
+    throw new Error(reply);
   }
 }
 
@@ -295,7 +315,8 @@ export async function transcribeVoiceMessage(
  *  agent. The message (with its audio attachment) is persisted BEFORE transcription so
  *  a transcription failure can never strand the recording for the nightly orphan
  *  sweep. `onTranscript` fires as soon as the words exist — the streaming client fills
- *  the voice bubble with them while the agent is still thinking. */
+ *  the voice bubble with them while the agent is still thinking; `onStage` reports the
+ *  slow pre-transcript steps so the client can show what's happening. */
 export async function runVoiceTurn(
   user: { id: string; name: string },
   input: {
@@ -307,6 +328,7 @@ export async function runVoiceTurn(
   },
   emit?: AgentEmit,
   onTranscript?: (transcript: string) => void,
+  onStage?: (stage: 'compressing' | 'transcribing') => void,
 ): Promise<SendResult & { transcript: string }> {
   assertChatUpload('audio', input.s3Key);
 
@@ -349,6 +371,7 @@ export async function runVoiceTurn(
       message.id,
       input.s3Key,
       input.mimeType,
+      onStage,
     );
     onTranscript?.(transcript);
 

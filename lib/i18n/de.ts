@@ -414,6 +414,8 @@ export const de: Dictionary = {
     welcomeTextSetup:
       'Erzähl mir von deiner Familie und ich richte dein Familienwerk ein — dann können wir anfangen, Erinnerungen zu sammeln.',
     thinking: 'Denke nach…',
+    uploadingRecording: 'Lade Aufnahme hoch…',
+    compressing: 'Komprimiere Aufnahme…',
     transcribing: 'Transkribiere…',
     transcriptionFailed: 'Konnte nicht transkribiert werden — die Aufnahme ist gespeichert.',
     somethingWentWrong: 'Entschuldigung — etwas ist schiefgelaufen. Bitte versuch es noch einmal.',
