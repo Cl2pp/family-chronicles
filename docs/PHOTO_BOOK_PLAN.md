@@ -145,7 +145,7 @@ sharp metadata → oriented `width`/`height` on `assets`; EXIF → `takenAt`, `g
 dHash over a 9×8 grayscale downscale (sharp raw pixels, ~20 lines, no dependency) →
 `phash`. Fast enough to run with normal worker concurrency.
 
-**`photo-vision` (batched, AI)** — vision scoring via OpenRouter (`STYLING_MODEL`, same
+**`photo-vision` (batched, AI)** — vision scoring via OpenRouter (`VISION_MODEL`, same
 client as `lib/book-ai-layout.ts`): batches of **~10 thumbnails per request** (768 px
 JPEG data-URIs, exactly the `photoVisionDataUri` approach that already exists), one
 structured-JSON answer per photo:
@@ -164,9 +164,41 @@ interface PhotoAnalysis {
 
 Each batch job validates per-photo JSON (zod), writes `book_photos.analysis`, and marks
 `analysisStatus`. A failed batch retries via pg-boss; photos that still fail are marked
-`failed` and simply layout without scores (treated as average). Ballpark cost: 100 photos
-at 768 px ≈ ~100k input tokens spread over ~10 calls — cents per book on a flash-class
-model, and `STYLING_MODEL` stays the single model knob.
+`failed` and simply layout without scores (treated as average). The scoring batches use
+their own `VISION_MODEL` env (flash-lite tier) rather than `STYLING_MODEL` — see the
+cost evaluation below.
+
+### Cost & model strategy (evaluated)
+
+Vision scoring is the only per-photo AI step, so it's where cost scales — and at current
+prices it's a non-issue if the model tier is chosen deliberately:
+
+- **Flash-lite-class hosted models** (Gemini Flash-Lite, Qwen-VL-Plus, 4o-mini class via
+  OpenRouter) charge ~$0.10–0.15/M input; a 768 px image costs ~260–1100 tokens →
+  **~$0.0001–0.0002 per photo, i.e. ~1–2 cents per 100-photo book** including prompt and
+  JSON output. Even 1,000 books/month ≈ €20. Frontier-class models would be 20–50× that
+  for no gain on "score this photo 0–10" — so the scoring batches get their **own
+  `VISION_MODEL` env** (flash-lite tier) instead of reusing `STYLING_MODEL`, which stays
+  the knob for the per-book design pass where judgment quality actually matters.
+- **Self-hosted specialized models** (near-zero marginal cost) were evaluated as the
+  alternative: LAION-Aesthetics / Aesthetic-Predictor-v2.5 (CLIP/SigLIP + small head,
+  ONNX on CPU, ~0.5–1 s/photo on the VPS) for aesthetics, MediaPipe Face Landmarker
+  (eye-blink blendshapes) for closed eyes, CLIP zero-shot for tags. Verdict: **not for
+  v1** — it adds ONNX plumbing, ~0.5–1 GB of model weights to the worker image, and RAM
+  pressure on the shared Hetzner VPS to save single-digit cents per book, and it still
+  can't produce the `shortDescription` the captions/agent need. The `PhotoAnalysis`
+  shape is deliberately producer-agnostic so a self-hosted scorer can replace the API
+  call later without touching consumers — the reasons to do that are **DSGVO posture**
+  (every photo leaves the server; today only the design pass's capped ~30 do) and volume,
+  not cost.
+- **Dedicated vision APIs** (AWS Rekognition face-quality/eyes-open at ~$1/1,000 images,
+  Google Cloud Vision) cost ~10× the LLM route, cover fewer fields, and add a vendor —
+  rejected.
+- **What never needs a model**: blur detection moves to the free tier — variance of
+  Laplacian over sharp's raw pixels in the `photo-meta` job — alongside pHash dedup and
+  EXIF. The vision call then only judges what actually needs judgment (aesthetics, eyes,
+  content); if flash-lite eyes-closed detection proves unreliable on small faces in
+  group shots, MediaPipe face landmarks slot into `photo-meta` as a fast-follow.
 
 **Duplicate clustering** is pure code at layout time (not a job): photos whose phash
 Hamming distance ≤ threshold within the same time cluster form a group; the best
@@ -387,9 +419,9 @@ memory/Docker fonts — check `INFRASTRUCTURE.md` before deploying those.
 
 1. **Photo cap per book** — hard limit (300?) to bound analysis cost and render memory,
    or soft warning only? Plan assumes a hard cap of 300 for v1.
-2. **Vision model** — reuse `STYLING_MODEL` (one knob, current behavior) vs a separate
-   cheaper `VISION_MODEL` env for the scoring batches. Plan assumes reuse until cost says
-   otherwise.
+2. **Vision model** — decided (§4): separate `VISION_MODEL` env at flash-lite tier for
+   scoring batches; `STYLING_MODEL` keeps the design pass. Remaining question: which
+   flash-lite model routes best through OpenRouter for structured JSON on images.
 3. **Reverse geocoding** — ship v1 with unnamed GPS clusters (AI names sections from
    content) or bundle an offline coarse-city dataset for "München, Juni 2025" labels?
 4. **Display rendition rollout** — generate the 1600 px rendition only for book-owned
