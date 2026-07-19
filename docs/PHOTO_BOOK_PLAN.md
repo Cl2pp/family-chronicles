@@ -336,6 +336,16 @@ picker session and then downloads the selected originals server-side (short-live
 long pole — days of review, privacy-policy requirements), session-polling plumbing, and
 a server-side fetch pipeline. Verdict: **worth doing as phase 3**; design the §3 ingest
 so "source: Google Photos" is just another way to feed it.
+
+**Albums**: there is no programmatic "import album X" — the app can never list a user's
+albums (Library API album reads are app-created-content-only since the 2025 change), and
+share-link albums have no official API. But the *user* can do it inside the picker: the
+picker opens on recent photos (albums aren't a browse category) and supports **search by
+album title**; the user searches their album and multi-selects its photos. So the
+"create an album, import the whole thing" workflow exists, phrased as UI guidance before
+opening the picker ("Erstelle in Google Photos ein Album, such es dann im Auswahlfenster
+und wähle die Fotos aus") — Google's own docs recommend exactly this instruction
+pattern. It's a quick multi-select gesture, not a one-click album import.
 Sources: [Google Photos updates](https://developers.google.com/photos/support/updates),
 [Picker API launch post](https://developers.googleblog.com/en/google-photos-picker-api-launch-and-library-api-updates/),
 [Picker API guide](https://developers.google.com/photos/picker/guides/get-started-picker).
