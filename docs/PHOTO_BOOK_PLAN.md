@@ -191,6 +191,40 @@ prices it's a non-issue if the model tier is chosen deliberately:
   call later without touching consumers — the reasons to do that are **DSGVO posture**
   (every photo leaves the server; today only the design pass's capped ~30 do) and volume,
   not cost.
+### Turnaround & throughput (hosted route)
+
+Latency is *not* a problem on the hosted route, for one structural reason: the worker's
+vision jobs are **I/O-bound HTTP calls, not CPU work on our VPS** — the provider's fleet
+does the compute, and we fan many requests out concurrently. (The self-hosted 0.5–1 s/photo
+figure was serial CPU on *our* box — exactly what doesn't scale to hundreds of users, and
+the reason we're not doing it in v1.)
+
+The math on a flash-lite model (TTFT ~0.3 s, ~220–390 output tok/s):
+- **One batch** (~6–8 thumbnails, structured JSON out ~120 tokens/photo ≈ ~850 output
+  tokens): ≈ **3–5 s** wall-clock.
+- **One book** (100 photos ≈ 14 batches): batches are enqueued independently and fanned
+  out through the worker's concurrency (the pg-boss `photo-vision` queue), so they don't
+  run serially — a whole book's vision pass lands in **~10–25 s** depending on the
+  concurrency cap and provider rate limits, not 14×5 s.
+- **Perceived latency ≈ 0 regardless**: the deterministic metadata layout (§6) gives the
+  user a complete, viewable book the instant uploads finish (EXIF order + blur/dup culling,
+  no AI). Vision only *refines* it (better hero, culling of eyes-closed shots, captions),
+  arriving a few seconds later as a live-preview update. Nobody watches a spinner waiting
+  on the model.
+
+**Scaling to 10s–100s of concurrent users** shifts the bottleneck off latency and onto
+throughput limits, handled by:
+- **Provider rate limits (RPM/TPM)** are the real ceiling — request a higher tier, and use
+  OpenRouter's provider routing to spread load across backends for the same model.
+- **Worker fan-out + replicas**: `photo-vision` runs at a healthy concurrency (dozens of
+  in-flight HTTP calls per worker, since they're not CPU-bound); if book volume outgrows
+  one worker, the process scales horizontally (stateless, pulls from the shared pg-boss
+  queue) without touching the web tier.
+- **Graceful degradation**: because the metadata book already stands, a backed-up vision
+  queue never blocks a user — their book just gets its AI refinement a bit later. A batch/
+  async vision API (≈50% cheaper, minutes-scale) is a possible cost lever at high volume,
+  but its latency is wrong for the interactive refine, so v1 stays on real-time calls.
+
 - **Dedicated vision APIs** (AWS Rekognition face-quality/eyes-open at ~$1/1,000 images,
   Google Cloud Vision) cost ~10× the LLM route, cover fewer fields, and add a vendor —
   rejected.
