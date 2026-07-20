@@ -524,6 +524,9 @@ export const de: Dictionary = {
     storyCount: (n: number) => (n === 1 ? '1 Geschichte' : `${n} Geschichten`),
     by: (name: string) => `Von ${name}`,
     addStory: 'Geschichte hinzufügen',
+    sortLabel: 'Sortierung',
+    sortHappened: 'Als es geschah',
+    sortAdded: 'Hinzugefügt',
     unlinkedTitle: 'Du bist noch nicht im Stammbaum',
     unlinkedBody:
       'Mindestens eines deiner Familienwerke zeigt Geschichten nur der nahen Familie. Bis dich ein Eigentümer im Stammbaum einträgt, siehst du nur die Geschichten, die du selbst erzählt hast.',
