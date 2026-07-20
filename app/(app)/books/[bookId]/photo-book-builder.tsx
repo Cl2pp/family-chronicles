@@ -33,6 +33,7 @@ import {
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
+import { isBookPrintFresh } from '@/lib/book-print-status';
 import { PHOTO_BOOK_STYLES, type PhotoBookStyle } from '@/lib/photo-book-plan';
 import { BulkPhotoUploader } from '@/components/bulk-photo-uploader';
 import {
@@ -195,7 +196,7 @@ export function PhotoBookBuilder({
    *  with a stale plan (photos added/excluded, a chat edit) never hands back an outdated
    *  PDF. */
   function downloadPdf() {
-    if (book.status === 'preview_ready' && !book.layoutStale) {
+    if (isBookPrintFresh('photo', book.status, book.layoutStale)) {
       triggerDownload();
       return;
     }
@@ -350,7 +351,7 @@ export function PhotoBookBuilder({
             component={Link}
             href={`/books/${book.id}/order`}
             leftSection={<IconShoppingCart size={16} />}
-            disabled={book.status !== 'preview_ready'}
+            disabled={!isBookPrintFresh('photo', book.status, book.layoutStale)}
           >
             {tb.orderCta}
           </Button>

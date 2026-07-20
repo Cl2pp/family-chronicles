@@ -25,6 +25,7 @@ import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
 import type { BookFormat, BookQuote } from '@/lib/gelato';
 import type { BookKind, BookStatus } from '@/lib/books';
+import { isBookPrintFresh } from '@/lib/book-print-status';
 import { renderPreviewAction } from '../../actions';
 import posthog from 'posthog-js';
 
@@ -40,6 +41,11 @@ interface OrderBook {
    *  book (excluded ones don't count). Null for story books. */
   photoCount: number | null;
   status: BookStatus;
+  /** True when the book's content/plan changed since its stored print PDF was rendered
+   *  (`lib/books.ts`'s `BookDetail.layoutStale`). Photo books only — story books always
+   *  downgrade `status` back to `draft` on any content change, so `preview_ready` alone
+   *  means fresh for them (see `isBookPrintFresh`, `lib/book-print-status.ts`). */
+  layoutStale: boolean;
   errorMessage: string | null;
   /** True when the viewer can't read every story in the book — the all-chapters
    *  print/order flow is off limits; the view explains why instead. Always false for
@@ -84,7 +90,17 @@ export function OrderView({
     return () => clearInterval(timer);
   }, [book.accessBlocked, book.status, book.id, router]);
 
-  const preparing = book.status !== 'preview_ready' && book.status !== 'ordered';
+  // For story books this is exactly the old `status !== 'preview_ready' && status !==
+  // 'ordered'` check (unchanged behavior — `isBookPrintFresh` ignores `layoutStale` for
+  // them, since their mutations already downgrade `status` back to `draft` on any
+  // content change). For photo books it ALSO treats a `preview_ready` book with
+  // `layoutStale: true` as still preparing — the narrow race where a mutation landed
+  // while a render was already in flight (see `lib/book-print-status.ts`) — so the price
+  // and Download button never show a PDF that predates the book's current content. That
+  // falls into the same "preparing" UI below as any other not-yet-rendered state, and
+  // reuses the same `preparePrintProof`/`renderPreviewAction` trigger and the `rendering`
+  // status poll above.
+  const preparing = !isBookPrintFresh(book.kind, book.status, book.layoutStale);
   const priced = quote?.priced ?? false;
   const priceLine = priced && quote?.total != null ? eur(quote.total) : to.priceOnRequest;
 
