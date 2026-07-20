@@ -12,11 +12,14 @@ import {
   deleteBook,
   editablePhotoBook,
   getBookForUser,
+  getPhotoBookStyle,
   listBookPhotos,
+  regeneratePhotoBookLayout,
   requestAiDesign,
   requestPreview,
   resetBookLayout,
   setBookStories,
+  setPhotoBookStyle,
   setPhotoExcluded,
   updateBook,
   updateBookLayout,
@@ -24,6 +27,7 @@ import {
   type BookPhotoItem,
   type LayoutOp,
 } from '@/lib/books';
+import type { PhotoBookStyle } from '@/lib/photo-book-plan';
 import { runBookAgent, type ChatTurn } from '@/lib/ai/agent';
 import type { Receipt, ToolContext } from '@/lib/ai/tools';
 import { getI18n } from '@/lib/i18n/server';
@@ -155,6 +159,34 @@ export async function setPhotoExcludedAction(input: {
   const user = await requireUser();
   const result = await setPhotoExcluded({ ...input, userId: user.id });
   if (result.ok) revalidatePath(`/books/${input.bookId}`);
+  return result.ok ? {} : { error: result.error };
+}
+
+/** The photo book's current style suite — for the builder's picker to highlight. */
+export async function getPhotoBookStyleAction(
+  bookId: string,
+): Promise<{ style?: PhotoBookStyle; error?: string }> {
+  const user = await requireUser();
+  const result = await getPhotoBookStyle(bookId, user.id);
+  return result.ok ? { style: result.value.style } : { error: result.error };
+}
+
+/** Switch the photo book's style suite. */
+export async function setPhotoBookStyleAction(input: {
+  bookId: string;
+  style: PhotoBookStyle;
+}): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await setPhotoBookStyle({ ...input, userId: user.id });
+  if (result.ok) revalidatePath(`/books/${input.bookId}`);
+  return result.ok ? {} : { error: result.error };
+}
+
+/** Rebuild the photo book's layout from scratch (the builder's "Regenerate" button). */
+export async function regeneratePhotoBookLayoutAction(bookId: string): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await regeneratePhotoBookLayout({ bookId, userId: user.id });
+  if (result.ok) revalidatePath(`/books/${bookId}`);
   return result.ok ? {} : { error: result.error };
 }
 

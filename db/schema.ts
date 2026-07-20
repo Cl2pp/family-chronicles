@@ -382,6 +382,11 @@ export const assets = pgTable(
     s3Key: text('s3_key').notNull(),
     /** Downscaled WebP for grids/banners, written by the worker's `thumbnail` job. */
     thumbS3Key: text('thumb_s3_key'),
+    /** ~1600px-longest-edge WebP, written by the worker's `thumbnail` job for BOOK-owned
+     *  photos only (`book_id` set) — 640px thumbnails read as visibly soft on a
+     *  full-bleed photo-book page (docs/PHOTO_BOOK_PLAN.md §8). Story photos never get
+     *  one; their thumbnail is enough for the text-column figures they render into. */
+    displayS3Key: text('display_s3_key'),
     mimeType: text('mime_type').notNull(),
     bytes: integer('bytes'),
     caption: text('caption'),

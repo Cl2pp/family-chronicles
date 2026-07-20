@@ -1,0 +1,1 @@
+ALTER TABLE "assets" ADD COLUMN "display_s3_key" text;

@@ -12,10 +12,11 @@ import { deleteObject, listObjects } from '@/lib/s3';
  * NOT orphans: their `message_attachments` rows keep rendering in the chat history, so
  * deleting them would leave broken thumbnails in the conversation.
  */
-// `thumbs/` is worker-written, not browser-uploaded, but sweeping it the same way
-// reclaims thumbnails whose asset rows are gone (e.g. after a story delete raced).
-// `books/photos/` is the bulk photo-book uploader's prefix (lib/books.ts,
-// addBookPhotos) — same abandoned-upload risk as `stories/photos/`.
+// `thumbs/`/`displays/` are worker-written, not browser-uploaded, but sweeping them the
+// same way reclaims renditions whose asset rows are gone (e.g. after a story delete
+// raced). `displays/` is the photo-book "display" rendition (lib/thumbnails.ts,
+// docs/PHOTO_BOOK_PLAN.md §8). `books/photos/` is the bulk photo-book uploader's prefix
+// (lib/books.ts, addBookPhotos) — same abandoned-upload risk as `stories/photos/`.
 const SWEPT_PREFIXES = [
   'chat/photos/',
   'chat/audio/',
@@ -23,6 +24,7 @@ const SWEPT_PREFIXES = [
   'books/photos/',
   'avatars/',
   'thumbs/',
+  'displays/',
 ];
 
 /**
@@ -34,15 +36,16 @@ const GRACE_MS = 24 * 60 * 60 * 1000;
 
 /** Every object key the database still points at. */
 async function referencedKeys(): Promise<Set<string>> {
-  const [attachmentRows, assetRows, thumbRows, personRows, userRows] = await Promise.all([
+  const [attachmentRows, assetRows, thumbRows, displayRows, personRows, userRows] = await Promise.all([
     db.select({ key: messageAttachments.s3Key }).from(messageAttachments),
     db.select({ key: assets.s3Key }).from(assets),
     db.select({ key: assets.thumbS3Key }).from(assets),
+    db.select({ key: assets.displayS3Key }).from(assets),
     db.select({ key: people.avatarS3Key }).from(people),
     db.select({ key: user.image }).from(user),
   ]);
   const keys = new Set<string>();
-  for (const rows of [attachmentRows, assetRows, thumbRows, personRows, userRows]) {
+  for (const rows of [attachmentRows, assetRows, thumbRows, displayRows, personRows, userRows]) {
     for (const r of rows) if (r.key) keys.add(r.key);
   }
   return keys;
