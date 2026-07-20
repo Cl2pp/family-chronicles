@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildPhotoBookAutoLayout, type AutoLayoutPhoto } from './photo-book-autolayout';
+import { buildPhotoBookAutoLayout, type AutoLayoutPhoto, type PhotoBookAutoLayoutInput } from './photo-book-autolayout';
+import { checkPhotoBookPlanConsistency } from './photo-book-plan';
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -92,8 +93,12 @@ describe('buildPhotoBookAutoLayout — sectioning', () => {
     const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
     expect(plan.sections.length).toBeLessThanOrEqual(4);
     expect(plan.sections.length).toBeGreaterThan(1);
+    // 30 photos in, 1 becomes the cover hero (excluded from interior pages — see "cover
+    // selection — exclusivity" below), so 29 remain placed inside sections.
     const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
-    expect(placed).toHaveLength(30);
+    expect(placed).toHaveLength(29);
+    expect(plan.cover.heroAssetId).toBeDefined();
+    expect(placed).not.toContain(plan.cover.heroAssetId);
   });
 
   it('keeps a multi-day weekend trip as one section (gaps only overnight)', () => {
@@ -129,8 +134,12 @@ describe('buildPhotoBookAutoLayout — sectioning', () => {
     ];
     const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
     expect(plan.sections).toHaveLength(1);
+    // One of the 5 becomes the cover hero and is excluded from interior placement (see
+    // "cover selection — exclusivity" below) — so `placed` alone is the other 4; adding
+    // the hero back in accounts for all 5.
     const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
-    expect(placed.sort()).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(placed).toHaveLength(4);
+    expect([...placed, plan.cover.heroAssetId].sort()).toEqual(['a', 'b', 'c', 'd', 'e']);
   });
 
   it('starts a new section on a large GPS jump even without a big time gap', () => {
@@ -180,7 +189,10 @@ describe('buildPhotoBookAutoLayout — culling', () => {
       photo({ assetId: 'blurry-dup', position: 1, takenAt: new Date(t0 + 60_000), phash: 'aaaaaaaaaaaaaaaa', blurScore: 50 }),
       photo({ assetId: 'other', position: 2, takenAt: new Date(t0 + 2 * 60_000), phash: 'ffffffffffffffff', blurScore: 180 }),
     ];
-    const { plan, culled } = buildPhotoBookAutoLayout(baseInput(photos));
+    // Pin the cover away from any of these ids — this test is about duplicate culling,
+    // not cover-hero exclusivity (covered separately below), so both survivors should
+    // land in the interior pages.
+    const { plan, culled } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
     expect(culled).toEqual([{ assetId: 'blurry-dup', reason: 'duplicate' }]);
     const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
     expect(placed).not.toContain('blurry-dup');
@@ -219,9 +231,14 @@ describe('buildPhotoBookAutoLayout — culling', () => {
 });
 
 describe('buildPhotoBookAutoLayout — pacing', () => {
+  // Every test in this block pins the cover to an id outside the section under test —
+  // otherwise the section's own best photo would double as the (excluded) cover hero,
+  // which is exactly what "cover selection — exclusivity" below tests; pinning it away
+  // keeps these tests focused on `paceSection`'s grouping logic alone.
+
   it('gives a lone section photo its own full page, not a multi-slot template', () => {
     const photos = [photo({ assetId: 'a', position: 0, takenAt: new Date(t0), width: 1600, height: 1200 })];
-    const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
+    const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
     expect(plan.sections[0].pages).toHaveLength(1);
     expect(['full-bleed', 'full-framed']).toContain(plan.sections[0].pages[0].template);
     expect(plan.sections[0].pages[0].assetIds).toEqual(['a']);
@@ -233,7 +250,7 @@ describe('buildPhotoBookAutoLayout — pacing', () => {
       photo({ assetId: 'a', position: 1, takenAt: new Date(t0 + HOUR), width: 1600, height: 1000 }),
       photo({ assetId: 'b', position: 2, takenAt: new Date(t0 + 2 * HOUR), width: 1600, height: 1000 }),
     ];
-    const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
+    const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
     const pairPage = plan.sections[0].pages.find((p) => p.assetIds.length === 2);
     expect(pairPage?.template).toBe('two-horizontal');
   });
@@ -244,7 +261,7 @@ describe('buildPhotoBookAutoLayout — pacing', () => {
       photo({ assetId: 'a', position: 1, takenAt: new Date(t0 + HOUR), width: 1000, height: 1600 }),
       photo({ assetId: 'b', position: 2, takenAt: new Date(t0 + 2 * HOUR), width: 1000, height: 1600 }),
     ];
-    const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
+    const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
     const pairPage = plan.sections[0].pages.find((p) => p.assetIds.length === 2);
     expect(pairPage?.template).toBe('two-vertical');
   });
@@ -333,5 +350,161 @@ describe('buildPhotoBookAutoLayout — cover selection', () => {
     });
     expect(plan.cover.title).toBe('Familie Müller');
     expect(plan.style).toBe('gallery');
+  });
+});
+
+describe('buildPhotoBookAutoLayout — cover selection exclusivity (regression)', () => {
+  // Regression coverage for the blocker this fixes: the auto-layouter used to pick the
+  // cover hero via `pickBestPhoto` *and* let `paceSection` place that same photo again as
+  // its section's opener, producing a duplicate `assetId` that `checkPhotoBookPlanConsistency`
+  // rejects — which made `buildAndPersistPhotoAutoPlan` fall back to a blank book for
+  // essentially every real photo book. See `lib/photo-book-autolayout.ts`'s hero-exclusion
+  // comment in `buildPhotoBookAutoLayout`.
+
+  it('never places the auto-picked hero anywhere inside a section, single-section book', () => {
+    const photos = [
+      photo({ assetId: 'a', position: 0, takenAt: new Date(t0), width: 4000, height: 3000 }),
+      photo({ assetId: 'b', position: 1, takenAt: new Date(t0 + HOUR), width: 1200, height: 900 }),
+      photo({ assetId: 'c', position: 2, takenAt: new Date(t0 + 2 * HOUR), width: 1200, height: 900 }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
+    expect(plan.cover.heroAssetId).toBe('a'); // highest resolution, no pin/carry-over
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    expect(interior).not.toContain('a');
+  });
+
+  it('never places a pinned cover hero anywhere inside a section, even if it would also have been the local opener', () => {
+    const photos = [
+      photo({ assetId: 'a', position: 0, takenAt: new Date(t0), width: 4000, height: 3000 }),
+      photo({ assetId: 'b', position: 1, takenAt: new Date(t0 + HOUR), width: 1200, height: 900 }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'a' });
+    expect(plan.cover.heroAssetId).toBe('a');
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    expect(interior).not.toContain('a');
+  });
+
+  it('drops a section entirely, rather than emitting an empty one, when its only photo is the hero', () => {
+    const photos = [photo({ assetId: 'only', position: 0, takenAt: new Date(t0), width: 2000, height: 1500 })];
+    const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
+    expect(plan.cover.heroAssetId).toBe('only');
+    expect(plan.sections).toEqual([]);
+  });
+});
+
+describe('buildPhotoBookAutoLayout — plan consistency (regression)', () => {
+  // The regression class that let the exclusivity bug through PR2 review: every plan the
+  // producer emits, for a realistic spread of book sizes, must pass
+  // `checkPhotoBookPlanConsistency` (`lib/photo-book-plan.ts`) with zero problems — no
+  // asset placed twice, nothing referencing a photo outside the book, no empty sections,
+  // every page's arity matching its template.
+
+  function checkConsistency(input: PhotoBookAutoLayoutInput) {
+    const { plan, culled } = buildPhotoBookAutoLayout(input);
+    const culledIds = new Set(culled.map((c) => c.assetId));
+    const allAssetIds = input.photos.map((p) => p.assetId);
+    const availableAssetIds = allAssetIds.filter((id) => !culledIds.has(id));
+    const problems = checkPhotoBookPlanConsistency(plan, { availableAssetIds, allAssetIds });
+    return { plan, problems };
+  }
+
+  function randomish(n: number, seed: number): number {
+    // Deterministic pseudo-random-ish jitter, no `Math.random()` — keeps the test stable.
+    return ((seed * 9301 + 49297) * (n + 1)) % 233280;
+  }
+
+  it('is consistent for a single small section', () => {
+    const photos = Array.from({ length: 5 }, (_, i) =>
+      photo({
+        assetId: `p${i}`,
+        position: i,
+        takenAt: new Date(t0 + i * HOUR),
+        width: 800 + (randomish(i, 1) % 2000),
+        height: 600 + (randomish(i, 2) % 1500),
+        blurScore: 50 + (randomish(i, 3) % 150),
+      }),
+    );
+    const { plan, problems } = checkConsistency(baseInput(photos));
+    expect(problems).toEqual([]);
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
+  });
+
+  it('is consistent for a handful of photos (fewer than a full section)', () => {
+    const photos = [
+      photo({ assetId: 'x', position: 0, takenAt: new Date(t0), width: 1600, height: 1200 }),
+      photo({ assetId: 'y', position: 1, takenAt: new Date(t0 + HOUR), width: 1200, height: 1600 }),
+    ];
+    const { plan, problems } = checkConsistency(baseInput(photos));
+    expect(problems).toEqual([]);
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
+  });
+
+  it('is consistent for a single photo (whole book collapses to just a cover)', () => {
+    const photos = [photo({ assetId: 'solo', position: 0, takenAt: new Date(t0), width: 2400, height: 1600 })];
+    const { plan, problems } = checkConsistency(baseInput(photos));
+    expect(problems).toEqual([]);
+    expect(plan.cover.heroAssetId).toBe('solo');
+    expect(plan.sections).toEqual([]);
+  });
+
+  it('is consistent across multiple date/GPS-separated sections', () => {
+    const clusters = [0, 1, 2].map((cluster) =>
+      Array.from({ length: 6 }, (_, i) =>
+        photo({
+          assetId: `c${cluster}-${i}`,
+          position: cluster * 6 + i,
+          takenAt: new Date(t0 + cluster * 3 * DAY + i * HOUR),
+          width: 1000 + (randomish(i, cluster + 10) % 3000),
+          height: 800 + (randomish(i, cluster + 20) % 2200),
+          blurScore: 40 + (randomish(i, cluster + 30) % 160),
+          phash: (i % 3 === 0 ? 'a' : 'f').repeat(16),
+        }),
+      ),
+    ).flat();
+    const { plan, problems } = checkConsistency(baseInput(clusters));
+    expect(problems).toEqual([]);
+    expect(plan.sections.length).toBeGreaterThan(1);
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
+  });
+
+  it('is consistent for a large, many-photo book spanning many sections', () => {
+    const photos = Array.from({ length: 120 }, (_, i) => {
+      const cluster = Math.floor(i / 12);
+      return photo({
+        assetId: `l${i}`,
+        position: i,
+        takenAt: new Date(t0 + cluster * 2 * DAY + (i % 12) * HOUR),
+        gpsLat: 48 + cluster * 2,
+        gpsLng: 11 + cluster * 2,
+        width: 900 + (randomish(i, 40) % 3500),
+        height: 700 + (randomish(i, 50) % 2800),
+        blurScore: 30 + (randomish(i, 60) % 170),
+      });
+    });
+    const { plan, problems } = checkConsistency(baseInput(photos));
+    expect(problems).toEqual([]);
+    expect(plan.sections.length).toBeGreaterThan(1);
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
+  });
+
+  it('is consistent with an explicit cover pin that would otherwise collide with a section opener', () => {
+    const photos = Array.from({ length: 8 }, (_, i) =>
+      photo({
+        assetId: `q${i}`,
+        position: i,
+        takenAt: new Date(t0 + i * HOUR),
+        width: 4000, // identical resolution — every photo is an equally strong "best photo" candidate
+        height: 3000,
+      }),
+    );
+    const { plan, problems } = checkConsistency({ ...baseInput(photos), coverAssetId: 'q3' });
+    expect(problems).toEqual([]);
+    expect(plan.cover.heroAssetId).toBe('q3');
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    expect(interior).not.toContain('q3');
   });
 });

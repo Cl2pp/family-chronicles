@@ -198,6 +198,15 @@ export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: Phot
   if (plan.cover.heroAssetId) reference(plan.cover.heroAssetId, 'Cover');
   for (const id of plan.cover.backAssetIds ?? []) reference(id, 'Cover back');
 
+  // A book with actual content (any section with at least one page) must have a cover
+  // hero — a printed photo book can't have a blank front cover. An empty book (no
+  // sections, or sections with no pages left after culling/exclusion) is still legal
+  // without one, same as a freshly created photo book with zero uploaded photos.
+  const hasContent = plan.sections.some((section) => section.pages.length > 0);
+  if (hasContent && !plan.cover.heroAssetId) {
+    problems.push('Cover has no heroAssetId, but the book has content');
+  }
+
   for (const section of plan.sections) {
     if (section.pages.length === 0) {
       problems.push(`Section "${section.title}" has no pages`);

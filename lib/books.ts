@@ -754,13 +754,22 @@ export async function setPhotoExcluded(input: {
  * "always have an answer" contract as `getBookLayoutSummary` for story books), so the
  * builder's style picker always has a value to highlight, and the live preview and the
  * picker never disagree about which suite is active.
+ *
+ * Cheap by default: the builder page (`app/(app)/books/[bookId]/page.tsx`) calls this
+ * purely to seed the style picker, and its `<iframe>` immediately fires a second request
+ * at `preview-html`, which resolves the SAME plan again (it needs the full content anyway
+ * to render). A valid, non-stale stored plan answers this from the `books` row alone —
+ * skipping `loadPhotoBook`'s full photo join and any rebuild — so the common case (every
+ * request after the book's first) doesn't pay for that load twice. Only a book with no
+ * usable plan yet takes the full build path, and it persists what it builds, so it's a
+ * one-time cost.
  */
 export async function getPhotoBookStyle(
   bookId: string,
   userId: string,
 ): Promise<Result<{ style: PhotoBookStyle }>> {
   const [row] = await db
-    .select({ chronicleId: books.chronicleId, kind: books.kind })
+    .select({ chronicleId: books.chronicleId, kind: books.kind, layoutPlan: books.layoutPlan, layoutStale: books.layoutStale })
     .from(books)
     .where(eq(books.id, bookId))
     .limit(1);
@@ -768,6 +777,13 @@ export async function getPhotoBookStyle(
   if (row.kind !== 'photo') return err('This is not a photo book.');
   const m = await getMembership(row.chronicleId, userId);
   if (!m) return err('Book not found.');
+
+  if (row.layoutPlan && !row.layoutStale) {
+    const validated = validatePhotoBookPlan(row.layoutPlan);
+    if (validated.ok) return { ok: true, value: { style: validated.plan.style } };
+    // Falls through to the full build below — same "rebuild on invalid stored plan"
+    // behavior `loadOrBuildPhotoPlan` has, just reached via the cheap path's own check.
+  }
 
   const loaded = await loadPhotoBook(bookId);
   const plan = await loadOrBuildPhotoPlan(bookId, loaded);

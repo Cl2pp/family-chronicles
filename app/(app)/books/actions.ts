@@ -12,7 +12,6 @@ import {
   deleteBook,
   editablePhotoBook,
   getBookForUser,
-  getPhotoBookStyle,
   listBookPhotos,
   regeneratePhotoBookLayout,
   requestAiDesign,
@@ -160,15 +159,6 @@ export async function setPhotoExcludedAction(input: {
   const result = await setPhotoExcluded({ ...input, userId: user.id });
   if (result.ok) revalidatePath(`/books/${input.bookId}`);
   return result.ok ? {} : { error: result.error };
-}
-
-/** The photo book's current style suite — for the builder's picker to highlight. */
-export async function getPhotoBookStyleAction(
-  bookId: string,
-): Promise<{ style?: PhotoBookStyle; error?: string }> {
-  const user = await requireUser();
-  const result = await getPhotoBookStyle(bookId, user.id);
-  return result.ok ? { style: result.value.style } : { error: result.error };
 }
 
 /** Switch the photo book's style suite. */

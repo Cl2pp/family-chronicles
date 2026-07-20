@@ -142,4 +142,24 @@ describe('checkPhotoBookPlanConsistency', () => {
     const plan = basePlan({ cover: { title: 'Empty Book' }, sections: [] });
     expect(checkPhotoBookPlanConsistency(plan, contentFor([]))).toEqual([]);
   });
+
+  it('flags a non-empty book with no cover hero', () => {
+    const plan = basePlan({ cover: { title: 'No Hero' } }); // sections carried over from basePlan(), non-empty
+    const content = contentFor(['a1', 'a2', 'a3', 'a4']);
+    const problems = checkPhotoBookPlanConsistency(plan, content);
+    expect(problems.some((p) => p.includes('heroAssetId'))).toBe(true);
+  });
+
+  it('does not flag a missing hero when every section has zero pages (already flagged separately)', () => {
+    // A book whose only section is empty isn't really "has content" in spirit, but that
+    // case is already flagged by the "Section has no pages" check — this test just
+    // documents that the missing-hero check doesn't pile on a second, redundant problem
+    // for the same underlying section.
+    const plan = basePlan({ cover: { title: 'x' } });
+    plan.sections[0].pages = [];
+    const content = contentFor(['a1', 'a2', 'a3', 'a4']);
+    const problems = checkPhotoBookPlanConsistency(plan, content);
+    expect(problems.some((p) => p.includes('heroAssetId'))).toBe(false);
+    expect(problems.some((p) => p.includes('no pages'))).toBe(true);
+  });
 });

@@ -170,10 +170,11 @@ function sectionizeByBoundary(sortedDated: AutoLayoutPhoto[]): AutoLayoutPhoto[]
 
 /** Time gap between the end of one photo group and the start of the next — used to pick
  *  which adjacent pair to merge, both for tiny-section folding and section-count
- *  capping. A group with no dated boundary photo (the undated tail) reads as gap 0
- *  (epoch to epoch), which sorts it last among merge candidates in practice since real
- *  gaps between real dated sections are almost always far larger than 0 — i.e. it's
- *  merged only when nothing else is left to merge. */
+ *  capping. The undated tail has no `takenAt` on its boundary photos, so it falls back to
+ *  the epoch (1970) on whichever side is undated; measured against a real (modern) date on
+ *  the other side, that reads as a HUGE gap — decades, not zero — which is exactly what
+ *  sorts it last among merge candidates (this function picks the *smallest* gap first): it
+ *  only gets merged once every other, genuinely-close pair has already been merged. */
 function gapBetween(a: AutoLayoutPhoto[], b: AutoLayoutPhoto[]): number {
   const aEnd = a[a.length - 1]?.takenAt?.getTime() ?? 0;
   const bStart = b[0]?.takenAt?.getTime() ?? 0;
@@ -408,7 +409,13 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
 
   const culled: CulledPhoto[] = [];
   const survivorsForCover: AutoLayoutPhoto[] = [];
-  const sections: PhotoSectionPlan[] = [];
+  // Post-cull photos per group, kept alongside the ORIGINAL group (pre-cull, still used
+  // for `sectionTitle`'s date range) — two passes are needed because the cover hero can
+  // only be chosen once every group's culling has run (it's picked from the full,
+  // book-wide survivor pool), but pacing each section needs to know the hero first (to
+  // exclude it — see below), so the pass that builds pages can't happen until after hero
+  // selection.
+  const groupKeeps: { group: AutoLayoutPhoto[]; keep: AutoLayoutPhoto[] }[] = [];
 
   for (const group of groups) {
     if (group.length === 0) continue;
@@ -420,14 +427,31 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
     if (keep.length === 0) continue;
 
     survivorsForCover.push(...keep);
-    sections.push({
-      title: sectionTitle(group, locale, undatedTitle),
-      pages: paceSection(keep),
-    });
+    groupKeeps.push({ group, keep });
   }
 
   const bestOverall = pickBestPhoto(survivorsForCover);
   const heroAssetId = input.coverAssetId ?? input.existingHeroAssetId ?? bestOverall?.assetId;
+
+  // The cover hero (however it was chosen — pinned, carried over, or auto-picked) is the
+  // book's front-cover image and must NOT also turn up as an interior page: `paceSection`
+  // independently picks each section's own opener by the same "best photo" criterion, so
+  // without this filter the hero's section would place it a second time as its own
+  // opener, producing a duplicate `assetId` that fails `checkPhotoBookPlanConsistency`
+  // (mirrors `buildChapterBlocks`'s `pool = pool.filter(...)` in `lib/book-autolayout.ts`,
+  // which solves the same problem for story books).
+  const sections: PhotoSectionPlan[] = [];
+  for (const { group, keep } of groupKeeps) {
+    const interior = heroAssetId ? keep.filter((p) => p.assetId !== heroAssetId) : keep;
+    // Excluding the hero can leave a section with nothing left (e.g. a single-photo
+    // section whose only photo IS the hero) — drop it rather than emit an empty section,
+    // which `checkPhotoBookPlanConsistency` also rejects.
+    if (interior.length === 0) continue;
+    sections.push({
+      title: sectionTitle(group, locale, undatedTitle),
+      pages: paceSection(interior),
+    });
+  }
 
   const plan: PhotoBookPlan = {
     kind: 'photo',
