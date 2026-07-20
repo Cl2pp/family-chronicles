@@ -333,9 +333,21 @@ function cullBlurry(photos: AutoLayoutPhoto[]): { keep: AutoLayoutPhoto[]; culle
  * has an `analysis` at all (PR2 behavior, unscored books/photos untouched), and whenever
  * NONE of the group's analyzed photos has its eyes open (culling every eyes-closed shot
  * with nothing to replace it with would just remove the only record of that moment).
- * Bounded by `MIN_SURVIVORS`, same floor as `cullBlurry`.
+ * Bounded by `MIN_SURVIVORS`, same floor as `cullBlurry`. `protectedId` (the pinned or
+ * carried-over cover hero — see `buildPhotoBookAutoLayout`) is NEVER culled here even if
+ * it scores `eyesClosed: true`: the hero is resolved from `input.coverAssetId` /
+ * `input.existingHeroAssetId` independently of anything this function decides, so
+ * culling it anyway would leave `plan.cover.heroAssetId` pointing at an excluded photo —
+ * `checkPhotoBookPlanConsistency` flags that as "Cover references an excluded photo" and
+ * the whole plan gets discarded for a blank one (see the module's PR3 fix history). A
+ * user's own explicit pin — or a hero the book has already settled on across a rebuild —
+ * always wins over this heuristic; the alternative (a blank book) is strictly worse than
+ * a cover with closed eyes the user chose.
  */
-function cullEyesClosed(photos: AutoLayoutPhoto[]): { keep: AutoLayoutPhoto[]; culled: CulledPhoto[] } {
+function cullEyesClosed(
+  photos: AutoLayoutPhoto[],
+  protectedId: string | null,
+): { keep: AutoLayoutPhoto[]; culled: CulledPhoto[] } {
   const analyzed = photos.filter((p) => p.analysis != null);
   if (analyzed.length === 0) return { keep: photos, culled: [] };
   const hasOpenEyedSibling = analyzed.some((p) => p.analysis!.eyesClosed === false);
@@ -346,6 +358,7 @@ function cullEyesClosed(photos: AutoLayoutPhoto[]): { keep: AutoLayoutPhoto[]; c
   let survivorCount = photos.length;
   for (const p of photos) {
     if (survivorCount <= MIN_SURVIVORS) break;
+    if (p.assetId === protectedId) continue;
     if (p.analysis?.eyesClosed === true) {
       culledIds.add(p.assetId);
       culled.push({ assetId: p.assetId, reason: 'eyes-closed' });
@@ -377,15 +390,22 @@ const NEUTRAL_AESTHETIC_SCORE = 5;
  *  no-op for any group at or under the cap, or where too little of it is scored yet (see
  *  `MIN_SCORED_FRACTION_FOR_AESTHETIC_CULL`), so an unscored/partially-scored book
  *  behaves exactly as PR2 did. Never reduces a group below the cap, so it can't combine
- *  with the other cullers to empty a section. */
-function cullLowAesthetic(photos: AutoLayoutPhoto[]): { keep: AutoLayoutPhoto[]; culled: CulledPhoto[] } {
+ *  with the other cullers to empty a section. `protectedId` (see `cullEyesClosed`'s doc
+ *  comment) is excluded from the surplus candidate pool entirely, so it can never be
+ *  picked as part of the "lowest-scored surplus" no matter how low its own score is —
+ *  the surplus size itself is unchanged, it's just drawn only from the non-protected
+ *  photos. */
+function cullLowAesthetic(
+  photos: AutoLayoutPhoto[],
+  protectedId: string | null,
+): { keep: AutoLayoutPhoto[]; culled: CulledPhoto[] } {
   if (photos.length <= MAX_SCORED_SECTION_PHOTOS) return { keep: photos, culled: [] };
   const scoredCount = photos.filter((p) => p.analysis?.aestheticScore != null).length;
   if (scoredCount < photos.length * MIN_SCORED_FRACTION_FOR_AESTHETIC_CULL) return { keep: photos, culled: [] };
 
   const surplus = photos.length - MAX_SCORED_SECTION_PHOTOS;
   const sorted = photos
-    .slice()
+    .filter((p) => p.assetId !== protectedId)
     .sort(
       (a, b) =>
         (a.analysis?.aestheticScore ?? NEUTRAL_AESTHETIC_SCORE) -
@@ -522,6 +542,12 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
 
   const groups = computeCandidateSections(input.photos);
 
+  // Resolved up front (before any culling runs) so the score-aware cullers below can
+  // protect it from their own candidacy — see `cullEyesClosed`'s doc comment for why. A
+  // pinned cover always wins over a carried-over one, same precedence `heroAssetId`
+  // itself uses further down.
+  const protectedHeroId = input.coverAssetId ?? input.existingHeroAssetId ?? null;
+
   const culled: CulledPhoto[] = [];
   const survivorsForCover: AutoLayoutPhoto[] = [];
   // Post-cull photos per group, kept alongside the ORIGINAL group (pre-cull, still used
@@ -540,9 +566,11 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
     culled.push(...blurResult.culled);
     // The two score-aware cullers below are no-ops whenever `analysis` is absent (see
     // their own doc comments) — a book with no vision data yet culls identically to PR2.
-    const eyesResult = cullEyesClosed(blurResult.keep);
+    // Both are handed `protectedHeroId` so the resolved cover hero (pinned or carried
+    // over) can never be culled out from under `plan.cover.heroAssetId`.
+    const eyesResult = cullEyesClosed(blurResult.keep, protectedHeroId);
     culled.push(...eyesResult.culled);
-    const aestheticResult = cullLowAesthetic(eyesResult.keep);
+    const aestheticResult = cullLowAesthetic(eyesResult.keep, protectedHeroId);
     culled.push(...aestheticResult.culled);
     const keep = aestheticResult.keep;
     if (keep.length === 0) continue;
@@ -552,7 +580,7 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   }
 
   const bestOverall = pickBestPhoto(survivorsForCover);
-  const heroAssetId = input.coverAssetId ?? input.existingHeroAssetId ?? bestOverall?.assetId;
+  const heroAssetId = protectedHeroId ?? bestOverall?.assetId;
 
   // The cover hero (however it was chosen — pinned, carried over, or auto-picked) is the
   // book's front-cover image and must NOT also turn up as an interior page: `paceSection`

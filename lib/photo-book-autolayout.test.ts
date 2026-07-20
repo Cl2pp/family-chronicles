@@ -782,3 +782,98 @@ describe('buildPhotoBookAutoLayout — plan consistency with analysis present (r
     if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
   });
 });
+
+describe('buildPhotoBookAutoLayout — FIX 1: pinned/carried-over hero survives culling (regression)', () => {
+  // docs/PHOTO_BOOK_PLAN.md PR3 blocker: `heroAssetId` is resolved from
+  // `input.coverAssetId` / `input.existingHeroAssetId` AFTER `cullEyesClosed` /
+  // `cullLowAesthetic` have already run, so — before this fix — a pinned or
+  // carried-over hero that itself scored eyesClosed / lowest-aesthetic got excluded by
+  // those cullers while `plan.cover.heroAssetId` still pointed at it, which
+  // `checkPhotoBookPlanConsistency` flags as "Cover references an excluded photo" and
+  // collapses the whole plan to `emptyPlan()`. Every test below asserts all three
+  // things the fix guarantees: (a) zero consistency problems, (b) the protected id is
+  // the cover hero and is NOT in `culled`, (c) it is not placed on any interior page.
+
+  function assertHeroProtected(
+    result: ReturnType<typeof buildPhotoBookAutoLayout>,
+    allPhotos: AutoLayoutPhoto[],
+    heroId: string,
+  ) {
+    const { plan, culled } = result;
+    const culledIds = new Set(culled.map((c) => c.assetId));
+    expect(culledIds.has(heroId)).toBe(false);
+    expect(plan.cover.heroAssetId).toBe(heroId);
+
+    const allAssetIds = allPhotos.map((p) => p.assetId);
+    const availableAssetIds = allAssetIds.filter((id) => !culledIds.has(id));
+    const problems = checkPhotoBookPlanConsistency(plan, { availableAssetIds, allAssetIds });
+    expect(problems).toEqual([]);
+
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    expect(interior).not.toContain(heroId);
+  }
+
+  it('protects a PINNED (coverAssetId) hero that itself scores eyesClosed:true with open-eyed siblings', () => {
+    const photos = [
+      photo({ assetId: 'hero', position: 0, takenAt: new Date(t0), analysis: analysis({ eyesClosed: true }) }),
+      photo({ assetId: 'sib1', position: 1, takenAt: new Date(t0 + HOUR), analysis: analysis({ eyesClosed: false }) }),
+      photo({ assetId: 'sib2', position: 2, takenAt: new Date(t0 + 2 * HOUR), analysis: analysis({ eyesClosed: false }) }),
+    ];
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), coverAssetId: 'hero' };
+    assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
+  });
+
+  it('protects a CARRIED-OVER (existingHeroAssetId) hero that itself scores eyesClosed:true with open-eyed siblings', () => {
+    const photos = [
+      photo({ assetId: 'hero', position: 0, takenAt: new Date(t0), analysis: analysis({ eyesClosed: true }) }),
+      photo({ assetId: 'sib1', position: 1, takenAt: new Date(t0 + HOUR), analysis: analysis({ eyesClosed: false }) }),
+      photo({ assetId: 'sib2', position: 2, takenAt: new Date(t0 + 2 * HOUR), analysis: analysis({ eyesClosed: false }) }),
+    ];
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), existingHeroAssetId: 'hero' };
+    assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
+  });
+
+  it('protects a PINNED (coverAssetId) hero that itself has the lowest aestheticScore in an oversized, mostly-scored section', () => {
+    const photos = Array.from({ length: 45 }, (_, i) => {
+      const assetId = i === 0 ? 'hero' : `p${i}`;
+      return photo({
+        assetId,
+        position: i,
+        takenAt: new Date(t0 + i * HOUR),
+        // Every non-hero photo scores strictly higher than the hero, so an unprotected
+        // hero would always land in the culled bottom-5 surplus.
+        analysis: analysis({ aestheticScore: i === 0 ? -1 : i }),
+      });
+    });
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), coverAssetId: 'hero' };
+    assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
+  });
+
+  it('protects a CARRIED-OVER (existingHeroAssetId) hero that itself has the lowest aestheticScore in an oversized, mostly-scored section', () => {
+    const photos = Array.from({ length: 45 }, (_, i) => {
+      const assetId = i === 0 ? 'hero' : `p${i}`;
+      return photo({
+        assetId,
+        position: i,
+        takenAt: new Date(t0 + i * HOUR),
+        analysis: analysis({ aestheticScore: i === 0 ? -1 : i }),
+      });
+    });
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), existingHeroAssetId: 'hero' };
+    assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
+  });
+
+  it('protects a pinned hero that is BOTH eyesClosed AND the lowest-aesthetic photo in an oversized section', () => {
+    const photos = Array.from({ length: 45 }, (_, i) => {
+      const assetId = i === 0 ? 'hero' : `p${i}`;
+      return photo({
+        assetId,
+        position: i,
+        takenAt: new Date(t0 + i * HOUR),
+        analysis: analysis({ aestheticScore: i === 0 ? -1 : i, eyesClosed: i === 0 }),
+      });
+    });
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), coverAssetId: 'hero' };
+    assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
+  });
+});

@@ -79,71 +79,107 @@ function img(image: PhotoLayoutImage | undefined, cls: string): string {
   return `<img class="${cls}" src="${image.src}" alt="" style="aspect-ratio: ${image.width} / ${image.height}" />`;
 }
 
+/** Renders one `page.captions[i]` entry, or nothing when it's absent/null/empty — the
+ *  AI design pass (`lib/photo-book-ai-layout.ts`) is the only producer that ever fills
+ *  `captions` (the deterministic auto-layouter never does), and even it leaves most
+ *  photos uncaptioned, so this is the common case everywhere `withCaption`/`framedFigure`
+ *  call it. */
+function captionEl(caption: string | null | undefined): string {
+  if (!caption) return '';
+  return `<p class="ph-caption">${esc(caption)}</p>`;
+}
+
+/** Wraps a photo's markup with an optional caption underneath it, in a flex column that
+ *  lets the photo shrink to make room. Crucially, the `.ph-cell` wrapper (and the CSS
+ *  that makes the photo flexible instead of a hardcoded 100% height) only appears in the
+ *  output when a caption is actually present — a caption-less photo's markup is byte-
+ *  for-byte what it was before captions existed, so plans without captions (i.e. every
+ *  plan the auto-layouter ever produces) render exactly as before. */
+function withCaption(photoHtml: string, caption: string | null | undefined): string {
+  if (!caption) return photoHtml;
+  return `<div class="ph-cell">${photoHtml}${captionEl(caption)}</div>`;
+}
+
 /** One figure of a justified row: the flex share equals the image's aspect ratio, same
  *  math as `rowFigureHtml` in `lib/book-layout.ts` — every image in the row renders at
  *  the SAME height while the row fills the full width, whatever the orientation mix. */
-function rowFigure(image: PhotoLayoutImage | undefined): string {
+function rowFigure(image: PhotoLayoutImage | undefined, caption?: string | null): string {
   if (!image) return `<div class="ph-row-figure ph-missing" style="flex: 1 1 0%"></div>`;
   const aspect = (image.width / image.height).toFixed(4);
-  return `<div class="ph-row-figure" style="flex: ${aspect} 1 0%">${img(image, 'ph-row-img')}</div>`;
+  return `<div class="ph-row-figure" style="flex: ${aspect} 1 0%">${withCaption(img(image, 'ph-row-img'), caption)}</div>`;
 }
 
-function framedFigure(image: PhotoLayoutImage | undefined): string {
-  return `<div class="ph-frame">${img(image, 'ph-frame-img')}</div>`;
+function framedFigure(image: PhotoLayoutImage | undefined, caption?: string | null): string {
+  return withCaption(`<div class="ph-frame">${img(image, 'ph-frame-img')}</div>`, caption);
 }
 
 function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, pageNamed: string): string {
   const get = (id: string) => images.get(id);
   switch (page.template) {
     case 'full-bleed': {
+      // Bleeds edge to edge, so a caption (when present) overlays the bottom on a
+      // scrim rather than pushing content below it — same treatment the cover front
+      // uses for its title over `coverHero` (`.pb-cover-text`'s gradient, below).
+      const caption = page.captions?.[0];
       return `
       <section class="page photo-page pb-fullbleed" style="page: ${pageNamed}">
         ${img(get(page.assetIds[0]), 'ph-fullbleed-img')}
+        ${caption ? `<div class="ph-fullbleed-caption"><p>${esc(caption)}</p></div>` : ''}
       </section>`;
     }
     case 'full-framed': {
       return `
       <section class="page photo-page pb-framed">
-        <div class="pb-framed-inner">${framedFigure(get(page.assetIds[0]))}</div>
+        <div class="pb-framed-inner">${framedFigure(get(page.assetIds[0]), page.captions?.[0])}</div>
       </section>`;
     }
     case 'two-vertical': {
       // Two portraits side by side, justified to share one height across full width.
       return `
       <section class="page photo-page pb-row">
-        ${page.assetIds.map((id) => rowFigure(get(id))).join('\n')}
+        ${page.assetIds.map((id, i) => rowFigure(get(id), page.captions?.[i])).join('\n')}
       </section>`;
     }
     case 'two-horizontal': {
       // Two landscapes stacked, each filling the width in its own half of the page.
       return `
       <section class="page photo-page pb-stack-2">
-        ${page.assetIds.map((id) => `<div class="ph-stack-cell">${img(get(id), 'ph-cover-img')}</div>`).join('\n')}
+        ${page.assetIds
+          .map((id, i) => `<div class="ph-stack-cell">${withCaption(img(get(id), 'ph-cover-img'), page.captions?.[i])}</div>`)
+          .join('\n')}
       </section>`;
     }
     case 'three-column': {
       return `
       <section class="page photo-page pb-row">
-        ${page.assetIds.map((id) => rowFigure(get(id))).join('\n')}
+        ${page.assetIds.map((id, i) => rowFigure(get(id), page.captions?.[i])).join('\n')}
       </section>`;
     }
     case 'three-mixed': {
       const [dominant, ...rest] = page.assetIds;
+      const [dominantCaption, ...restCaptions] = page.captions ?? [];
       return `
       <section class="page photo-page pb-mixed-3">
-        <div class="ph-dominant">${img(get(dominant), 'ph-cover-img')}</div>
+        <div class="ph-dominant">${withCaption(img(get(dominant), 'ph-cover-img'), dominantCaption)}</div>
         <div class="ph-mixed-stack">
-          ${rest.map((id) => `<div class="ph-stack-cell">${img(get(id), 'ph-cover-img')}</div>`).join('\n')}
+          ${rest
+            .map((id, i) => `<div class="ph-stack-cell">${withCaption(img(get(id), 'ph-cover-img'), restCaptions[i])}</div>`)
+            .join('\n')}
         </div>
       </section>`;
     }
     case 'collage-4': {
+      // Dense mosaic, no captions — mirrors `.photo-grid figcaption { display: none }`
+      // in `lib/book-layout.ts`: 4 small tiles have no room for per-photo text without
+      // crowding the grid (the AI design pass is told the same thing — see the "not on
+      // dense collages" line in `lib/photo-book-ai-layout.ts`'s system prompt).
       return `
       <section class="page photo-page pb-collage-4">
         ${page.assetIds.map((id) => `<div class="ph-tile">${img(get(id), 'ph-cover-img')}</div>`).join('\n')}
       </section>`;
     }
     case 'collage-5': {
+      // Same reasoning as collage-4 — 5 tiles is even denser.
       const [dominant, ...rest] = page.assetIds;
       return `
       <section class="page photo-page pb-collage-5">
@@ -157,6 +193,10 @@ function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, 
       // The auto-layouter never emits a `divider` page (it opens sections with a hero
       // photo instead — see `lib/photo-book-autolayout.ts`), but the template exists for
       // PR3/PR4 producers, so the renderer supports it: a muted photo behind the title.
+      // Any `page.captions` here are intentionally not rendered — a divider is the
+      // section-title page (see `.pb-divider`'s own `<h2>`/`dateLabel` above), not a
+      // photo page, so a per-photo caption would compete with the title it's already
+      // showing.
       const id = page.assetIds[0];
       const image = id ? get(id) : undefined;
       return `
@@ -367,11 +407,43 @@ ${styleVarsCss(style)}
     height: ${contentH}mm;
     margin: ${m.top}mm ${m.outer}mm ${m.bottom}mm ${m.inner}mm;
   }
-  .pb-fullbleed { width: ${pageW}mm; height: ${pageH}mm; }
+  .pb-fullbleed { width: ${pageW}mm; height: ${pageH}mm; position: relative; }
   .ph-fullbleed-img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .ph-missing { background: repeating-linear-gradient(45deg, #eee, #eee 8px, #f6f6f6 8px, #f6f6f6 16px); }
 
+  /* full-bleed caption: overlaid on a bottom scrim (the photo bleeds edge to edge, so
+     there's no margin to put text in below it) — same gradient-over-photo idea as the
+     cover front's title treatment above. */
+  .ph-fullbleed-caption {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: 10mm 14mm 8mm;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.6) 60%);
+  }
+  .ph-fullbleed-caption p { margin: 0; color: #fff; font-size: 10pt; font-style: italic; line-height: 1.4; }
+
   .ph-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: var(--pb-photo-radius); }
+
+  /* Optional per-photo captions (AI design pass only — the auto-layouter never emits
+     them, so a caption-less plan never emits this markup at all — see withCaption()).
+     '.ph-cell' turns a photo's normal 100%-height box into a flex column so the photo
+     can shrink and leave room for the caption beneath it; '> *:first-child' reaches
+     whatever's actually in there (an img element, or full-framed's already-matted
+     '.ph-frame' div) and overrides its fixed height with 'flex: 1', at higher
+     specificity than any of '.ph-cover-img' / '.ph-row-img' / '.ph-frame''s own
+     'height: 100%' rules — those rules stay untouched for every caption-less photo,
+     which is the vast majority. */
+  .ph-cell { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; }
+  .ph-cell > *:first-child { flex: 1 1 0%; min-height: 0; height: auto; }
+  .ph-caption {
+    flex: 0 0 auto;
+    margin: 1.5mm 0 0;
+    font-size: 8pt;
+    line-height: 1.35;
+    font-style: italic;
+    text-align: center;
+    color: var(--pb-caption-color);
+  }
 
   /* full-framed: one photo, matted per the style suite */
   .pb-framed { display: flex; align-items: center; justify-content: center; }
@@ -388,7 +460,10 @@ ${styleVarsCss(style)}
   }
   .ph-frame-img { width: 100%; height: 100%; object-fit: contain; display: block; border-radius: var(--pb-photo-radius); }
 
-  /* two-vertical / three-column: a justified row sharing one height (see rowFigure) */
+  /* two-vertical / three-column: a justified row sharing one height (see rowFigure).
+     A caption (when present) arrives already wrapped in '.ph-cell' by withCaption(), so
+     it gets the same flex-shrink-to-make-room treatment as every other template — the
+     caption-less path below ('.ph-row-img' direct child, 'height: 100%') is untouched. */
   .pb-row { display: flex; align-items: stretch; gap: 4mm; }
   .ph-row-figure { min-width: 0; }
   .ph-row-img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: var(--pb-photo-radius); }
