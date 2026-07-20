@@ -52,10 +52,13 @@ export default async function BookBuilderPage({
             id: book.id,
             title: book.title,
             status: book.status,
+            errorMessage: book.errorMessage,
             style: styleResult.ok ? styleResult.value.style : 'classic',
             previewVersion: book.updatedAt.getTime(),
             designing: book.designRequestedAt != null,
             layoutSource: book.layoutSource,
+            layoutStale: book.layoutStale,
+            hasPrint: Boolean(book.printS3Key),
           }}
           photos={photos}
         />

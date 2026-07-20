@@ -1,6 +1,8 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { assets, bookPhotos, books } from '@/db/schema';
+import { getObjectBuffer } from '@/lib/s3';
+import { orientedDimensions } from '@/lib/book-content';
 import {
   checkPhotoBookPlanConsistency,
   validatePhotoBookPlan,
@@ -255,3 +257,40 @@ export function photoAssetRenditionNeeds(plan: PhotoBookPlan): Map<string, 'disp
   }
   return needs;
 }
+
+/**
+ * Fills in `assets.width/height` for any book photo missing them, reading the true
+ * original from S3 — the photo-book counterpart of `backfillDimensionsFromOriginals` in
+ * `lib/book-content.ts`. In practice every book photo already has dimensions by the time
+ * a plan is built (the `photo-meta` job sets them right after upload — `lib/photo-meta.ts`),
+ * so this is a defensive backfill for the render path, same reasoning as the story path:
+ * an older/failed upload shouldn't silently drop out of the printed book for lack of a
+ * dimension. Worker-only, like its story counterpart — it's the one process allowed to
+ * write `assets.width/height`. Mutates `photos` in place so the caller's in-memory copy
+ * (already loaded for the plan build) reflects the backfilled values without a re-fetch.
+ */
+export async function backfillPhotoBookDimensionsFromOriginals(
+  photos: PhotoBookPhotoRef[],
+): Promise<void> {
+  for (const photo of photos) {
+    if (photo.width && photo.height) continue;
+    try {
+      const buffer = await getObjectBuffer(photo.s3Key);
+      const dims = await orientedDimensions(buffer);
+      if (!dims) continue;
+      photo.width = dims.width;
+      photo.height = dims.height;
+      await db.update(assets).set({ width: dims.width, height: dims.height }).where(eq(assets.id, photo.assetId));
+    } catch (e) {
+      console.error(`[photo-book-content] failed to read original dimensions for ${photo.s3Key}:`, e);
+    }
+  }
+}
+
+// `countPhotoBookPages` and `photoAssetPrintTargetSizeMm` (page-count estimation and
+// print-embedding size math) live in `lib/photo-book-print-sizing.ts`, NOT here — they're
+// pure functions with no DB/S3 dependency, and this file's other exports (`loadPhotoBook`
+// etc.) pull in `@/db`/`@/lib/s3` at module scope, which would drag a database/env
+// dependency into what should be a plain, vitest-without-a-database unit test. Re-exported
+// here anyway so existing callers of this module don't need a second import.
+export { countPhotoBookPages, photoAssetPrintTargetSizeMm, type PrintTargetSizeMm } from '@/lib/photo-book-print-sizing';

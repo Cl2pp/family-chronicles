@@ -10,6 +10,7 @@ import { computeCandidateSections, type AutoLayoutPhoto } from '@/lib/photo-book
 import {
   checkPhotoBookPlanConsistency,
   validatePhotoBookPlan,
+  PHOTO_BOOK_STYLES,
   PHOTO_PAGE_TEMPLATES,
   PHOTO_PAGE_TEMPLATE_SLOTS,
   type PhotoBookPlan,
@@ -119,7 +120,7 @@ function schemaText(): string {
 
 {
   "kind": "photo",
-  "style": "classic" | "modern" | "gallery",
+  "style": ${PHOTO_BOOK_STYLES.map((s) => `"${s}"`).join(' | ')},
   "cover": {
     "heroAssetId": "<assetId>",
     "title": "<a short, warm book title — you may improve on the current title>",

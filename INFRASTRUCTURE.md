@@ -44,6 +44,25 @@ and keep full traceability (who submitted what + the raw inputs).
   Text story → `style` job → `ready`. Status lifecycle: `draft → processing → ready | failed`.
 - **Stateless apps, stateful data.** All durable state is in **Postgres** (text/metadata) and
   **R2** (audio/photos). `web`/`worker` containers are disposable.
+- **Book PDFs render via headless Chromium in the `worker`** (`lib/book-render.ts`, the
+  `render-book` job) — the Dockerfile installs `chromium font-dejavu font-noto font-noto-emoji`
+  and sets `PUPPETEER_EXECUTABLE_PATH`; `puppeteer`'s own Chromium download is skipped at
+  build time (`PUPPETEER_SKIP_DOWNLOAD=1`) since the system package is used instead. Runs
+  serially (`teamSize`/`batchSize: 1` in `worker/index.ts`) — Chromium plus full-resolution
+  photos is the most memory-hungry thing this app does, on a box shared with the web app and
+  Postgres. **Photo-book style suites self-host their own fonts** (`public/fonts/*.woff2`,
+  all SIL-OFL-licensed Google Fonts, `lib/photo-book-fonts.ts`) instead of relying on the
+  Dockerfile's system fonts: the live builder preview loads them via `@font-face { src:
+  url('/fonts/...') }` (served by Next's `public/` static handler, no route needed), and the
+  print PDF embeds each file as a base64 `data:` URI so Chromium in the worker — which has no
+  route back to the web process's `/fonts/*` and renders fully offline — needs no network
+  access to get the right glyphs. **No Dockerfile change was needed for this**: both `web` and
+  `worker` are the same image/checkout (`COPY --from=build /app ./` copies the whole repo,
+  `public/` included), and both processes resolve `public/fonts/*.woff2` from
+  `process.cwd()` (`/app` in the container). Story-book themes (`lib/book-layout.ts`) still
+  rely on the Dockerfile's system fonts (Georgia falls back to `font-dejavu`'s DejaVu Serif
+  when actually rendered by Chromium) — folding them into the self-hosted-font system is a
+  later cleanup (docs/PHOTO_BOOK_PLAN.md §7).
 
 ## 3. Server (Hetzner)
 

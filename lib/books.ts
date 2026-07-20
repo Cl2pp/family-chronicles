@@ -50,6 +50,7 @@ import {
 } from '@/lib/book-layout-plan';
 import {
   buildAndPersistPhotoAutoPlan,
+  countPhotoBookPages,
   loadOrBuildPhotoPlan,
   loadPhotoBook,
   referencedPhotoAssetIds,
@@ -274,6 +275,11 @@ export interface BookDetail {
   /** Who last wrote the layout plan: the heuristic auto-layouter, an AI design pass, or a
    *  manual edit (manual edits are phase 4; the type already allows for them). */
   layoutSource: 'auto' | 'ai' | 'edited';
+  /** True when the book's content changed since `layoutPlan` was built (a photo was
+   *  added/excluded, a chat op touched the plan) — the render/download flow uses this to
+   *  decide whether a stored `preview_ready` PDF still matches the book's current content
+   *  or must be re-rendered first (docs/PHOTO_BOOK_PLAN.md PR5, "Download PDF"). */
+  layoutStale: boolean;
   /** Set while an AI design job is queued/running; null once it completes (success or
    *  fallback). Drives the builder's "Design my book" working state. */
   designRequestedAt: Date | null;
@@ -386,6 +392,7 @@ export async function getBookForUser(
     previewS3Key: row.book.previewS3Key,
     printS3Key: row.book.printS3Key,
     layoutSource: row.book.layoutSource as 'auto' | 'ai' | 'edited',
+    layoutStale: row.book.layoutStale,
     designRequestedAt: row.book.designRequestedAt,
     updatedAt: row.book.updatedAt,
     chapters: visibleChapters.map((c, i) => ({
@@ -1345,6 +1352,32 @@ export async function requestPreview(input: {
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+
+  // Photo books (docs/PHOTO_BOOK_PLAN.md PR5): a separate branch, not a rewrite of the
+  // story checks below — a photo book has no `chapters`/`hiddenChapterCount` (book_stories
+  // stays empty for it) and, unlike a story book, is never opened by a viewer with partial
+  // access (§2: "every chronicle member with access to the book sees them"), so neither of
+  // the story-only checks below applies.
+  if (gate.book.kind === 'photo') {
+    // Already fresh — nothing to (re-)render. Lets the "Download PDF" flow call this
+    // unconditionally before serving the PDF without forcing a wasteful Chromium re-run
+    // on a book whose print PDF already matches its current content.
+    if (gate.book.status === 'preview_ready' && !gate.book.layoutStale) return { ok: true };
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(bookPhotos)
+      .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.excluded, false)));
+    if (!count) return err('Add at least one photo before rendering.');
+    if (gate.book.status === 'rendering') return err('A preview is already being rendered.');
+
+    await db
+      .update(books)
+      .set({ status: 'rendering', errorMessage: null, updatedAt: new Date() })
+      .where(eq(books.id, input.bookId));
+    await enqueueRenderBook({ bookId: input.bookId });
+    return { ok: true };
+  }
+
   // The rendered PDF physically contains EVERY chapter — all-or-nothing: only
   // someone who can read all of the book's stories may trigger (and later fetch) it.
   if (gate.book.hiddenChapterCount > 0) {
@@ -1793,22 +1826,37 @@ export async function quoteBook(input: {
 }): Promise<Result<{ quote: BookQuote }>> {
   const book = await getBookForUser(input.bookId, input.userId);
   if (!book) return err('Book not found.');
-  // Quoting is part of the order flow, which needs the all-chapters print PDF.
+  // Quoting is part of the order flow, which needs the all-chapters print PDF. Photo
+  // books have no hidden-chapter concept (§2: every chronicle member with book access
+  // sees every photo), so this never blocks them — `hiddenChapterCount` is always 0.
   if (book.hiddenChapterCount > 0) {
     return err(
       "Some of this book's chapters are stories you don't have access to — the printed book contains every chapter, so only someone who can read all of them can price or order it.",
     );
   }
-  const pageCount = book.pageCount ?? estimatePageCount(book);
+  const pageCount = book.pageCount ?? (await estimatePageCount(book));
   const quote = await quoteBookPrice({ format: book.format, pageCount });
   return { ok: true, value: { quote } };
 }
 
 /**
- * Rough page estimate before a render exists: ~2.5 pages of prose per story plus
- * a page per two photos, front matter, and chapter starts on right-hand pages.
+ * Rough page estimate before a render exists. Story books: ~2.5 pages of prose per story
+ * plus a page per two photos, front matter, and chapter starts on right-hand pages — pure
+ * arithmetic over `book.chapters`, already loaded. Photo books: no `chapters` to estimate
+ * from (`book_stories` stays empty for them), so this loads/resolves the book's actual
+ * layout plan (`loadOrBuildPhotoPlan` — builds one if there isn't a usable one yet, same
+ * as the live preview) and counts its real pages (`countPhotoBookPages`,
+ * `lib/photo-book-content.ts`) — a photo book's page count is far more layout-dependent
+ * than a story book's (page templates hold 1-5 photos each), so a flat per-photo formula
+ * would be a much rougher guess than just resolving the plan, which the preview route
+ * does on every request anyway.
  */
-export function estimatePageCount(book: Pick<BookDetail, 'chapters'>): number {
+export async function estimatePageCount(book: Pick<BookDetail, 'id' | 'kind' | 'chapters'>): Promise<number> {
+  if (book.kind === 'photo') {
+    const loaded = await loadPhotoBook(book.id);
+    const plan = await loadOrBuildPhotoPlan(book.id, loaded);
+    return countPhotoBookPages(plan);
+  }
   const front = 4; // cover sheet, title page, TOC, blank
   const perStory = book.chapters.reduce(
     (sum, c) => sum + 3 + Math.ceil(c.photoCount / 2),

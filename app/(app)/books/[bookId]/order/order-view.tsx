@@ -15,26 +15,38 @@ import {
   Text,
   Title,
 } from '@mantine/core';
-import { IconArrowLeft, IconInfoCircle, IconMail } from '@tabler/icons-react';
+import {
+  IconArrowLeft,
+  IconDownload,
+  IconInfoCircle,
+  IconMail,
+} from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
 import type { BookFormat, BookQuote } from '@/lib/gelato';
-import type { BookStatus } from '@/lib/books';
+import type { BookKind, BookStatus } from '@/lib/books';
 import { renderPreviewAction } from '../../actions';
 import posthog from 'posthog-js';
 
 interface OrderBook {
   id: string;
   title: string;
+  kind: BookKind;
   format: BookFormat;
   formatLabel: string;
   pageCount: number;
   storyCount: number;
+  /** Photo books only (`kind === 'photo'`) — how many photos are currently placed in the
+   *  book (excluded ones don't count). Null for story books. */
+  photoCount: number | null;
   status: BookStatus;
   errorMessage: string | null;
   /** True when the viewer can't read every story in the book — the all-chapters
-   *  print/order flow is off limits; the view explains why instead. */
+   *  print/order flow is off limits; the view explains why instead. Always false for
+   *  photo books (docs/PHOTO_BOOK_PLAN.md §2 — no per-viewer hiding). */
   accessBlocked: boolean;
+  /** True once a print PDF exists in S3 — gates the "Download PDF" button. */
+  hasPrint: boolean;
 }
 
 const eur = (n: number) =>
@@ -128,8 +140,8 @@ export function OrderView({
             <Text>{book.pageCount}</Text>
           </Group>
           <Group justify="space-between">
-            <Text c="dimmed">{to.summaryStories}</Text>
-            <Text>{book.storyCount}</Text>
+            <Text c="dimmed">{book.kind === 'photo' ? to.summaryPhotos : to.summaryStories}</Text>
+            <Text>{book.kind === 'photo' ? (book.photoCount ?? 0) : book.storyCount}</Text>
           </Group>
           <Group justify="space-between">
             <Text c="dimmed">{to.summaryReference}</Text>
@@ -138,6 +150,27 @@ export function OrderView({
             </Text>
           </Group>
         </Stack>
+
+        {/* Photo-book only (docs/PHOTO_BOOK_PLAN.md PR5, the v1 deliverable) — story
+            books keep their existing order-screen behavior unchanged (no download link
+            here yet; their PDF proof link lives on the builder page). */}
+        {book.kind === 'photo' && !preparing && book.hasPrint && (
+          <Button
+            component="a"
+            href={`/api/books/${book.id}/print`}
+            variant="light"
+            size="sm"
+            mt="sm"
+            fullWidth
+            leftSection={<IconDownload size={16} />}
+            onClick={() =>
+              posthog.__loaded &&
+              posthog.capture('book_pdf_downloaded', { book_id: book.id, kind: book.kind })
+            }
+          >
+            {to.downloadPdf}
+          </Button>
+        )}
 
         <Divider my="md" />
 

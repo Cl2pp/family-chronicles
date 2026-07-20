@@ -20,6 +20,7 @@ import {
   referencedPhotoAssetIds,
   type PhotoBookPhotoRef,
 } from '@/lib/photo-book-content';
+import { screenFontFaceCss } from '@/lib/photo-book-fonts';
 
 /**
  * The live builder preview: the same layout plan the worker prints to PDF,
@@ -167,6 +168,7 @@ async function photoBookPreview(bookId: string, chronicleName: string): Promise<
     trim: TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'],
     plan,
     images: resolved,
+    fontFaceCss: screenFontFaceCss(plan.style),
     createdLabel: new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long' }),
   });
 

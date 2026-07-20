@@ -8,18 +8,22 @@ import { PHOTO_BOOK_STYLES } from '@/lib/photo-book-plan';
  * map, exactly like `THEME_TOKENS` in `lib/book-layout.ts` for story books. Suites are
  * closed and code-defined: users pick a suite, never a font or a color.
  *
- * PR2 ships 3 of the eventual 6 (`PHOTO_BOOK_STYLES` in `lib/photo-book-plan.ts`):
- * `classic`, `modern`, `gallery`. `heirloom`, `bold`, `journal` land in PR5.
+ * All 6 (`PHOTO_BOOK_STYLES` in `lib/photo-book-plan.ts`): `classic`, `modern`, `gallery`
+ * (PR2) plus `heirloom`, `bold`, `journal` (PR5).
  *
- * Fonts: PR2 renders ONLY the `screen` (live-preview) variant — the Chromium print
- * render is PR5's `render-book` photo branch. Self-hosting webfonts (`public/fonts` +
- * `@font-face`, so the eventual print PDF never depends on a network font, matching the
- * plan's requirement) is deferred to that PR, when print/preview glyph parity actually
- * matters. For now every suite uses a robust system font stack — the same choice
- * `lib/book-layout.ts`'s `THEME_TOKENS` already makes for story books (Georgia /
- * system-ui, with the worker Docker image's `font-dejavu`/`font-noto` as the eventual
- * Chromium fallback) — so the preview renders correctly in any browser today without
- * shipping font files this PR never uses for print.
+ * Fonts (PR5, docs/PHOTO_BOOK_PLAN.md §7/§8): every suite now pairs a self-hosted,
+ * SIL-OFL-licensed heading/body typeface (`lib/photo-book-fonts.ts`'s `PHOTO_STYLE_FONTS`,
+ * files under `public/fonts/`) instead of PR2's system-font stacks — the Chromium print
+ * render has no network access, and the live preview must show the identical glyphs the
+ * PDF will, so `fontHeading`/`fontBody` below name the self-hosted family FIRST, with the
+ * same system-font stack PR2 used as a defensive fallback (covers the sliver of time
+ * before a browser's `@font-face` request resolves, and keeps this file's values legible
+ * even if `public/fonts/` were ever misconfigured).
+ *
+ * Photo treatment extras (`dividerOrnament`, `photoTape`/`photoTapeColor`) are optional,
+ * CSS-variable-driven flourishes a suite can opt into — see their use in
+ * `lib/photo-book-layout.ts` (`.pb-divider h2::before/::after`, `.ph-frame::before`) —
+ * rather than new per-suite markup, so the shared renderer stays the same for every suite.
  */
 
 export interface PhotoStyleTokens {
@@ -50,14 +54,24 @@ export interface PhotoStyleTokens {
   photoShadow: string;
   photoFrameBorder: string;
   captionColor: string;
+  /** Decorative flourish above/below a section divider's title (heirloom's "ornamental
+   *  dividers", docs/PHOTO_BOOK_PLAN.md §7) — a plain hairline rule drawn by
+   *  `.pb-divider h2::before/::after` in `lib/photo-book-layout.ts`, shown only when true.
+   *  Optional/undefined = off, so PR2's 3 suites don't need to opt out explicitly. */
+  dividerOrnament?: boolean;
+  /** A small washi-tape accent across the top of matted/framed photos (journal's
+   *  "taped-photo mats") — `.ph-frame::before` in `lib/photo-book-layout.ts`, shown only
+   *  when true, colored by `photoTapeColor`. */
+  photoTape?: boolean;
+  photoTapeColor?: string;
 }
 
 export const PHOTO_STYLE_TOKENS: Record<PhotoBookStyle, PhotoStyleTokens> = {
   classic: {
     id: 'classic',
     label: 'Classic',
-    fontHeading: "Georgia, 'Noto Serif', 'DejaVu Serif', serif",
-    fontBody: "Georgia, 'Noto Serif', 'DejaVu Serif', serif",
+    fontHeading: "'Playfair Display', Georgia, 'Noto Serif', 'DejaVu Serif', serif",
+    fontBody: "'Playfair Display', Georgia, 'Noto Serif', 'DejaVu Serif', serif",
     colorText: '#1e2430',
     colorMuted: '#5a6372',
     pageBg: '#faf8f4',
@@ -77,8 +91,9 @@ export const PHOTO_STYLE_TOKENS: Record<PhotoBookStyle, PhotoStyleTokens> = {
   modern: {
     id: 'modern',
     label: 'Modern',
-    fontHeading: "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif",
-    fontBody: "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif",
+    fontHeading:
+      "'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif",
+    fontBody: "'Inter', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif",
     colorText: '#1c1c1e',
     colorMuted: '#6b6f76',
     pageBg: '#ffffff',
@@ -98,8 +113,8 @@ export const PHOTO_STYLE_TOKENS: Record<PhotoBookStyle, PhotoStyleTokens> = {
   gallery: {
     id: 'gallery',
     label: 'Gallery',
-    fontHeading: "'Helvetica Neue', Helvetica, Arial, sans-serif",
-    fontBody: "'Helvetica Neue', Helvetica, Arial, sans-serif",
+    fontHeading: "'Work Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif",
+    fontBody: "'Work Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif",
     colorText: '#111111',
     colorMuted: '#767676',
     pageBg: '#ffffff',
@@ -115,6 +130,72 @@ export const PHOTO_STYLE_TOKENS: Record<PhotoBookStyle, PhotoStyleTokens> = {
     photoShadow: 'none',
     photoFrameBorder: '',
     captionColor: '#767676',
+  },
+  heirloom: {
+    id: 'heirloom',
+    label: 'Heirloom',
+    fontHeading: "'Cormorant Garamond', Georgia, 'Noto Serif', serif",
+    fontBody: "'Cormorant Garamond', Georgia, 'Noto Serif', serif",
+    colorText: '#2b2116',
+    colorMuted: '#8a7a5c',
+    pageBg: '#f7f1e3',
+    coverBg: '#f0e6cf',
+    coverHeadingColor: '#2b2116',
+    coverMutedColor: '#8a7a5c',
+    coverBackBg: '#f0e6cf',
+    coverBackTextColor: '#8a7a5c',
+    dividerBg: '#f0e6cf',
+    dividerTextColor: '#2b2116',
+    photoMatMm: 6,
+    photoRadius: '0mm',
+    photoShadow: '0 2mm 6mm rgba(60, 45, 20, 0.18)',
+    photoFrameBorder: 'rgba(140, 120, 80, 0.35)',
+    captionColor: '#8a7a5c',
+    dividerOrnament: true,
+  },
+  bold: {
+    id: 'bold',
+    label: 'Bold',
+    fontHeading: "'Archivo Black', Arial, sans-serif",
+    fontBody: "'Archivo', Arial, sans-serif",
+    colorText: '#f5f5f5',
+    colorMuted: '#b8b8b8',
+    pageBg: '#111111',
+    coverBg: '#000000',
+    coverHeadingColor: '#ffffff',
+    coverMutedColor: '#c9c9c9',
+    coverBackBg: '#000000',
+    coverBackTextColor: '#c9c9c9',
+    dividerBg: '#000000',
+    dividerTextColor: '#ffffff',
+    photoMatMm: 0,
+    photoRadius: '0mm',
+    photoShadow: 'none',
+    photoFrameBorder: '',
+    captionColor: '#b8b8b8',
+  },
+  journal: {
+    id: 'journal',
+    label: 'Journal',
+    fontHeading: "'Caveat', cursive",
+    fontBody: "'Courier Prime', 'Courier New', monospace",
+    colorText: '#3a2f22',
+    colorMuted: '#8a7c68',
+    pageBg: '#f4ecd8',
+    coverBg: '#e8dcb8',
+    coverHeadingColor: '#3a2f22',
+    coverMutedColor: '#8a7c68',
+    coverBackBg: '#e8dcb8',
+    coverBackTextColor: '#8a7c68',
+    dividerBg: '#e8dcb8',
+    dividerTextColor: '#3a2f22',
+    photoMatMm: 4,
+    photoRadius: '0mm',
+    photoShadow: '0 2mm 5mm rgba(40, 30, 15, 0.25)',
+    photoFrameBorder: 'rgba(80, 60, 30, 0.25)',
+    captionColor: '#8a7c68',
+    photoTape: true,
+    photoTapeColor: 'rgba(214, 188, 133, 0.75)',
   },
 };
 
