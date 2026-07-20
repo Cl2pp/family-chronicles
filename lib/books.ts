@@ -1,8 +1,9 @@
-import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   assets,
   books,
+  bookPhotos,
   bookStories,
   chronicles,
   memberships,
@@ -20,7 +21,7 @@ import {
 } from '@/lib/story-access';
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { deleteObject } from '@/lib/s3';
-import { enqueueDesignBook, enqueueRenderBook } from '@/lib/queue';
+import { enqueueDesignBook, enqueuePhotoMeta, enqueueRenderBook, enqueueThumbnail } from '@/lib/queue';
 import { quoteBookPrice, type BookFormat, type BookQuote } from '@/lib/gelato';
 import {
   buildAndPersistAutoPlan,
@@ -48,6 +49,7 @@ import {
  */
 
 export type BookStatus = 'draft' | 'rendering' | 'preview_ready' | 'render_failed' | 'ordered';
+export type BookKind = 'story' | 'photo';
 
 export type Result<T = undefined> =
   | (T extends undefined ? { ok: true } : { ok: true; value: T })
@@ -165,6 +167,7 @@ export interface BookListItem {
   chronicleName: string;
   title: string;
   subtitle: string | null;
+  kind: BookKind;
   status: BookStatus;
   format: BookFormat;
   pageCount: number | null;
@@ -181,6 +184,7 @@ export async function listBooksForUser(userId: string): Promise<BookListItem[]> 
       chronicleName: chronicles.name,
       title: books.title,
       subtitle: books.subtitle,
+      kind: books.kind,
       status: books.status,
       format: books.format,
       pageCount: books.pageCount,
@@ -204,6 +208,7 @@ export async function listBooksForUser(userId: string): Promise<BookListItem[]> 
 
   return rows.map((r) => ({
     ...r,
+    kind: r.kind as BookKind,
     status: r.status as BookStatus,
     format: r.format as BookFormat,
     storyCount: countByBook.get(r.id) ?? 0,
@@ -230,6 +235,7 @@ export interface BookDetail {
   subtitle: string | null;
   dedication: string | null;
   coverAssetId: string | null;
+  kind: BookKind;
   format: BookFormat;
   status: BookStatus;
   errorMessage: string | null;
@@ -314,7 +320,12 @@ export async function getBookForUser(
         .where(and(inArray(assets.storyId, storyIds), eq(assets.kind, 'photo')))
     : [];
   const photosByStory = new Map<string, number>();
-  for (const p of photoRows) photosByStory.set(p.storyId, (photosByStory.get(p.storyId) ?? 0) + 1);
+  // `assets.storyId` is nullable (book-owned photos), but every row here came from a
+  // query filtered to `storyId IN (storyIds)`, so it's never null in practice.
+  for (const p of photoRows) {
+    if (!p.storyId) continue;
+    photosByStory.set(p.storyId, (photosByStory.get(p.storyId) ?? 0) + 1);
+  }
 
   // Same boundary for the cover photo: if it belongs to a hidden chapter, the
   // viewer gets `null` rather than an asset id they couldn't otherwise see.
@@ -326,7 +337,7 @@ export async function getBookForUser(
       .where(eq(assets.id, coverAssetId))
       .limit(1);
     const visibleStoryIds = new Set(storyIds);
-    if (cover && !visibleStoryIds.has(cover.storyId)) coverAssetId = null;
+    if (cover && (!cover.storyId || !visibleStoryIds.has(cover.storyId))) coverAssetId = null;
   }
 
   return {
@@ -338,6 +349,7 @@ export async function getBookForUser(
     subtitle: row.book.subtitle,
     dedication: row.book.dedication,
     coverAssetId,
+    kind: row.book.kind as BookKind,
     format: row.book.format as BookFormat,
     status: row.book.status as BookStatus,
     errorMessage: row.book.errorMessage,
@@ -445,6 +457,245 @@ export async function createBook(input: {
     return created.id;
   });
   return { ok: true, value: { bookId } };
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Photo books (docs/PHOTO_BOOK_PLAN.md PR 1): a second `books.kind`, built by
+ * bulk-uploading photos rather than picking stories. `book_stories` stays empty;
+ * photos live in `assets` (book_id set, story_id null) + `book_photos` (per-photo
+ * state and the metadata the `photo-meta` worker job fills in).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Create an empty photo book — the bulk uploader adds photos to it afterwards. */
+export async function createPhotoBook(input: {
+  chronicleId: string;
+  userId: string;
+  title: string;
+}): Promise<Result<{ bookId: string }>> {
+  const gate = await ensureBookAccess(input.chronicleId, input.userId);
+  if (!gate.ok) return gate;
+
+  const [created] = await db
+    .insert(books)
+    .values({
+      chronicleId: input.chronicleId,
+      createdBy: input.userId,
+      kind: 'photo',
+      title: input.title.trim() || 'Fotobuch',
+    })
+    .returning();
+  return { ok: true, value: { bookId: created.id } };
+}
+
+export interface AddBookPhotoInput {
+  s3Key: string;
+  mimeType: string;
+  bytes: number;
+  width?: number | null;
+  height?: number | null;
+  /** Client-read EXIF hints (§3) — the `photo-meta` job overwrites these with the
+   *  authoritative, server-extracted values once it runs. */
+  takenAt?: Date | null;
+  gpsLat?: number | null;
+  gpsLng?: number | null;
+}
+
+/** Access + lock gate shared by every photo-book mutation below — also used directly
+ *  by the batch presign action, which needs the same check before signing PUT URLs. */
+export async function editablePhotoBook(
+  bookId: string,
+  userId: string,
+): Promise<{ ok: true; chronicleId: string } | { ok: false; error: string }> {
+  const [row] = await db
+    .select({ chronicleId: books.chronicleId, kind: books.kind, status: books.status })
+    .from(books)
+    .where(eq(books.id, bookId))
+    .limit(1);
+  if (!row) return err('Book not found.');
+  if (row.kind !== 'photo') return err('This is not a photo book.');
+  const gate = await ensureBookAccess(row.chronicleId, userId);
+  if (!gate.ok) return gate;
+  if (row.status === 'ordered') {
+    return err('This book has been ordered and is locked. Create a new book to make changes.');
+  }
+  return { ok: true, chronicleId: row.chronicleId };
+}
+
+/**
+ * Attach already-uploaded photos (via the batch presign action) to a photo book:
+ * one `assets` row + one `book_photos` row per photo, appended after whatever is
+ * already in the book, then a `thumbnail` and a `photo-meta` job per photo — mirrors
+ * `addStoryPhotoContribution`'s "insert, then enqueue" shape in spirit.
+ *
+ * Idempotent by `s3Key`: an `s3Key` this book already holds an asset for is skipped,
+ * so a retried batch (e.g. after a flaky network response) never double-adds photos.
+ */
+export async function addBookPhotos(input: {
+  bookId: string;
+  userId: string;
+  photos: AddBookPhotoInput[];
+}): Promise<Result<{ added: number }>> {
+  if (input.photos.length === 0) return { ok: true, value: { added: 0 } };
+  const gate = await editablePhotoBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+
+  // The key must be one we signed for a book photo, not a guess at another object.
+  if (input.photos.some((p) => !p.s3Key.startsWith('books/photos/'))) {
+    return err('Invalid upload.');
+  }
+
+  const inserted = await db.transaction(async (tx) => {
+    const keys = input.photos.map((p) => p.s3Key);
+    const existing = await tx
+      .select({ s3Key: assets.s3Key })
+      .from(assets)
+      .where(and(eq(assets.bookId, input.bookId), inArray(assets.s3Key, keys)));
+    const existingKeys = new Set(existing.map((e) => e.s3Key));
+    const fresh = input.photos.filter((p) => !existingKeys.has(p.s3Key));
+    if (fresh.length === 0) return [];
+
+    const [{ count }] = await tx
+      .select({ count: sql<number>`count(*)::int` })
+      .from(bookPhotos)
+      .where(eq(bookPhotos.bookId, input.bookId));
+    const startPosition = count ?? 0;
+
+    const assetRows = await tx
+      .insert(assets)
+      .values(
+        fresh.map((p) => ({
+          storyId: null,
+          bookId: input.bookId,
+          kind: 'photo' as const,
+          s3Key: p.s3Key,
+          mimeType: p.mimeType,
+          bytes: p.bytes,
+          width: p.width ?? null,
+          height: p.height ?? null,
+        })),
+      )
+      .returning({ id: assets.id, s3Key: assets.s3Key });
+
+    const bySource = new Map(fresh.map((p) => [p.s3Key, p]));
+    await tx.insert(bookPhotos).values(
+      assetRows.map((a, i) => {
+        const source = bySource.get(a.s3Key);
+        return {
+          bookId: input.bookId,
+          assetId: a.id,
+          position: startPosition + i,
+          takenAt: source?.takenAt ?? null,
+          gpsLat: source?.gpsLat ?? null,
+          gpsLng: source?.gpsLng ?? null,
+        };
+      }),
+    );
+    return assetRows;
+  });
+
+  if (inserted.length > 0) {
+    await db.update(books).set({ updatedAt: new Date() }).where(eq(books.id, input.bookId));
+  }
+
+  for (const a of inserted) {
+    await enqueueThumbnail({ s3Key: a.s3Key });
+    await enqueuePhotoMeta({ assetId: a.id });
+  }
+
+  return { ok: true, value: { added: inserted.length } };
+}
+
+export interface BookPhotoItem {
+  assetId: string;
+  s3Key: string;
+  thumbS3Key: string | null;
+  mimeType: string;
+  width: number | null;
+  height: number | null;
+  position: number;
+  excluded: boolean;
+  excludedReason: string | null;
+  takenAt: Date | null;
+  /** True once the `photo-meta` job has recorded a perceptual hash for this photo —
+   *  the builder's "X / Y analyzed" progress indicator counts these. */
+  analyzed: boolean;
+}
+
+/** Every photo of a photo book, in upload order, for the builder's grid. */
+export async function listBookPhotos(
+  bookId: string,
+  userId: string,
+): Promise<Result<{ photos: BookPhotoItem[] }>> {
+  const [row] = await db
+    .select({ chronicleId: books.chronicleId, kind: books.kind })
+    .from(books)
+    .where(eq(books.id, bookId))
+    .limit(1);
+  if (!row) return err('Book not found.');
+  if (row.kind !== 'photo') return err('This is not a photo book.');
+  const m = await getMembership(row.chronicleId, userId);
+  if (!m) return err('Book not found.');
+
+  const rows = await db
+    .select({
+      assetId: assets.id,
+      s3Key: assets.s3Key,
+      thumbS3Key: assets.thumbS3Key,
+      mimeType: assets.mimeType,
+      width: assets.width,
+      height: assets.height,
+      position: bookPhotos.position,
+      excluded: bookPhotos.excluded,
+      excludedReason: bookPhotos.excludedReason,
+      takenAt: bookPhotos.takenAt,
+      phash: bookPhotos.phash,
+    })
+    .from(bookPhotos)
+    .innerJoin(assets, eq(bookPhotos.assetId, assets.id))
+    .where(eq(bookPhotos.bookId, bookId))
+    .orderBy(asc(bookPhotos.position));
+
+  return {
+    ok: true,
+    value: {
+      photos: rows.map((r) => ({
+        assetId: r.assetId,
+        s3Key: r.s3Key,
+        thumbS3Key: r.thumbS3Key,
+        mimeType: r.mimeType,
+        width: r.width,
+        height: r.height,
+        position: r.position,
+        excluded: r.excluded,
+        excludedReason: r.excludedReason,
+        takenAt: r.takenAt,
+        analyzed: r.phash != null,
+      })),
+    },
+  };
+}
+
+/** Toggle one photo in/out of the layout (the builder's exclude/include control). */
+export async function setPhotoExcluded(input: {
+  bookId: string;
+  assetId: string;
+  excluded: boolean;
+  userId: string;
+}): Promise<Result> {
+  const gate = await editablePhotoBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+
+  const updated = await db
+    .update(bookPhotos)
+    .set({
+      excluded: input.excluded,
+      excludedReason: input.excluded ? 'user' : null,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.assetId, input.assetId)))
+    .returning({ id: bookPhotos.id });
+  if (updated.length === 0) return err('Photo not found in this book.');
+  return { ok: true };
 }
 
 /** Guard shared by every mutation: member, contributor, and the book not locked.
@@ -906,6 +1157,9 @@ export async function updateBookLayout(input: {
   if (!gate.ok) return gate;
   const hidden = hiddenChaptersError(gate.book);
   if (hidden) return hidden;
+  // Photo books have no layout plan yet (docs/PHOTO_BOOK_PLAN.md PR 2+) — `loadBook`
+  // below assumes a story book (>= 1 chapter) and throws otherwise.
+  if (gate.book.kind !== 'story') return err('This book has no layout plan yet.');
   if (input.ops.length === 0) return { ok: true };
 
   const loaded = await loadBook(input.bookId);
@@ -993,6 +1247,9 @@ export async function getBookLayoutSummary(
 ): Promise<Result<BookLayoutSummary>> {
   const book = await getBookForUser(bookId, userId, accessCtx);
   if (!book) return err('Book not found.');
+  // Photo books have no layout plan yet (docs/PHOTO_BOOK_PLAN.md PR 2+) — `loadBook`
+  // below assumes a story book (>= 1 chapter) and throws otherwise.
+  if (book.kind !== 'story') return err('This book has no layout plan yet.');
   const loaded = await loadBook(bookId);
   const plan = await loadOrBuildPlan(bookId, loaded);
 

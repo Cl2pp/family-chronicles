@@ -603,7 +603,13 @@ export const de: Dictionary = {
     noBooksHint:
       'Wähle Geschichten aus, bring sie in Reihenfolge — wir setzen daraus ein druckfertiges Familienbuch mit Fotos.',
     needStories: 'Du brauchst mindestens eine fertige Geschichte, um ein Buch zu erstellen.',
+    needChronicle: 'Erstelle oder tritt einem Familienwerk bei, bevor du ein Buch erstellst.',
     defaultTitle: (chronicle: string) => `Das ${chronicle}-Buch`,
+    defaultPhotoBookTitle: (chronicle: string) => `Das ${chronicle}-Fotobuch`,
+    kindStory: 'Geschichtenbuch',
+    kindStoryHint: 'Setzt deine geschriebenen Geschichten als Kapitel mit Fotos.',
+    kindPhoto: 'Fotobuch',
+    kindPhotoHint: 'Lade 100+ Fotos hoch — wir sortieren, räumen auf und layouten automatisch.',
     storyCount: (n: number) => (n === 1 ? '1 Geschichte' : `${n} Geschichten`),
     pageCount: (n: number) => `${n} Seiten`,
     status: {
@@ -678,6 +684,22 @@ export const de: Dictionary = {
         'Das Layout dieses Buchs wurde von Hand bearbeitet. Das ersetzt diese Änderungen jetzt durch ein neu erstelltes Layout.',
       overwriteEditsConfirm: 'Änderungen ersetzen',
       overwriteEditsCancel: 'Abbrechen',
+      photoBook: {
+        addPhotos: 'Fotos hinzufügen',
+        uploadProgress: (done: number, total: number) => `${done} / ${total} hochgeladen`,
+        someFailed: (n: number) =>
+          n === 1
+            ? '1 Foto konnte nicht hochgeladen werden.'
+            : `${n} Fotos konnten nicht hochgeladen werden.`,
+        uploadFailed: 'Hochladen fehlgeschlagen — versuch es bitte noch einmal.',
+        photos: 'Fotos',
+        analyzedProgress: (analyzed: number, total: number) => `${analyzed} / ${total} analysiert`,
+        analyzing: 'Wird analysiert…',
+        noPhotosYet: 'Noch keine Fotos',
+        noPhotosHint: 'Füge oben Fotos hinzu, um dieses Buch zu füllen.',
+        exclude: 'Aus dem Buch ausschließen',
+        include: 'Wieder ins Buch aufnehmen',
+      },
     },
     order: {
       title: 'Dein Buch bestellen',

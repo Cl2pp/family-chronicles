@@ -4,10 +4,11 @@ import { Box } from '@mantine/core';
 import { db } from '@/db';
 import { assets } from '@/db/schema';
 import { requireUser } from '@/lib/session';
-import { getBookForUser, getBookLayoutSummary, readyStoriesForChronicle } from '@/lib/books';
+import { getBookForUser, getBookLayoutSummary, listBookPhotos, readyStoriesForChronicle } from '@/lib/books';
 import { loadStoryAccessContext } from '@/lib/story-access';
 import { presignGet } from '@/lib/s3';
 import { BookBuilder, type CoverOption } from './book-builder';
+import { PhotoBookBuilder, type PhotoBookPhotoView } from './photo-book-builder';
 
 export default async function BookBuilderPage({
   params,
@@ -20,6 +21,29 @@ export default async function BookBuilderPage({
   const access = await loadStoryAccessContext(user.id);
   const book = await getBookForUser(bookId, user.id, access);
   if (!book) notFound();
+
+  if (book.kind === 'photo') {
+    const photosResult = await listBookPhotos(bookId, user.id);
+    const rows = photosResult.ok ? photosResult.value.photos : [];
+    const photos: PhotoBookPhotoView[] = await Promise.all(
+      rows.map(async (p) => ({
+        assetId: p.assetId,
+        url: p.thumbS3Key
+          ? await presignGet(p.thumbS3Key, 'image/webp')
+          : await presignGet(p.s3Key, p.mimeType),
+        excluded: p.excluded,
+        analyzed: p.analyzed,
+      })),
+    );
+    return (
+      <Box p="lg" maw={1200} mx="auto">
+        <PhotoBookBuilder
+          book={{ id: book.id, title: book.title, status: book.status }}
+          photos={photos}
+        />
+      </Box>
+    );
+  }
 
   // Story picker: only stories the acting user can read (per-viewer, like the chapters).
   const chronicleStories = await readyStoriesForChronicle(book.chronicleId, user.id, access);

@@ -6,15 +6,22 @@ import { cookies } from 'next/headers';
 import { requireUser } from '@/lib/session';
 import { resolveActiveChronicle } from '@/lib/chronicles';
 import {
+  addBookPhotos,
   createBook,
+  createPhotoBook,
   deleteBook,
+  editablePhotoBook,
   getBookForUser,
+  listBookPhotos,
   requestAiDesign,
   requestPreview,
   resetBookLayout,
   setBookStories,
+  setPhotoExcluded,
   updateBook,
   updateBookLayout,
+  type AddBookPhotoInput,
+  type BookPhotoItem,
   type LayoutOp,
 } from '@/lib/books';
 import { runBookAgent, type ChatTurn } from '@/lib/ai/agent';
@@ -22,6 +29,8 @@ import type { Receipt, ToolContext } from '@/lib/ai/tools';
 import { getI18n } from '@/lib/i18n/server';
 import type { BookFormat } from '@/lib/gelato';
 import { captureServerEvent } from '@/lib/posthog-server';
+import { buildKey, presignPut } from '@/lib/s3';
+import { validateUpload } from '@/lib/uploads';
 
 /** UI actions are thin wrappers over lib/books.ts — the agent tools wrap the same functions. */
 
@@ -45,6 +54,105 @@ export async function createBookAction(): Promise<{ error: string } | never> {
     chronicle_id: active.id,
   });
   redirect(`/books/${result.value.bookId}`);
+}
+
+/** Create a photo book (empty — the bulk uploader adds photos) and open its builder. */
+export async function createPhotoBookAction(): Promise<{ error: string } | never> {
+  const user = await requireUser();
+  const activeCookie = (await cookies()).get('activeChronicleId')?.value;
+  const { active } = await resolveActiveChronicle(user.id, activeCookie);
+  const { t } = await getI18n();
+  if (!active) return { error: t.books.needChronicle };
+
+  const result = await createPhotoBook({
+    chronicleId: active.id,
+    userId: user.id,
+    title: t.books.defaultPhotoBookTitle(active.name),
+  });
+  if (!result.ok) return { error: result.error };
+  revalidatePath('/books');
+  captureServerEvent(user.id, 'photo_book_created', {
+    book_id: result.value.bookId,
+    chronicle_id: active.id,
+  });
+  redirect(`/books/${result.value.bookId}`);
+}
+
+/** One presigned upload slot for the bulk photo uploader. */
+export interface PresignedBookPhoto {
+  /** Echoes the request so the client can match a slot back to its `File`. */
+  index: number;
+  url: string;
+  s3Key: string;
+  mimeType: string;
+}
+
+/**
+ * Batch presign: one round trip signs N book-photo uploads (§3, "Batch presign
+ * server action"). Each file is validated against the same allowlist/15 MB limit as
+ * every other photo upload (`lib/uploads.ts`) — only the object key prefix differs
+ * (`books/photos/` instead of `stories/photos/`).
+ */
+export async function presignBookPhotosAction(input: {
+  bookId: string;
+  files: { mimeType: string; bytes: number }[];
+}): Promise<{ uploads: PresignedBookPhoto[] } | { error: string }> {
+  const user = await requireUser();
+  const gate = await editablePhotoBook(input.bookId, user.id);
+  if (!gate.ok) return { error: gate.error };
+  if (input.files.length === 0) return { uploads: [] };
+
+  try {
+    const uploads = await Promise.all(
+      input.files.map(async (file, index) => {
+        const validated = validateUpload('photo', file.mimeType, file.bytes);
+        const s3Key = buildKey('books/photos', validated.ext);
+        const url = await presignPut(s3Key, validated.mimeType, validated.bytes);
+        return { index, url, s3Key, mimeType: validated.mimeType };
+      }),
+    );
+    return { uploads };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Invalid upload.' };
+  }
+}
+
+/** Attach already-uploaded photos (via `presignBookPhotosAction`) to a photo book. */
+export async function addBookPhotosAction(input: {
+  bookId: string;
+  photos: AddBookPhotoInput[];
+}): Promise<{ added?: number; error?: string }> {
+  const user = await requireUser();
+  const result = await addBookPhotos({ ...input, userId: user.id });
+  if (!result.ok) return { error: result.error };
+  revalidatePath(`/books/${input.bookId}`);
+  captureServerEvent(user.id, 'photo_book_photos_added', {
+    book_id: input.bookId,
+    photo_count: result.value.added,
+  });
+  return { added: result.value.added };
+}
+
+/** The current photo grid of a photo book, for the builder to poll analysis progress. */
+export async function listBookPhotosAction(
+  bookId: string,
+): Promise<{ photos: BookPhotoItem[] } | { error: string }> {
+  const user = await requireUser();
+  const result = await listBookPhotos(bookId, user.id);
+  if (!result.ok) return { error: result.error };
+  return { photos: result.value.photos };
+}
+
+/** Exclude/include one photo from the photo book's layout. */
+export async function setPhotoExcludedAction(input: {
+  bookId: string;
+  assetId: string;
+  excluded: boolean;
+}): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await setPhotoExcluded({ ...input, userId: user.id });
+  if (result.ok) revalidatePath(`/books/${input.bookId}`);
+  return result.ok ? {} : { error: result.error };
 }
 
 export async function updateBookAction(input: {

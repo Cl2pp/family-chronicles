@@ -7,6 +7,7 @@ import {
   QUEUES,
   SWEEP_ORPHANS_CRON,
   type DesignBookJob,
+  type PhotoMetaJob,
   type RenderBookJob,
   type StyleJob,
   type ThumbnailJob,
@@ -20,6 +21,7 @@ import { styleContextForStory } from '@/lib/stories';
 import { sweepOrphanedObjects } from '@/lib/orphans';
 import { transcodeAudioObject } from '@/lib/transcode';
 import { generateThumbnail } from '@/lib/thumbnails';
+import { analyzePhotoMeta } from '@/lib/photo-meta';
 
 async function markFailed(storyId: string, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
@@ -139,6 +141,19 @@ async function handleThumbnail(data: ThumbnailJob) {
   }
 }
 
+/** Extract deterministic metadata (dimensions, EXIF, phash, blur score) for one
+ *  book photo. Cheap and idempotent — safe to run at normal worker concurrency. */
+async function handlePhotoMeta(data: PhotoMetaJob) {
+  try {
+    const result = await analyzePhotoMeta(data.assetId);
+    console.log(`[worker] photo-meta ${data.assetId}: ${result}`);
+  } catch (err) {
+    // The photo still uploaded fine — it just stays unanalyzed (no phash/EXIF) until
+    // a retry; nothing is lost.
+    console.error(`[worker] photo-meta failed for ${data.assetId}:`, err);
+  }
+}
+
 /** Reclaim storage from uploads whose owning row was never written. */
 async function handleSweepOrphans() {
   try {
@@ -183,13 +198,17 @@ async function main() {
     },
   );
 
+  await boss.work<PhotoMetaJob>(QUEUES.photoMeta, async (jobs) => {
+    for (const job of jobs) await handlePhotoMeta(job.data);
+  });
+
   await boss.work(QUEUES.sweepOrphans, async () => {
     await handleSweepOrphans();
   });
   await boss.schedule(QUEUES.sweepOrphans, SWEEP_ORPHANS_CRON);
 
   console.log(
-    '[worker] ready — listening for style + transcode + thumbnail + render-book + design-book jobs; orphan sweep scheduled',
+    '[worker] ready — listening for style + transcode + thumbnail + render-book + design-book + photo-meta jobs; orphan sweep scheduled',
   );
 }
 

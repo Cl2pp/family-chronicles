@@ -372,6 +372,10 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
     .orderBy(asc(assets.createdAt));
   const photosByStory = new Map<string, (typeof photos)[number][]>();
   for (const p of photos) {
+    // `assets.storyId` is nullable (book-owned photos), but this query is filtered to
+    // `storyId IN (ids)`, so it's never null in practice — the guard just satisfies
+    // the type.
+    if (!p.storyId) continue;
     const arr = photosByStory.get(p.storyId) ?? [];
     arr.push(p);
     photosByStory.set(p.storyId, arr);

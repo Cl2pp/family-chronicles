@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   pgEnum,
   pgTable,
@@ -6,9 +7,12 @@ import {
   timestamp,
   uuid,
   integer,
+  doublePrecision,
   jsonb,
   index,
   uniqueIndex,
+  check,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -363,9 +367,13 @@ export const assets = pgTable(
   'assets',
   {
     id: uuid('id').defaultRandom().primaryKey(),
-    storyId: uuid('story_id')
-      .notNull()
-      .references(() => stories.id, { onDelete: 'cascade' }),
+    /** Nullable: a photo-book upload belongs to a book, not a story — see `bookId` below
+     *  and the `assets_story_or_book_ck` CHECK constraint (exactly one owner). */
+    storyId: uuid('story_id').references(() => stories.id, { onDelete: 'cascade' }),
+    /** Owning photo book, for uploads that don't belong to a story (see `storyId`).
+     *  Return-typed to break the assets↔books circular reference (books.coverAssetId
+     *  points back at assets.id). */
+    bookId: uuid('book_id').references((): AnyPgColumn => books.id, { onDelete: 'cascade' }),
     /** The contribution this asset arrived with, for the source-material timeline. */
     contributionId: uuid('contribution_id').references(() => contributions.id, {
       onDelete: 'set null',
@@ -384,9 +392,13 @@ export const assets = pgTable(
   },
   (t) => [
     index('assets_story_idx').on(t.storyId),
+    index('assets_book_idx').on(t.bookId),
     // One story never holds the same object twice — an accepted draft re-run must
-    // not duplicate the photos it already carried over.
+    // not duplicate the photos it already carried over. NULLs (book-owned assets)
+    // are treated as distinct by Postgres, so this never blocks book photos.
     uniqueIndex('assets_story_key_uq').on(t.storyId, t.s3Key),
+    // Every asset belongs to exactly one owner — a story or a book, never neither.
+    check('assets_story_or_book_ck', sql`${t.storyId} is not null or ${t.bookId} is not null`),
   ],
 );
 
@@ -432,6 +444,10 @@ export const bookStatus = pgEnum('book_status', [
 /** Trim sizes offered in the UI; each maps to a Gelato product UID (lib/gelato.ts). */
 export const bookFormat = pgEnum('book_format', ['hardcover-21x28', 'hardcover-20x20']);
 
+/** `story`: the existing chapters-from-stories book. `photo`: a photo-only book built
+ *  from bulk-uploaded photos (docs/PHOTO_BOOK_PLAN.md) — `book_stories` stays empty. */
+export const bookKind = pgEnum('book_kind', ['story', 'photo']);
+
 export const books = pgTable(
   'books',
   {
@@ -442,6 +458,7 @@ export const books = pgTable(
     createdBy: text('created_by')
       .notNull()
       .references(() => user.id, { onDelete: 'restrict' }),
+    kind: bookKind('kind').notNull().default('story'),
     title: text('title').notNull(),
     subtitle: text('subtitle'),
     dedication: text('dedication'),
@@ -510,4 +527,58 @@ export const bookOrders = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (t) => [index('book_orders_book_idx').on(t.bookId)],
+);
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Photo books — per-photo state + analysis (docs/PHOTO_BOOK_PLAN.md §2/§4)
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Vision-analysis lifecycle for one photo. PR1 only ever leaves this at `pending` —
+ *  the `photo-vision` job that advances it is a later PR. */
+export const photoAnalysisStatus = pgEnum('photo_analysis_status', [
+  'pending',
+  'analyzing',
+  'done',
+  'failed',
+]);
+
+/** One row per photo in a photo book: upload order, exclusion, and everything the
+ *  `photo-meta`/`photo-vision` jobs discover about it. Hot fields the layouter/dedup
+ *  need to query directly are real columns; the model's judgment (a later PR) lives in
+ *  `analysis`. */
+export const bookPhotos = pgTable(
+  'book_photos',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    bookId: uuid('book_id')
+      .notNull()
+      .references(() => books.id, { onDelete: 'cascade' }),
+    assetId: uuid('asset_id')
+      .notNull()
+      .references(() => assets.id, { onDelete: 'cascade' }),
+    /** Upload order — the fallback sort when EXIF has no capture time. */
+    position: integer('position').notNull(),
+    /** Excluded from the layout (auto: duplicate/blurry/eyes-closed, or user says so).
+     *  Excluded ≠ deleted: the builder's tray shows them and they can be re-included. */
+    excluded: boolean('excluded').notNull().default(false),
+    /** 'duplicate' | 'blurry' | 'eyes-closed' | 'low-quality' | 'user' */
+    excludedReason: text('excluded_reason'),
+    /** EXIF capture metadata, extracted server-side (authoritative) by `photo-meta`. */
+    takenAt: timestamp('taken_at'),
+    gpsLat: doublePrecision('gps_lat'),
+    gpsLng: doublePrecision('gps_lng'),
+    /** Perceptual hash (dHash, hex) for near-duplicate clustering — pure code, no AI. */
+    phash: text('phash'),
+    /** Variance-of-Laplacian sharpness score — pure code, no AI; lower = blurrier. */
+    blurScore: doublePrecision('blur_score'),
+    analysisStatus: photoAnalysisStatus('analysis_status').notNull().default('pending'),
+    /** AI vision result (later PR) — see PhotoAnalysis in lib/photo-analysis.ts. */
+    analysis: jsonb('analysis'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('book_photos_book_asset_uq').on(t.bookId, t.assetId),
+    index('book_photos_book_idx').on(t.bookId),
+  ],
 );

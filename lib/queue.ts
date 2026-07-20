@@ -9,6 +9,7 @@ export const QUEUES = {
   renderBook: 'render-book',
   thumbnail: 'thumbnail',
   designBook: 'design-book',
+  photoMeta: 'photo-meta',
 } as const;
 
 /** Nightly, off-peak — the sweep lists every object under the upload prefixes. */
@@ -36,6 +37,11 @@ export interface ThumbnailJob {
 /** Run the AI design pass on a book, falling back to the auto-layouter on failure. */
 export interface DesignBookJob {
   bookId: string;
+}
+
+/** Extract deterministic metadata (dimensions, EXIF, phash, blur) for one book photo. */
+export interface PhotoMetaJob {
+  assetId: string;
 }
 
 const globalForBoss = globalThis as unknown as { __boss?: Promise<PgBoss> };
@@ -84,4 +90,9 @@ export async function enqueueThumbnail(data: ThumbnailJob): Promise<void> {
 export async function enqueueDesignBook(data: DesignBookJob): Promise<void> {
   const boss = await getBoss();
   await boss.send(QUEUES.designBook, data);
+}
+
+export async function enqueuePhotoMeta(data: PhotoMetaJob): Promise<void> {
+  const boss = await getBoss();
+  await boss.send(QUEUES.photoMeta, data);
 }
