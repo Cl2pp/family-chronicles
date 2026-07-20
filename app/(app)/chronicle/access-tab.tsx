@@ -257,29 +257,49 @@ export function AccessTab({
                           {t.access.willJoinAs(i.personName)}
                         </Text>
                       )}
-                    </Table.Td>
-                    <Table.Td style={{ textAlign: 'right' }}>
-                      <Group justify="flex-end" gap="xs" wrap="nowrap">
-                        {manage && (
-                          <>
-                            <Button
-                              size="compact-xs"
-                              variant="subtle"
-                              loading={invitePending}
-                              onClick={() => handleResend(i)}
-                            >
-                              {t.access.resendInvitation}
-                            </Button>
-                            <Button
-                              size="compact-xs"
-                              variant="subtle"
-                              color="red"
-                              onClick={() => setRevokeTarget(i)}
-                            >
-                              {t.access.revokeInvitation}
-                            </Button>
-                          </>
+                      {/* A phone has no room for a third column, so the badges
+                          ride under the address there and the dedicated column
+                          takes over from `sm` up. */}
+                      <Group gap="xs" mt={6} hiddenFrom="sm">
+                        {i.expired && (
+                          <Badge variant="light" color="red">
+                            {t.access.inviteExpired}
+                          </Badge>
                         )}
+                        <Badge variant="outline" color="slate">
+                          {t.roles[i.role]}
+                        </Badge>
+                      </Group>
+                    </Table.Td>
+                    {/* Actions get their own centred column so they line up down
+                        the list — sharing a cell with the badges let a row's
+                        "expired" badge shove its buttons out of alignment. */}
+                    <Table.Td style={{ textAlign: 'center' }}>
+                      {manage && (
+                        // Allowed to wrap: side by side wherever there is room,
+                        // stacked on a phone rather than clipped at the edge.
+                        <Group justify="center" gap="xs">
+                          <Button
+                            size="xs"
+                            variant="default"
+                            loading={invitePending}
+                            onClick={() => handleResend(i)}
+                          >
+                            {t.access.resendInvitation}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="light"
+                            color="red"
+                            onClick={() => setRevokeTarget(i)}
+                          >
+                            {t.access.revokeInvitation}
+                          </Button>
+                        </Group>
+                      )}
+                    </Table.Td>
+                    <Table.Td visibleFrom="sm" style={{ textAlign: 'right' }}>
+                      <Group justify="flex-end" gap="xs" wrap="nowrap">
                         {i.expired && (
                           <Badge variant="light" color="red">
                             {t.access.inviteExpired}
