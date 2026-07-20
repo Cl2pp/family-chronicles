@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { checkPhotoBookPlanConsistency, type PhotoBookPlan, type PhotoPlanContent } from './photo-book-plan';
-import { applyPhotoLayoutOp, removePhotoFromPlan, type PurePhotoLayoutOp } from './photo-book-ops';
+import { checkPhotoBookPlanConsistency, type PhotoBookPlan, type PhotoPagePlan, type PhotoPlanContent } from './photo-book-plan';
+import {
+  applyPhotoLayoutOp,
+  findMergeSectionsIndexHazard,
+  removePhotoFromPlan,
+  type PhotoLayoutOp,
+  type PurePhotoLayoutOp,
+} from './photo-book-ops';
 
 // The cover hero ('a1') deliberately does NOT also appear on any section page — a real
 // plan never reuses an id between the cover and a page (checkPhotoBookPlanConsistency
@@ -155,6 +161,51 @@ describe('applyPhotoLayoutOp', () => {
     expect('error' in result).toBe(true);
   });
 
+  it('swap_photos swaps captions along with the photos when both are captioned on the same page', () => {
+    // Captions are POSITIONAL (index into assetIds) — a swap that only remaps assetIds
+    // would leave each caption behind at its old slot, now describing the OTHER photo.
+    const plan = basePlan();
+    plan.sections[0].pages[2] = { ...plan.sections[0].pages[2], captions: ['Cap4', 'Cap5', null] } as PhotoPagePlan;
+    const result = apply(plan, { op: 'swap_photos', assetIdA: 'a4', assetIdB: 'a5' });
+    expect('plan' in result).toBe(true);
+    if (!('plan' in result)) return;
+    const page = result.plan.sections[0].pages[2];
+    expect(page.assetIds).toEqual(['a5', 'a4', 'a6']);
+    // a4's caption ("Cap4") must follow a4 to its new slot (index 1), and a5's caption
+    // ("Cap5") must follow a5 to its new slot (index 0) — not stay behind at the old slot.
+    expect(page.captions).toEqual(['Cap5', 'Cap4', null]);
+  });
+
+  it('swap_photos carries a single caption to its photo\'s new slot when only one side is captioned', () => {
+    const plan = basePlan();
+    plan.sections[0].pages[1] = { ...plan.sections[0].pages[1], captions: ['At home', null] } as PhotoPagePlan;
+    const result = apply(plan, { op: 'swap_photos', assetIdA: 'a2', assetIdB: 'a3' });
+    expect('plan' in result).toBe(true);
+    if (!('plan' in result)) return;
+    const page = result.plan.sections[0].pages[1];
+    expect(page.assetIds).toEqual(['a3', 'a2']);
+    // a2's caption travels with a2 to its new slot (index 1); a3 (never captioned) is null.
+    expect(page.captions).toEqual([null, 'At home']);
+  });
+
+  it('swap_photos moves a caption across pages/sections for a cross-page swap', () => {
+    const plan = basePlan();
+    plan.sections[0].pages[2] = { ...plan.sections[0].pages[2], captions: ['Cap4', null, null] } as PhotoPagePlan;
+    // a4 (section 0, captioned "Cap4") swaps with b3 (section 1, no caption).
+    const result = apply(plan, { op: 'swap_photos', assetIdA: 'a4', assetIdB: 'b3' });
+    expect('plan' in result).toBe(true);
+    if (!('plan' in result)) return;
+    const sourcePage = result.plan.sections[0].pages[2];
+    expect(sourcePage.assetIds).toEqual(['b3', 'a5', 'a6']);
+    // b3 (now in a4's old slot) had no caption, so that slot goes back to null — "Cap4"
+    // must NOT stay behind here.
+    expect(sourcePage.captions).toEqual([null, null, null]);
+    const destPage = result.plan.sections[1].pages[0];
+    expect(destPage.assetIds).toEqual(['b1', 'b2', 'a4', 'b4', 'b5']);
+    // "Cap4" must have traveled with a4 into its new page/section, landing at a4's new slot.
+    expect(destPage.captions).toEqual([null, null, 'Cap4', null, null]);
+  });
+
   it('move_section reorders sections', () => {
     const result = apply(basePlan(), { op: 'move_section', fromIndex: 1, toIndex: 0 });
     expect('plan' in result && result.plan.sections.map((s) => s.title)).toEqual(['Juli 2025', 'Juni 2025']);
@@ -259,5 +310,64 @@ describe('exclude/set_cover interplay with checkPhotoBookPlanConsistency (the re
     if (!('plan' in result)) return;
     const problems = checkPhotoBookPlanConsistency(result.plan, contentFor(result.plan));
     expect(problems).toEqual([]);
+  });
+});
+
+describe('findMergeSectionsIndexHazard (the merge_sections batch-index-instability guard)', () => {
+  it('flags an index-addressed op that follows merge_sections in the same batch', () => {
+    const ops: PhotoLayoutOp[] = [
+      { op: 'merge_sections', sectionIndex: 0, intoIndex: 1 },
+      { op: 'set_section_title', sectionIndex: 1, title: 'Sommer' },
+    ];
+    expect(findMergeSectionsIndexHazard(ops)).not.toBeNull();
+  });
+
+  it('flags every index-addressed op type when it follows a merge_sections', () => {
+    const indexedOps: PhotoLayoutOp[] = [
+      { op: 'set_section_title', sectionIndex: 0, title: 'x' },
+      { op: 'set_page_template', sectionIndex: 0, pageIndex: 0, template: 'full-framed' },
+      { op: 'move_photo', assetId: 'a1', toSectionIndex: 0 },
+      { op: 'move_section', fromIndex: 0, toIndex: 1 },
+      { op: 'merge_sections', sectionIndex: 0, intoIndex: 1 },
+      { op: 'set_caption', sectionIndex: 0, pageIndex: 0, assetId: 'a1', caption: 'x' },
+    ];
+    for (const followUp of indexedOps) {
+      const ops: PhotoLayoutOp[] = [{ op: 'merge_sections', sectionIndex: 0, intoIndex: 1 }, followUp];
+      expect(findMergeSectionsIndexHazard(ops)).not.toBeNull();
+    }
+  });
+
+  it('allows merge_sections as the only op', () => {
+    const ops: PhotoLayoutOp[] = [{ op: 'merge_sections', sectionIndex: 0, intoIndex: 1 }];
+    expect(findMergeSectionsIndexHazard(ops)).toBeNull();
+  });
+
+  it('allows merge_sections as the last op, preceded by other ops', () => {
+    const ops: PhotoLayoutOp[] = [
+      { op: 'set_style', style: 'modern' },
+      { op: 'set_section_title', sectionIndex: 0, title: 'Renamed first' },
+      { op: 'merge_sections', sectionIndex: 0, intoIndex: 1 },
+    ];
+    expect(findMergeSectionsIndexHazard(ops)).toBeNull();
+  });
+
+  it('allows merge_sections followed only by non-index-addressed ops', () => {
+    const ops: PhotoLayoutOp[] = [
+      { op: 'merge_sections', sectionIndex: 0, intoIndex: 1 },
+      { op: 'set_style', style: 'gallery' },
+      { op: 'set_cover', heroAssetId: 'a1' },
+      { op: 'swap_photos', assetIdA: 'a1', assetIdB: 'a2' },
+      { op: 'exclude_photo', assetId: 'a3' },
+      { op: 'include_photo', assetId: 'a3' },
+    ];
+    expect(findMergeSectionsIndexHazard(ops)).toBeNull();
+  });
+
+  it('allows a batch with no merge_sections at all, indexed ops included', () => {
+    const ops: PhotoLayoutOp[] = [
+      { op: 'set_section_title', sectionIndex: 0, title: 'x' },
+      { op: 'move_section', fromIndex: 0, toIndex: 1 },
+    ];
+    expect(findMergeSectionsIndexHazard(ops)).toBeNull();
   });
 });

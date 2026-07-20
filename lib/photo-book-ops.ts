@@ -53,6 +53,54 @@ export type PhotoLayoutOp =
  *  handled by `updatePhotoBookLayout` itself (see module comment). */
 export type PurePhotoLayoutOp = Exclude<PhotoLayoutOp, { op: 'exclude_photo' } | { op: 'include_photo' }>;
 
+/** Ops that address a section and/or page by INDEX — everything `merge_sections` can
+ *  silently retarget, since it's the one op that REMOVES a section and shifts every later
+ *  section index down by one (see `applyPhotoLayoutOp`'s `merge_sections` case). */
+function referencesIndex(op: PhotoLayoutOp): boolean {
+  switch (op.op) {
+    case 'set_section_title':
+    case 'set_page_template':
+    case 'move_photo':
+    case 'move_section':
+    case 'merge_sections':
+    case 'set_caption':
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Guards against the footgun `applyPhotoLayoutOp`'s `merge_sections` case warns about in
+ * its own comment but a model calling `update_photo_book_layout` can't see: merging
+ * removes a section, so every section index from `sectionIndex` onward — including any
+ * later op's `sectionIndex`/`intoIndex`/`toSectionIndex`/`fromIndex`/`toIndex` — silently
+ * points at a DIFFERENT (but still valid) section after the merge. That's a silent wrong
+ * mutation, not an error, so it can't be caught by validation of the result alone.
+ *
+ * Rejects a batch where a `merge_sections` op is followed by ANY other op that addresses
+ * a section/page by index — `merge_sections` may be the last op in a batch, or the only
+ * op, but never followed by an index-addressed op in the same call. The caller must
+ * re-fetch `get_photo_book` (fresh indices) before issuing further indexed ops. Pure and
+ * batch-only — never touches a plan, called once up front before any op is applied.
+ */
+export function findMergeSectionsIndexHazard(ops: readonly PhotoLayoutOp[]): string | null {
+  for (let i = 0; i < ops.length; i++) {
+    if (ops[i].op !== 'merge_sections') continue;
+    const laterIndexed = ops.slice(i + 1).some(referencesIndex);
+    if (laterIndexed) {
+      return (
+        'merge_sections shifts every later section index down by one, so it cannot be ' +
+        'followed by another op that addresses a section or page by index in the same ' +
+        'batch. Call merge_sections alone (or last), then get_photo_book again for fresh ' +
+        'indices before any further move_section/set_section_title/set_page_template/' +
+        'move_photo/set_caption/merge_sections op.'
+      );
+    }
+  }
+  return null;
+}
+
 export interface PhotoLayoutOpContext {
   /** Every photo id currently usable by the plan — in this book and not excluded. Ops
    *  that reference a photo (set_cover, move_photo, swap_photos) are rejected if either
@@ -132,9 +180,29 @@ export function removePhotoFromPlan(plan: PhotoBookPlan, assetId: string): Photo
   return { ...plan, cover, sections };
 }
 
+/** Finds `assetId`'s caption wherever it currently sits on a section page — `undefined`
+ *  if it isn't placed on any page (e.g. it's only the cover hero), `null` if it's placed
+ *  but has no caption text yet. Used by `swapIdEverywhere` to look up each side's caption
+ *  BEFORE any mutation, since after the id swap the old slot no longer belongs to it. */
+function findPlacedCaption(plan: PhotoBookPlan, assetId: string): string | null | undefined {
+  for (const section of plan.sections) {
+    for (const page of section.pages) {
+      const idx = page.assetIds.indexOf(assetId);
+      if (idx !== -1) return page.captions?.[idx] ?? null;
+    }
+  }
+  return undefined;
+}
+
 /** Swaps every occurrence of `a`/`b` in the plan (cover hero, cover back slots, and every
  *  page's `assetIds`) — pure id substitution, so unlike `move_photo` it never needs to
- *  re-template a page (the photo COUNT per page never changes). */
+ *  re-template a page (the photo COUNT per page never changes).
+ *
+ *  Captions are POSITIONAL (index into `assetIds`), so swapping only the ids would leave
+ *  each caption stranded at its old slot, now describing the OTHER photo that swapped
+ *  into it. Look up each of `a`/`b`'s caption up front, then re-home it at that photo's
+ *  NEW slot after the id swap — so the caption follows the photo's identity, not the
+ *  slot, including when `a` and `b` start out on different pages/sections. */
 function swapIdEverywhere(plan: PhotoBookPlan, a: string, b: string): PhotoBookPlan {
   const swap = (id: string) => (id === a ? b : id === b ? a : id);
   const cover: PhotoCoverPlan = {
@@ -142,9 +210,33 @@ function swapIdEverywhere(plan: PhotoBookPlan, a: string, b: string): PhotoBookP
     heroAssetId: plan.cover.heroAssetId ? swap(plan.cover.heroAssetId) : plan.cover.heroAssetId,
     backAssetIds: plan.cover.backAssetIds?.map(swap),
   };
+
+  const captionA = findPlacedCaption(plan, a);
+  const captionB = findPlacedCaption(plan, b);
+
   const sections = plan.sections.map((section) => ({
     ...section,
-    pages: section.pages.map((page) => ({ ...page, assetIds: page.assetIds.map(swap) }) as PhotoPagePlan),
+    pages: section.pages.map((page) => {
+      const idxA = page.assetIds.indexOf(a);
+      const idxB = page.assetIds.indexOf(b);
+      const assetIds = page.assetIds.map(swap);
+      if (idxA === -1 && idxB === -1) {
+        return { ...page, assetIds } as PhotoPagePlan;
+      }
+      // b's old caption (if any) lands wherever a used to be, and vice versa — only
+      // create a captions array from scratch if there's actually a caption to carry in;
+      // a page with neither photo captioned stays caption-free rather than gaining a
+      // needless all-null array.
+      const incomingAtIdxA = idxA !== -1 ? captionB ?? null : undefined;
+      const incomingAtIdxB = idxB !== -1 ? captionA ?? null : undefined;
+      if (!page.captions && !incomingAtIdxA && !incomingAtIdxB) {
+        return { ...page, assetIds } as PhotoPagePlan;
+      }
+      const captions = page.captions ? page.captions.slice() : page.assetIds.map(() => null);
+      if (idxA !== -1) captions[idxA] = incomingAtIdxA ?? null;
+      if (idxB !== -1) captions[idxB] = incomingAtIdxB ?? null;
+      return { ...page, assetIds, captions } as PhotoPagePlan;
+    }),
   }));
   return { ...plan, cover, sections };
 }
@@ -284,8 +376,11 @@ export function applyPhotoLayoutOp(
       const [removed] = sections.splice(sectionIndex, 1);
       // Merging REMOVES a section (unlike every other op here), so every section index
       // from sectionIndex onward shifts by one — including intoIndex, if it pointed past
-      // the removed one. Combine merge_sections with other index-addressed ops in the
-      // same batch with care; this is the one op that isn't index-stable.
+      // the removed one. `updatePhotoBookLayout` (lib/books.ts) enforces this at the
+      // batch level via `findMergeSectionsIndexHazard`, above: it rejects a batch outright
+      // if any op after a merge_sections addresses a section/page by index, so this
+      // function never actually sees that combination — merge_sections is always the last
+      // (or only) op it's asked to apply.
       const adjustedInto = sectionIndex < intoIndex ? intoIndex - 1 : intoIndex;
       sections[adjustedInto] = {
         ...sections[adjustedInto],

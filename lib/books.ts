@@ -62,7 +62,12 @@ import {
   type PhotoPageTemplate,
   type PhotoPlanContent,
 } from '@/lib/photo-book-plan';
-import { applyPhotoLayoutOp, removePhotoFromPlan, type PhotoLayoutOp } from '@/lib/photo-book-ops';
+import {
+  applyPhotoLayoutOp,
+  findMergeSectionsIndexHazard,
+  removePhotoFromPlan,
+  type PhotoLayoutOp,
+} from '@/lib/photo-book-ops';
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
 
 /**
@@ -1050,7 +1055,7 @@ export async function getPhotoBookSummary(bookId: string, userId: string): Promi
  * build/load the plan, fold every op over it, validate once, persist once — an op that
  * would leave the plan invalid rejects the WHOLE batch, nothing written).
  *
- * Two differences from the story path:
+ * Three differences from the story path:
  *  - `exclude_photo`/`include_photo` need a `book_photos.excluded` write alongside the
  *    plan edit. That write is intentionally NOT done eagerly per-op (unlike the
  *    builder's plain exclude/include toggle, `setPhotoExcluded`, which writes
@@ -1072,6 +1077,12 @@ export async function getPhotoBookSummary(bookId: string, userId: string): Promi
  *    mark the plan edited) — any chat edit, however small, is treated as a manual edit
  *    from here on, so a later `redesign_photo_book`/regenerate asks for confirmation
  *    before discarding it.
+ *  - The read-modify-write below runs inside a transaction that locks the book row
+ *    (`FOR UPDATE`) BEFORE reading the current plan, mirroring `addBookPhotos`'s lock
+ *    above — the chat surface makes concurrent writers to `layout_plan` realistic (a
+ *    chat op racing "Design my book"/regenerate, or two tabs), and without the lock the
+ *    second writer could read the same pre-edit plan and silently clobber the first
+ *    writer's change on save.
  */
 export async function updatePhotoBookLayout(input: {
   bookId: string;
@@ -1082,46 +1093,64 @@ export async function updatePhotoBookLayout(input: {
   if (!gate.ok) return gate;
   if (input.ops.length === 0) return { ok: true };
 
-  const loaded = await loadPhotoBook(input.bookId);
-  let plan: PhotoBookPlan = await loadOrBuildPhotoPlan(input.bookId, loaded);
+  // merge_sections shifts every later section index down by one — a model that doesn't
+  // re-fetch get_photo_book in between would silently retarget any following
+  // index-addressed op at the wrong (but still valid) section. Reject the whole batch
+  // up front, before any read/write, rather than let it apply a wrong mutation.
+  const mergeHazard = findMergeSectionsIndexHazard(input.ops);
+  if (mergeHazard) return err(mergeHazard);
 
-  const allIds = new Set(loaded.photos.map((p) => p.assetId));
-  const availableIds = new Set(loaded.photos.filter((p) => !p.excluded).map((p) => p.assetId));
-  const exclusionChanges = new Map<string, boolean>();
-  let coverAssetId: string | undefined;
+  // The whole read-modify-write below runs in one transaction, locked on the book row
+  // first (`FOR UPDATE`, mirroring `addBookPhotos`'s same-purpose lock above): PR4's chat
+  // surface makes concurrent writers to `books.layout_plan` realistic (a chat op racing
+  // "Design my book"/"Regenerate", or two tabs open on the same book), and without a lock
+  // a classic lost update is possible — both read the same pre-edit plan, both validate
+  // fine independently, and whichever writes last silently discards the other's edit. A
+  // second call's `FOR UPDATE` blocks here until the first call's transaction commits (or
+  // rolls back), and its subsequent plan read — a fresh query, not reused from before the
+  // lock — then sees that committed change instead of clobbering it.
+  return db.transaction(async (tx) => {
+    await tx.select({ id: books.id }).from(books).where(eq(books.id, input.bookId)).for('update');
 
-  for (const op of input.ops) {
-    if (op.op === 'exclude_photo' || op.op === 'include_photo') {
-      if (!allIds.has(op.assetId)) return err('That photo is not in this book.');
-      const excluded = op.op === 'exclude_photo';
-      exclusionChanges.set(op.assetId, excluded);
-      if (excluded) {
-        availableIds.delete(op.assetId);
-        plan = removePhotoFromPlan(plan, op.assetId);
-      } else {
-        availableIds.add(op.assetId);
+    const loaded = await loadPhotoBook(input.bookId);
+    let plan: PhotoBookPlan = await loadOrBuildPhotoPlan(input.bookId, loaded);
+
+    const allIds = new Set(loaded.photos.map((p) => p.assetId));
+    const availableIds = new Set(loaded.photos.filter((p) => !p.excluded).map((p) => p.assetId));
+    const exclusionChanges = new Map<string, boolean>();
+    let coverAssetId: string | undefined;
+
+    for (const op of input.ops) {
+      if (op.op === 'exclude_photo' || op.op === 'include_photo') {
+        if (!allIds.has(op.assetId)) return err('That photo is not in this book.');
+        const excluded = op.op === 'exclude_photo';
+        exclusionChanges.set(op.assetId, excluded);
+        if (excluded) {
+          availableIds.delete(op.assetId);
+          plan = removePhotoFromPlan(plan, op.assetId);
+        } else {
+          availableIds.add(op.assetId);
+        }
+        continue;
       }
-      continue;
+      const result = applyPhotoLayoutOp(plan, op, { availableAssetIds: availableIds });
+      if ('error' in result) return err(result.error);
+      plan = result.plan;
+      if (result.coverAssetId !== undefined) coverAssetId = result.coverAssetId;
     }
-    const result = applyPhotoLayoutOp(plan, op, { availableAssetIds: availableIds });
-    if ('error' in result) return err(result.error);
-    plan = result.plan;
-    if (result.coverAssetId !== undefined) coverAssetId = result.coverAssetId;
-  }
 
-  const validated = validatePhotoBookPlan(plan);
-  if (!validated.ok) return err(`That change would leave the layout invalid: ${validated.error}`);
+    const validated = validatePhotoBookPlan(plan);
+    if (!validated.ok) return err(`That change would leave the layout invalid: ${validated.error}`);
 
-  const content: PhotoPlanContent = {
-    availableAssetIds: [...availableIds],
-    allAssetIds: [...allIds],
-  };
-  const problems = checkPhotoBookPlanConsistency(validated.plan, content);
-  if (problems.length > 0) {
-    return err(`That change would leave the layout invalid: ${problems.join('; ')}`);
-  }
+    const content: PhotoPlanContent = {
+      availableAssetIds: [...availableIds],
+      allAssetIds: [...allIds],
+    };
+    const problems = checkPhotoBookPlanConsistency(validated.plan, content);
+    if (problems.length > 0) {
+      return err(`That change would leave the layout invalid: ${problems.join('; ')}`);
+    }
 
-  await db.transaction(async (tx) => {
     for (const [assetId, excluded] of exclusionChanges) {
       await tx
         .update(bookPhotos)
@@ -1136,9 +1165,9 @@ export async function updatePhotoBookLayout(input: {
     };
     if (coverAssetId !== undefined) set.coverAssetId = coverAssetId;
     await tx.update(books).set(set).where(eq(books.id, input.bookId));
-  });
 
-  return { ok: true };
+    return { ok: true };
+  });
 }
 
 /** Guard shared by every mutation: member, contributor, and the book not locked.

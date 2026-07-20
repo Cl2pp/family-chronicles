@@ -40,8 +40,12 @@ export const getPhotoBookTool = defineTool<{ bookId: string }>({
 /** Mirrors `PhotoLayoutOp` (lib/photo-book-ops.ts) as a zod-discriminated union, one tool
  *  with an op discriminator — same shape as the story book's `layoutOpSchema`. Section/page
  *  addressing is by INDEX (sectionIndex/pageIndex), exactly as get_photo_book reports them;
- *  those indices stay stable across a batch except after merge_sections (see its own
- *  description) — call get_photo_book again if unsure. */
+ *  those indices stay stable across a batch EXCEPT after merge_sections, which removes a
+ *  section and shifts every later section index down by one — `updatePhotoBookLayout`
+ *  (lib/books.ts) enforces this by rejecting the whole batch if any op after a
+ *  merge_sections addresses a section/page by index (see merge_sections's own
+ *  `.describe()` below), so always call get_photo_book again for fresh indices before
+ *  issuing further indexed ops. */
 const photoLayoutOpSchema = z.discriminatedUnion('op', [
   z.object({
     op: z.literal('set_style'),
@@ -106,7 +110,14 @@ const photoLayoutOpSchema = z.discriminatedUnion('op', [
     op: z.literal('merge_sections'),
     sectionIndex: z.int().nonnegative().describe('The section to merge away — its pages are appended to intoIndex\'s.'),
     intoIndex: z.int().nonnegative().describe('The section that keeps existing (and gains the other\'s pages).'),
-  }),
+  }).describe(
+    'Removes sectionIndex and shifts every later section index down by one, so this MUST ' +
+      'be the last op in the batch (or the only one) — never followed by another op that ' +
+      'addresses a section or page by index (set_section_title, set_page_template, ' +
+      'move_photo, move_section, set_caption, or another merge_sections); such a batch is ' +
+      'rejected outright. Call get_photo_book again afterward to get fresh indices before ' +
+      'any further indexed op.',
+  ),
   z.object({
     op: z.literal('set_caption'),
     sectionIndex: z.int().nonnegative(),
