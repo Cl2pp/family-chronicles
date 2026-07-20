@@ -11,13 +11,21 @@ import {
   Group,
   Image,
   SegmentedControl,
+  Select,
   SimpleGrid,
   Stack,
   Text,
   Title,
   UnstyledButton,
 } from '@mantine/core';
-import { IconBook, IconMicrophone, IconPhoto, IconPlus, IconUsers } from '@tabler/icons-react';
+import {
+  IconArrowsSort,
+  IconBook,
+  IconMicrophone,
+  IconPhoto,
+  IconPlus,
+  IconUsers,
+} from '@tabler/icons-react';
 import { formatEventDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
 import { useI18n } from '@/lib/i18n/client';
@@ -25,10 +33,30 @@ import type { StoryListItem } from '@/lib/stories';
 
 type ViewMode = 'timeline' | 'bubbles';
 
-function yearKey(story: StoryListItem): number | null {
+/**
+ * Which date the timeline is built on. 'happened' (default) uses the event date —
+ * when the story took place — so the memoir reads chronologically. 'added' uses the
+ * submission date, for browsing by what's newest.
+ */
+type SortMode = 'happened' | 'added';
+
+function eventTime(story: StoryListItem): number | null {
   if (!story.eventDate) return null;
-  const d = new Date(story.eventDate);
-  return Number.isNaN(d.getTime()) ? null : d.getUTCFullYear();
+  const t = new Date(story.eventDate).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
+function createdTime(story: StoryListItem): number {
+  return new Date(story.createdAt).getTime();
+}
+
+function eventYear(story: StoryListItem): number | null {
+  const t = eventTime(story);
+  return t === null ? null : new Date(t).getUTCFullYear();
+}
+
+function createdYear(story: StoryListItem): number {
+  return new Date(createdTime(story)).getUTCFullYear();
 }
 
 interface YearGroup {
@@ -38,11 +66,40 @@ interface YearGroup {
   stories: StoryListItem[];
 }
 
-/** Group stories by event-year, ascending, with Undated last. */
-function groupByYear(stories: StoryListItem[], undatedLabel: string): YearGroup[] {
+/**
+ * Bucket stories into year groups for the timeline along the chosen date axis.
+ *
+ * - 'happened': group by event year, oldest first, Undated last; within a year the
+ *   stories run in event-date order (submission date breaks ties).
+ * - 'added': group by the year each story was added, newest first; within a year the
+ *   newest submission comes first. Every story has a submission date, so there is no
+ *   Undated bucket here.
+ */
+function groupStories(
+  stories: StoryListItem[],
+  sort: SortMode,
+  undatedLabel: string,
+): YearGroup[] {
+  if (sort === 'added') {
+    const buckets = new Map<number, StoryListItem[]>();
+    for (const s of stories) {
+      const y = createdYear(s);
+      const arr = buckets.get(y) ?? [];
+      arr.push(s);
+      buckets.set(y, arr);
+    }
+    return [...buckets.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([year, group]) => ({
+        year,
+        label: String(year),
+        stories: [...group].sort((a, b) => createdTime(b) - createdTime(a)),
+      }));
+  }
+
   const buckets = new Map<number | null, StoryListItem[]>();
   for (const s of stories) {
-    const y = yearKey(s);
+    const y = eventYear(s);
     const arr = buckets.get(y) ?? [];
     arr.push(s);
     buckets.set(y, arr);
@@ -50,10 +107,22 @@ function groupByYear(stories: StoryListItem[], undatedLabel: string): YearGroup[
   const dated: YearGroup[] = [...buckets.entries()]
     .filter((e) => e[0] !== null)
     .sort((a, b) => (a[0] as number) - (b[0] as number))
-    .map(([year, group]) => ({ year, label: String(year), stories: group }));
+    .map(([year, group]) => ({
+      year,
+      label: String(year),
+      stories: [...group].sort(
+        (a, b) => (eventTime(a) as number) - (eventTime(b) as number) || createdTime(a) - createdTime(b),
+      ),
+    }));
 
   const undated = buckets.get(null);
-  if (undated) dated.push({ year: null, label: undatedLabel, stories: undated });
+  if (undated) {
+    dated.push({
+      year: null,
+      label: undatedLabel,
+      stories: [...undated].sort((a, b) => createdTime(b) - createdTime(a)),
+    });
+  }
   return dated;
 }
 
@@ -260,6 +329,7 @@ const NO_FAMILY = '__no-family__';
 export function StoriesView({ stories }: { stories: StoryListItem[] }) {
   const { t } = useI18n();
   const [view, setView] = useState<ViewMode>('timeline');
+  const [sort, setSort] = useState<SortMode>('happened');
   const [tags, setTags] = useState<string[]>([]);
 
   // Family tags that actually appear on stories — the ones worth offering as filters.
@@ -289,15 +359,15 @@ export function StoriesView({ stories }: { stories: StoryListItem[] }) {
   );
 
   const groups = useMemo(
-    () => groupByYear(visible, t.stories.undated),
-    [visible, t.stories.undated],
+    () => groupStories(visible, sort, t.stories.undated),
+    [visible, sort, t.stories.undated],
   );
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="center">
+      <Group justify="space-between" align="center" wrap="wrap" gap="sm">
         <Title order={1}>{t.stories.title}</Title>
-        <Group gap="sm">
+        <Group gap="sm" wrap="wrap">
           <Button
             component={Link}
             href="/books"
@@ -315,15 +385,33 @@ export function StoriesView({ stories }: { stories: StoryListItem[] }) {
           >
             {t.stories.addStory}
           </Button>
-          <SegmentedControl
-            value={view}
-            onChange={(v) => setView(v as ViewMode)}
-            data={[
-              { label: t.stories.viewTimeline, value: 'timeline' },
-              { label: t.stories.viewBubbles, value: 'bubbles' },
-            ]}
-          />
         </Group>
+      </Group>
+
+      <Group justify="space-between" align="center" wrap="wrap" gap="sm">
+        <Select
+          size="xs"
+          w={210}
+          aria-label={t.stories.sortLabel}
+          leftSection={<IconArrowsSort size={14} />}
+          value={sort}
+          onChange={(v) => v && setSort(v as SortMode)}
+          allowDeselect={false}
+          comboboxProps={{ withinPortal: true }}
+          data={[
+            { label: t.stories.sortHappened, value: 'happened' },
+            { label: t.stories.sortAdded, value: 'added' },
+          ]}
+        />
+        <SegmentedControl
+          size="xs"
+          value={view}
+          onChange={(v) => setView(v as ViewMode)}
+          data={[
+            { label: t.stories.viewTimeline, value: 'timeline' },
+            { label: t.stories.viewBubbles, value: 'bubbles' },
+          ]}
+        />
       </Group>
 
       {(tagOptions.length > 1 || (tagOptions.length > 0 && hasUntagged)) && (

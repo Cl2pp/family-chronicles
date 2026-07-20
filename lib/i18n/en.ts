@@ -511,6 +511,9 @@ export const en = {
     storyCount: (n: number) => (n === 1 ? '1 story' : `${n} stories`),
     by: (name: string) => `By ${name}`,
     addStory: 'Add story',
+    sortLabel: 'Sort',
+    sortHappened: 'When it happened',
+    sortAdded: 'Date added',
     unlinkedTitle: 'You are not in the family tree yet',
     unlinkedBody:
       'At least one of your chronicles shows stories to close family only. Until an owner places you in the family tree, you only see the stories you added yourself.',

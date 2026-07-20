@@ -470,7 +470,10 @@ export async function listStoriesForUser(
     .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
     .innerJoin(user, eq(stories.submittedBy, user.id))
     .where(inArray(storyChronicles.chronicleId, chronicleIds))
-    .orderBy(desc(stories.createdAt))) as StoryRow[];
+    // Timeline order is when the story happened; undated rows (NULL) sort last, with
+    // submission time as the tiebreak. The stories view re-groups by year and can also
+    // re-sort by submission date, but this keeps the data-layer default chronological.
+    .orderBy(asc(stories.eventDate), desc(stories.createdAt))) as StoryRow[];
   if (!allChroniclesOpen(ctx)) {
     rows = await filterRowsByAccess(ctx, rows);
   }
