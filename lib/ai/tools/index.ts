@@ -39,6 +39,7 @@ import {
   updateBookLayoutTool,
   updateBookTool,
 } from './books';
+import { getPhotoBookTool, redesignPhotoBookTool, updatePhotoBookLayoutTool } from './photo-books';
 import type { Tool } from './types';
 
 export * from './types';
@@ -83,6 +84,16 @@ export const tools: Tool[] = [
   // direct save — only on the user's explicit request
   saveStoryTool,
 ];
+
+/**
+ * Photo-book tools — deliberately NOT part of `tools` above: they're scoped to the
+ * photo-book builder's own embedded chat (`runPhotoBookAgent`) only, never the general
+ * chat agent or the story-book chat (`runBookAgent`'s `bookTools`), so neither of those
+ * can see or call `update_photo_book_layout`/`redesign_photo_book` on someone's photo
+ * book, and the photo-book chat never sees the story-only book tools either
+ * (docs/PHOTO_BOOK_PLAN.md PR4).
+ */
+export const photoBookTools: Tool[] = [getPhotoBookTool, updatePhotoBookLayoutTool, redesignPhotoBookTool];
 
 /** A tool catalog as OpenAI function-tool schemas (parameters derived from each zod
  *  schema). Defaults to the full chat-agent catalog; scoped agents (e.g. the book

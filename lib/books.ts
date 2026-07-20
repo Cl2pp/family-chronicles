@@ -52,8 +52,18 @@ import {
   buildAndPersistPhotoAutoPlan,
   loadOrBuildPhotoPlan,
   loadPhotoBook,
+  referencedPhotoAssetIds,
 } from '@/lib/photo-book-content';
-import { validatePhotoBookPlan, type PhotoBookStyle } from '@/lib/photo-book-plan';
+import {
+  checkPhotoBookPlanConsistency,
+  validatePhotoBookPlan,
+  type PhotoBookPlan,
+  type PhotoBookStyle,
+  type PhotoPageTemplate,
+  type PhotoPlanContent,
+} from '@/lib/photo-book-plan';
+import { applyPhotoLayoutOp, removePhotoFromPlan, type PhotoLayoutOp } from '@/lib/photo-book-ops';
+import type { PhotoAnalysis } from '@/lib/photo-analysis';
 
 /**
  * Book domain — the ONE place book state changes. The Books UI (server actions)
@@ -834,14 +844,30 @@ export async function setPhotoBookStyle(input: {
 
 /**
  * Rebuild the photo book's plan from scratch with the deterministic auto-layouter — the
- * "Generate/Regenerate" button (docs/PHOTO_BOOK_PLAN.md PR2, builder wiring). Unlike the
- * story book's `resetBookLayout`, there is no manual-edit consent guard here yet: PR2
- * ships no targeted photo-book edit ops (that's PR4), so `layoutSource` is always
- * `'auto'` already and there's nothing a regenerate could silently overwrite.
+ * "Generate/Regenerate" button (docs/PHOTO_BOOK_PLAN.md PR2, builder wiring). Since PR4
+ * (`updatePhotoBookLayout`) can leave `layoutSource: 'edited'`, this now guards like the
+ * story book's `resetBookLayout`: an edited layout requires `overwriteEdits: true` to
+ * confirm before it's silently discarded.
  */
-export async function regeneratePhotoBookLayout(input: { bookId: string; userId: string }): Promise<Result> {
+export async function regeneratePhotoBookLayout(input: {
+  bookId: string;
+  userId: string;
+  overwriteEdits?: boolean;
+}): Promise<Result> {
   const gate = await editablePhotoBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+
+  const [row] = await db
+    .select({ layoutSource: books.layoutSource })
+    .from(books)
+    .where(eq(books.id, input.bookId))
+    .limit(1);
+  if (!row) return err('Book not found.');
+  if (row.layoutSource === 'edited' && !input.overwriteEdits) {
+    return err(
+      "This book's layout has manual edits. Regenerating it would replace them — try again to confirm.",
+    );
+  }
 
   const loaded = await loadPhotoBook(input.bookId);
   await buildAndPersistPhotoAutoPlan(input.bookId, loaded);
@@ -850,27 +876,37 @@ export async function regeneratePhotoBookLayout(input: { bookId: string; userId:
 
 /**
  * Queue the photo-book AI design pass (docs/PHOTO_BOOK_PLAN.md §6, producer #2) — the
- * "Design my book" button. Mirrors `requestAiDesign` (the story-book counterpart): sets
- * `design_requested_at` so the builder's poll can show a working state, then enqueues
- * `design-photo-book`, whose worker handler (`handleDesignPhotoBook`, `worker/index.ts`)
- * persists the AI's plan on success or falls back to a freshly-built auto plan on
- * failure — either way `design_requested_at` is cleared when the job finishes.
+ * "Design my book" button, and the `redesign_photo_book` agent tool. Mirrors
+ * `requestAiDesign` (the story-book counterpart): sets `design_requested_at` so the
+ * builder's poll can show a working state, then enqueues `design-photo-book`, whose
+ * worker handler (`handleDesignPhotoBook`, `worker/index.ts`) persists the AI's plan on
+ * success or falls back to a freshly-built auto plan on failure — either way
+ * `design_requested_at` is cleared when the job finishes.
  *
- * No manual-edit consent guard: like `regeneratePhotoBookLayout`, PR3 ships no targeted
- * photo-book edit ops yet (that's PR4), so `layoutSource` is always `'auto'` or `'ai'`
- * here, never `'edited'` — there's nothing a design pass could silently overwrite.
+ * Manual-edit consent guard: since PR4 (`updatePhotoBookLayout`) can leave
+ * `layoutSource: 'edited'`, a design pass over an edited layout requires
+ * `overwriteEdits: true` to confirm, exactly like the story book's `requestAiDesign`.
  */
-export async function requestPhotoBookAiDesign(input: { bookId: string; userId: string }): Promise<Result> {
+export async function requestPhotoBookAiDesign(input: {
+  bookId: string;
+  userId: string;
+  overwriteEdits?: boolean;
+}): Promise<Result> {
   const gate = await editablePhotoBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
 
   const [row] = await db
-    .select({ designRequestedAt: books.designRequestedAt })
+    .select({ designRequestedAt: books.designRequestedAt, layoutSource: books.layoutSource })
     .from(books)
     .where(eq(books.id, input.bookId))
     .limit(1);
   if (!row) return err('Book not found.');
   if (row.designRequestedAt) return err('An AI design pass is already running for this book.');
+  if (row.layoutSource === 'edited' && !input.overwriteEdits) {
+    return err(
+      "This book's layout has manual edits. Designing it again with AI would replace them — try again to confirm.",
+    );
+  }
 
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -880,6 +916,228 @@ export async function requestPhotoBookAiDesign(input: { bookId: string; userId: 
 
   await db.update(books).set({ designRequestedAt: new Date() }).where(eq(books.id, input.bookId));
   await enqueueDesignPhotoBook({ bookId: input.bookId });
+  return { ok: true };
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Photo-book chat/agent surface (docs/PHOTO_BOOK_PLAN.md PR4 / §9): a read
+ * (`getPhotoBookSummary`, backing the `get_photo_book` agent tool) and a targeted-edit
+ * entry point (`updatePhotoBookLayout`, backing `update_photo_book_layout`) — the "all
+ * mutations in lib/books.ts, tools+UI are thin wrappers" rule holds for photo books too.
+ * The pure per-op plan transforms live in `lib/photo-book-ops.ts` (kept free of db/env
+ * imports so they're unit-testable without a database); this is the impure shell that
+ * loads/persists plans and does the one op pair (`exclude_photo`/`include_photo`) that
+ * needs a DB write interleaved with the plan edit.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** One photo as the agent sees it: enough to reason about "which one is blurry / who's
+ *  in it / does it deserve the cover" without a separate lookup. `analysis` is `null`
+ *  until the `photo-vision` pass has scored this photo (or if scoring permanently
+ *  failed) — the agent should treat those as "no opinion available", not "bad photo". */
+export interface PhotoBookAgentPhoto {
+  assetId: string;
+  excluded: boolean;
+  excludedReason: string | null;
+  caption: string | null;
+  analysis: PhotoAnalysis | null;
+}
+
+export interface PhotoBookAgentPage {
+  pageIndex: number;
+  template: PhotoPageTemplate;
+  photos: PhotoBookAgentPhoto[];
+}
+
+export interface PhotoBookAgentSection {
+  sectionIndex: number;
+  title: string;
+  dateLabel?: string;
+  pages: PhotoBookAgentPage[];
+}
+
+export interface PhotoBookSummary {
+  id: string;
+  title: string;
+  status: BookStatus;
+  style: PhotoBookStyle;
+  layoutSource: 'auto' | 'ai' | 'edited';
+  cover: { heroAssetId: string | null; title: string; subtitle: string | null; backAssetIds: string[] };
+  sections: PhotoBookAgentSection[];
+  /** Photos excluded from the layout (auto-culled or user-excluded) — visible in the
+   *  builder's tray; `include_photo` brings one back. */
+  excludedPhotos: PhotoBookAgentPhoto[];
+  /** Photos that ARE available but the current plan doesn't place anywhere yet — legal
+   *  (no rule requires every available photo to be placed), and exactly what
+   *  `move_photo`/`set_cover`/`swap_photos` can pull from. */
+  unplacedPhotos: PhotoBookAgentPhoto[];
+}
+
+/**
+ * The photo book's full current state for the chat agent (`get_photo_book`): every
+ * section/page/photo the live plan places, plus each photo's vision-analysis summary —
+ * this is what lets "die verschwommenen raus" ("blurry ones out") or "the one with Oma"
+ * work, since the model can read `sharpness`/`shortDescription`/`sceneTags` per photo
+ * instead of guessing from a bare id. Read-only: any chronicle member can call this
+ * (membership gate only, like `listBookPhotos`), same as the story book's `get_book`.
+ */
+export async function getPhotoBookSummary(bookId: string, userId: string): Promise<Result<PhotoBookSummary>> {
+  const [row] = await db
+    .select({ chronicleId: books.chronicleId, kind: books.kind, title: books.title, status: books.status, layoutSource: books.layoutSource })
+    .from(books)
+    .where(eq(books.id, bookId))
+    .limit(1);
+  if (!row) return err('Book not found.');
+  if (row.kind !== 'photo') return err('This is not a photo book.');
+  const m = await getMembership(row.chronicleId, userId);
+  if (!m) return err('Book not found.');
+
+  const loaded = await loadPhotoBook(bookId);
+  const plan = await loadOrBuildPhotoPlan(bookId, loaded);
+  const byId = new Map(loaded.photos.map((p) => [p.assetId, p]));
+
+  function toAgentPhoto(assetId: string, caption: string | null): PhotoBookAgentPhoto {
+    const p = byId.get(assetId);
+    return {
+      assetId,
+      excluded: p?.excluded ?? true,
+      excludedReason: p?.excludedReason ?? null,
+      caption,
+      analysis: p?.analysis ?? null,
+    };
+  }
+
+  const sections: PhotoBookAgentSection[] = plan.sections.map((section, sectionIndex) => ({
+    sectionIndex,
+    title: section.title,
+    dateLabel: section.dateLabel,
+    pages: section.pages.map((page, pageIndex) => ({
+      pageIndex,
+      template: page.template,
+      photos: page.assetIds.map((id, i) => toAgentPhoto(id, page.captions?.[i] ?? null)),
+    })),
+  }));
+
+  const referenced = referencedPhotoAssetIds(plan);
+  const excludedPhotos = loaded.photos.filter((p) => p.excluded).map((p) => toAgentPhoto(p.assetId, null));
+  const unplacedPhotos = loaded.photos
+    .filter((p) => !p.excluded && !referenced.has(p.assetId))
+    .map((p) => toAgentPhoto(p.assetId, null));
+
+  return {
+    ok: true,
+    value: {
+      id: bookId,
+      title: row.title,
+      status: row.status as BookStatus,
+      style: plan.style,
+      layoutSource: row.layoutSource as 'auto' | 'ai' | 'edited',
+      cover: {
+        heroAssetId: plan.cover.heroAssetId ?? null,
+        title: plan.cover.title,
+        subtitle: plan.cover.subtitle ?? null,
+        backAssetIds: plan.cover.backAssetIds ?? [],
+      },
+      sections,
+      excludedPhotos,
+      unplacedPhotos,
+    },
+  };
+}
+
+/**
+ * Apply one or more targeted layout ops to a photo book's plan — the photo-book
+ * counterpart of `updateBookLayout` above (see its doc comment for the shared shape:
+ * build/load the plan, fold every op over it, validate once, persist once — an op that
+ * would leave the plan invalid rejects the WHOLE batch, nothing written).
+ *
+ * Two differences from the story path:
+ *  - `exclude_photo`/`include_photo` need a `book_photos.excluded` write alongside the
+ *    plan edit. That write is intentionally NOT done eagerly per-op (unlike the
+ *    builder's plain exclude/include toggle, `setPhotoExcluded`, which writes
+ *    immediately and unconditionally marks the plan stale for a full rebuild on next
+ *    load): this function is the "never persist an invalid plan" entry point, so every
+ *    `book_photos.excluded` change from this batch is staged in memory and committed in
+ *    the SAME transaction as the final plan write — if a later op in the batch (or the
+ *    final consistency check) fails, NOTHING from this call is written, including the
+ *    exclude/include flips. Excluding a currently-placed photo patches the plan in place
+ *    (`removePhotoFromPlan` shrinks/re-templates its page rather than rebuilding the
+ *    whole book) so a chat edit like "die verschwommenen raus" doesn't also discard
+ *    unrelated manual edits (captions, section titles, style) the way a full
+ *    regenerate/AI-design pass would. Including a photo needs no plan patch — an
+ *    available-but-unplaced photo is a legal, consistent plan state (see
+ *    `PhotoBookSummary.unplacedPhotos`); it simply becomes available for a follow-up
+ *    `move_photo`/`set_cover`/`swap_photos`.
+ *  - Every successful call sets `layout_source: 'edited'` unconditionally (including
+ *    `set_style`, unlike the story book's `set_theme`/`setPhotoBookStyle`, which never
+ *    mark the plan edited) — any chat edit, however small, is treated as a manual edit
+ *    from here on, so a later `redesign_photo_book`/regenerate asks for confirmation
+ *    before discarding it.
+ */
+export async function updatePhotoBookLayout(input: {
+  bookId: string;
+  userId: string;
+  ops: PhotoLayoutOp[];
+}): Promise<Result> {
+  const gate = await editablePhotoBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+  if (input.ops.length === 0) return { ok: true };
+
+  const loaded = await loadPhotoBook(input.bookId);
+  let plan: PhotoBookPlan = await loadOrBuildPhotoPlan(input.bookId, loaded);
+
+  const allIds = new Set(loaded.photos.map((p) => p.assetId));
+  const availableIds = new Set(loaded.photos.filter((p) => !p.excluded).map((p) => p.assetId));
+  const exclusionChanges = new Map<string, boolean>();
+  let coverAssetId: string | undefined;
+
+  for (const op of input.ops) {
+    if (op.op === 'exclude_photo' || op.op === 'include_photo') {
+      if (!allIds.has(op.assetId)) return err('That photo is not in this book.');
+      const excluded = op.op === 'exclude_photo';
+      exclusionChanges.set(op.assetId, excluded);
+      if (excluded) {
+        availableIds.delete(op.assetId);
+        plan = removePhotoFromPlan(plan, op.assetId);
+      } else {
+        availableIds.add(op.assetId);
+      }
+      continue;
+    }
+    const result = applyPhotoLayoutOp(plan, op, { availableAssetIds: availableIds });
+    if ('error' in result) return err(result.error);
+    plan = result.plan;
+    if (result.coverAssetId !== undefined) coverAssetId = result.coverAssetId;
+  }
+
+  const validated = validatePhotoBookPlan(plan);
+  if (!validated.ok) return err(`That change would leave the layout invalid: ${validated.error}`);
+
+  const content: PhotoPlanContent = {
+    availableAssetIds: [...availableIds],
+    allAssetIds: [...allIds],
+  };
+  const problems = checkPhotoBookPlanConsistency(validated.plan, content);
+  if (problems.length > 0) {
+    return err(`That change would leave the layout invalid: ${problems.join('; ')}`);
+  }
+
+  await db.transaction(async (tx) => {
+    for (const [assetId, excluded] of exclusionChanges) {
+      await tx
+        .update(bookPhotos)
+        .set({ excluded, excludedReason: excluded ? 'user' : null, updatedAt: new Date() })
+        .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.assetId, assetId)));
+    }
+    const set: Partial<typeof books.$inferInsert> = {
+      layoutPlan: validated.plan,
+      layoutSource: 'edited',
+      layoutStale: false,
+      updatedAt: new Date(),
+    };
+    if (coverAssetId !== undefined) set.coverAssetId = coverAssetId;
+    await tx.update(books).set(set).where(eq(books.id, input.bookId));
+  });
+
   return { ok: true };
 }
 
