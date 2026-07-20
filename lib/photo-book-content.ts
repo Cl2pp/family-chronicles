@@ -8,6 +8,7 @@ import {
   type PhotoPlanContent,
 } from '@/lib/photo-book-plan';
 import { buildPhotoBookAutoLayout, type AutoLayoutPhoto } from '@/lib/photo-book-autolayout';
+import { parseStoredPhotoAnalysis, type PhotoAnalysis } from '@/lib/photo-analysis';
 
 /**
  * Photo-book content loading + layout-plan resolution — the photo-book counterpart of
@@ -35,6 +36,11 @@ export interface PhotoBookPhotoRef {
   gpsLng: number | null;
   phash: string | null;
   blurScore: number | null;
+  /** AI vision score (`lib/photo-analysis.ts`), re-validated against the schema on read
+   *  (see `parseStoredPhotoAnalysis`) — `null` when the `photo-vision` pass hasn't
+   *  completed for this photo yet, was never run, or (defensively) the stored jsonb
+   *  doesn't validate. */
+  analysis: PhotoAnalysis | null;
 }
 
 export interface LoadedPhotoBook {
@@ -68,13 +74,17 @@ export async function loadPhotoBook(bookId: string): Promise<LoadedPhotoBook> {
       gpsLng: bookPhotos.gpsLng,
       phash: bookPhotos.phash,
       blurScore: bookPhotos.blurScore,
+      analysis: bookPhotos.analysis,
     })
     .from(bookPhotos)
     .innerJoin(assets, eq(bookPhotos.assetId, assets.id))
     .where(eq(bookPhotos.bookId, bookId))
     .orderBy(asc(bookPhotos.position));
 
-  return { row, photos: rows };
+  return {
+    row,
+    photos: rows.map((r) => ({ ...r, analysis: parseStoredPhotoAnalysis(r.analysis) })),
+  };
 }
 
 /** A plan with no cover hero and no sections — used as a last-resort fallback if the
@@ -152,6 +162,7 @@ export async function buildAndPersistPhotoAutoPlan(
       gpsLng: p.gpsLng,
       phash: p.phash,
       blurScore: p.blurScore,
+      analysis: p.analysis,
     }));
 
   const existing = row.layoutPlan ? validatePhotoBookPlan(row.layoutPlan) : null;

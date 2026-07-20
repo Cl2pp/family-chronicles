@@ -8,7 +8,9 @@ import {
   QUEUES,
   SWEEP_ORPHANS_CRON,
   type DesignBookJob,
+  type DesignPhotoBookJob,
   type PhotoMetaJob,
+  type PhotoVisionJob,
   type RenderBookJob,
   type StyleJob,
   type ThumbnailJob,
@@ -17,12 +19,15 @@ import {
 import { markRenderFailed, renderBook } from '@/lib/book-render';
 import { proposeLayoutPlan } from '@/lib/book-ai-layout';
 import { backfillDimensionsFromOriginals, buildAndPersistAutoPlan, loadBook } from '@/lib/book-content';
+import { proposePhotoBookPlan } from '@/lib/photo-book-ai-layout';
+import { buildAndPersistPhotoAutoPlan, loadPhotoBook } from '@/lib/photo-book-content';
 import { styleStory } from '@/lib/ai/openrouter';
 import { styleContextForStory } from '@/lib/stories';
 import { sweepOrphanedObjects } from '@/lib/orphans';
 import { transcodeAudioObject } from '@/lib/transcode';
 import { generateThumbnail } from '@/lib/thumbnails';
 import { analyzePhotoMeta, markPhotoMetaFailed } from '@/lib/photo-meta';
+import { markPhotoVisionFailed, runPhotoVisionBatch } from '@/lib/photo-vision';
 
 async function markFailed(storyId: string, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
@@ -131,6 +136,78 @@ async function handleDesignBook(data: DesignBookJob) {
   }
 }
 
+/**
+ * Run the photo-book AI design pass and persist whatever plan results — the photo-book
+ * counterpart of `handleDesignBook`, same contract: the AI's plan on success, a freshly
+ * built auto-layout plan on failure (`proposePhotoBookPlan` never throws, it returns
+ * null), and `design_requested_at` always cleared at the end so the builder's poll
+ * stops. "Design my book" never leaves the book worse off than before it was clicked.
+ */
+async function handleDesignPhotoBook(data: DesignPhotoBookJob) {
+  const { bookId } = data;
+  try {
+    const plan = await proposePhotoBookPlan(bookId);
+    if (plan) {
+      await db
+        .update(books)
+        .set({
+          layoutPlan: plan,
+          layoutSource: 'ai',
+          layoutStale: false,
+          designRequestedAt: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(books.id, bookId));
+      console.log(`[worker] AI-designed photo book ${bookId}`);
+      return;
+    }
+
+    console.log(`[worker] AI design pass for photo book ${bookId} produced no usable plan — falling back to auto layout`);
+    const loaded = await loadPhotoBook(bookId);
+    await buildAndPersistPhotoAutoPlan(bookId, loaded);
+    await db.update(books).set({ designRequestedAt: null }).where(eq(books.id, bookId));
+  } catch (err) {
+    console.error(`[worker] design-photo-book failed for ${bookId}:`, err);
+    try {
+      const loaded = await loadPhotoBook(bookId);
+      await buildAndPersistPhotoAutoPlan(bookId, loaded);
+    } catch (fallbackErr) {
+      console.error(`[worker] auto-layout fallback also failed for photo book ${bookId}:`, fallbackErr);
+    }
+    await db.update(books).set({ designRequestedAt: null }).where(eq(books.id, bookId));
+  }
+}
+
+/**
+ * Score one batch (~10) of book photos with the vision model (docs/PHOTO_BOOK_PLAN.md
+ * §4). Same retry/settle shape as `handlePhotoMeta`: `runPhotoVisionBatch` throws
+ * whenever the batch, as a whole, didn't fully succeed (see its doc comment for why a
+ * whole-batch retry is safe and even self-narrowing); this only marks the batch's
+ * still-unscored photos permanently `'failed'` once the `photoVision` queue's bounded
+ * retries (`lib/queue.ts`) are exhausted, so the builder's analysis-progress poll can
+ * terminate instead of waiting forever on a handful of stubborn photos.
+ */
+async function handlePhotoVision(job: JobWithMetadata<PhotoVisionJob>) {
+  const { assetIds } = job.data;
+  try {
+    await runPhotoVisionBatch(assetIds);
+    console.log(`[worker] photo-vision scored batch of ${assetIds.length} photo(s)`);
+  } catch (err) {
+    const attempt = job.retryCount + 1;
+    const maxAttempts = job.retryLimit + 1;
+    console.error(
+      `[worker] photo-vision failed for a batch of ${assetIds.length} photo(s) (attempt ${attempt}/${maxAttempts}):`,
+      err,
+    );
+    if (job.retryCount >= job.retryLimit) {
+      await markPhotoVisionFailed(assetIds).catch((markErr) =>
+        console.error(`[worker] failed to mark photo-vision batch as failed:`, markErr),
+      );
+    }
+    throw err;
+  }
+}
+
 /** Downscale a stored photo so lists and grids don't ship camera originals. */
 async function handleThumbnail(data: ThumbnailJob) {
   try {
@@ -225,13 +302,31 @@ async function main() {
     },
   );
 
+  // Same includeMetadata reasoning as photo-meta above.
+  await boss.work(
+    QUEUES.photoVision,
+    { includeMetadata: true } as const,
+    async (jobs: JobWithMetadata<PhotoVisionJob>[]) => {
+      for (const job of jobs) await handlePhotoVision(job);
+    },
+  );
+
+  // One model call plus photo downloads: serial, like design-book.
+  await boss.work<DesignPhotoBookJob>(
+    QUEUES.designPhotoBook,
+    { batchSize: 1 },
+    async (jobs) => {
+      for (const job of jobs) await handleDesignPhotoBook(job.data);
+    },
+  );
+
   await boss.work(QUEUES.sweepOrphans, async () => {
     await handleSweepOrphans();
   });
   await boss.schedule(QUEUES.sweepOrphans, SWEEP_ORPHANS_CRON);
 
   console.log(
-    '[worker] ready — listening for style + transcode + thumbnail + render-book + design-book + photo-meta jobs; orphan sweep scheduled',
+    '[worker] ready — listening for style + transcode + thumbnail + render-book + design-book + photo-meta + photo-vision + design-photo-book jobs; orphan sweep scheduled',
   );
 }
 

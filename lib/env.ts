@@ -33,6 +33,14 @@ const schema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
 
+  // AI — photo-book vision scoring (docs/PHOTO_BOOK_PLAN.md §4). Deliberately a
+  // separate, cheaper model from STYLING_MODEL: the `photo-vision` job scores every
+  // uploaded photo (aesthetics, sharpness, eyes-closed, …), so cost scales with photo
+  // count — a flash-lite-tier model keeps that at ~1-2 cents per 100-photo book, per
+  // the plan's cost evaluation. STYLING_MODEL stays the knob for the per-book AI design
+  // pass (`design-photo-book`), where judgment quality — not per-call cost — matters.
+  VISION_MODEL: z.string().default('google/gemini-2.5-flash-lite'),
+
   // AI — transcription via Groq Whisper
   GROQ_API_KEY: z.string().min(1),
   TRANSCRIBE_MODEL: z.string().default('whisper-large-v3-turbo'),

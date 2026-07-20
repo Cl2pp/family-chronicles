@@ -1,16 +1,22 @@
 import { hammingDistance } from '@/lib/photo-hash';
+import type { PhotoAnalysis } from '@/lib/photo-analysis';
 import type { PhotoBookPlan, PhotoBookStyle, PhotoPagePlan, PhotoSectionPlan } from '@/lib/photo-book-plan';
 
 /**
  * The photo-book deterministic auto-layouter (docs/PHOTO_BOOK_PLAN.md §6, producer #1) —
  * the photo-book counterpart of `lib/book-autolayout.ts`. Pure function: no I/O, no
  * randomness, same input always produces the same plan. Runs the instant a book's photos
- * have their *metadata* analyzed (`photo-meta`, PR1) — vision scores (`PhotoAnalysis`,
- * aesthetics/eyes-closed/people) do NOT exist yet in PR2 (that's PR3's `photo-vision`
- * job), so every heuristic here works off `takenAt`, `gpsLat/Lng`, `phash`, `blurScore`,
- * and pixel dimensions only.
+ * have their *metadata* analyzed (`photo-meta`, PR1), and keeps working exactly as it did
+ * in PR2 for any photo without a vision score yet — `analysis` (`PhotoAnalysis`, from
+ * PR3's `photo-vision` job, `lib/photo-analysis.ts`) is an OPTIONAL, purely additive
+ * input on `AutoLayoutPhoto`: every heuristic below that reads it falls back to its PR2,
+ * dimension/phash/blurScore-only behavior whenever it's absent, so a book whose vision
+ * pass hasn't finished (or was never run) lays out identically to before. Only pure
+ * function additions — no I/O here either, `analysis` arrives already-loaded on each
+ * `AutoLayoutPhoto` the same way `takenAt`/`phash`/`blurScore` do.
  *
- * Culling (near-duplicates, clearly-blurry photos) is computed here but NOT applied to
+ * Culling (near-duplicates, clearly-blurry photos, and — when scores are present —
+ * eyes-closed and low-aesthetic surplus photos) is computed here but NOT applied to
  * the database by this function — it only *reports* what it chose to omit and why. A
  * thin persistence wrapper (`lib/photo-book-content.ts`'s `buildAndPersistPhotoAutoPlan`)
  * writes those into `book_photos.excluded`/`excluded_reason` so the builder's tray can
@@ -42,6 +48,11 @@ export interface AutoLayoutPhoto {
   phash: string | null;
   /** Variance-of-Laplacian; lower = blurrier. Photos without one are never blur-culled. */
   blurScore: number | null;
+  /** AI vision score (PR3, `lib/photo-analysis.ts`) — `undefined`/`null` for a photo
+   *  whose `photo-vision` pass hasn't completed (or was never run). Every heuristic that
+   *  reads this treats its absence as "no opinion", not as a bad score — see the module
+   *  header comment. */
+  analysis?: PhotoAnalysis | null;
 }
 
 export interface PhotoBookAutoLayoutInput {
@@ -73,7 +84,9 @@ export interface PhotoBookAutoLayoutInput {
 
 export interface CulledPhoto {
   assetId: string;
-  reason: 'duplicate' | 'blurry';
+  /** Matches `book_photos.excluded_reason`'s documented values (docs/PHOTO_BOOK_PLAN.md
+   *  §2) — `'eyes-closed'`/`'low-quality'` only ever fire when `analysis` is present. */
+  reason: 'duplicate' | 'blurry' | 'eyes-closed' | 'low-quality';
 }
 
 export interface PhotoBookAutoLayoutResult {
@@ -314,6 +327,77 @@ function cullBlurry(photos: AutoLayoutPhoto[]): { keep: AutoLayoutPhoto[]; culle
   return { keep: photos.filter((p) => !culledIds.has(p.assetId)), culled };
 }
 
+/**
+ * Culls eyes-closed photos (docs/PHOTO_BOOK_PLAN.md §6: "eyesClosed on photos with a
+ * sharp-eyed sibling in the same time cluster") — a no-op whenever no photo in the group
+ * has an `analysis` at all (PR2 behavior, unscored books/photos untouched), and whenever
+ * NONE of the group's analyzed photos has its eyes open (culling every eyes-closed shot
+ * with nothing to replace it with would just remove the only record of that moment).
+ * Bounded by `MIN_SURVIVORS`, same floor as `cullBlurry`.
+ */
+function cullEyesClosed(photos: AutoLayoutPhoto[]): { keep: AutoLayoutPhoto[]; culled: CulledPhoto[] } {
+  const analyzed = photos.filter((p) => p.analysis != null);
+  if (analyzed.length === 0) return { keep: photos, culled: [] };
+  const hasOpenEyedSibling = analyzed.some((p) => p.analysis!.eyesClosed === false);
+  if (!hasOpenEyedSibling) return { keep: photos, culled: [] };
+
+  const culled: CulledPhoto[] = [];
+  const culledIds = new Set<string>();
+  let survivorCount = photos.length;
+  for (const p of photos) {
+    if (survivorCount <= MIN_SURVIVORS) break;
+    if (p.analysis?.eyesClosed === true) {
+      culledIds.add(p.assetId);
+      culled.push({ assetId: p.assetId, reason: 'eyes-closed' });
+      survivorCount--;
+    }
+  }
+  return { keep: photos.filter((p) => !culledIds.has(p.assetId)), culled };
+}
+
+/** A section whose surviving photo count exceeds this — once enough of it is actually
+ *  scored to judge fairly — gets its lowest-`aestheticScore` surplus trimmed down to the
+ *  cap (docs/PHOTO_BOOK_PLAN.md §6: "the lowest-scored surplus" when a section has "far
+ *  more photos than the format prints well"). Roughly `SECTION_CAP_DIVISOR`'s target
+ *  section size × 5 — big enough that ordinary sections never trigger this, small enough
+ *  to actually bound a single massive cluster (e.g. 80 photos from one long day). */
+const MAX_SCORED_SECTION_PHOTOS = 40;
+
+/** A group needs at least this fraction of its photos scored before this cull trusts the
+ *  scores enough to single anyone out — otherwise an unlucky, still-mostly-unanalyzed
+ *  group could have its (essentially random) scored minority unfairly picked on. */
+const MIN_SCORED_FRACTION_FOR_AESTHETIC_CULL = 0.8;
+
+/** Neutral aesthetic score assigned to an unscored photo when comparing it against
+ *  scored siblings — a photo with no opinion yet is treated as "average", never
+ *  penalized purely for not being analyzed. */
+const NEUTRAL_AESTHETIC_SCORE = 5;
+
+/** Culls the lowest-`aestheticScore` surplus of an oversized, mostly-scored group — a
+ *  no-op for any group at or under the cap, or where too little of it is scored yet (see
+ *  `MIN_SCORED_FRACTION_FOR_AESTHETIC_CULL`), so an unscored/partially-scored book
+ *  behaves exactly as PR2 did. Never reduces a group below the cap, so it can't combine
+ *  with the other cullers to empty a section. */
+function cullLowAesthetic(photos: AutoLayoutPhoto[]): { keep: AutoLayoutPhoto[]; culled: CulledPhoto[] } {
+  if (photos.length <= MAX_SCORED_SECTION_PHOTOS) return { keep: photos, culled: [] };
+  const scoredCount = photos.filter((p) => p.analysis?.aestheticScore != null).length;
+  if (scoredCount < photos.length * MIN_SCORED_FRACTION_FOR_AESTHETIC_CULL) return { keep: photos, culled: [] };
+
+  const surplus = photos.length - MAX_SCORED_SECTION_PHOTOS;
+  const sorted = photos
+    .slice()
+    .sort(
+      (a, b) =>
+        (a.analysis?.aestheticScore ?? NEUTRAL_AESTHETIC_SCORE) -
+          (b.analysis?.aestheticScore ?? NEUTRAL_AESTHETIC_SCORE) || a.position - b.position,
+    );
+  const culledIds = new Set(sorted.slice(0, surplus).map((p) => p.assetId));
+  const culled: CulledPhoto[] = sorted
+    .slice(0, surplus)
+    .map((p) => ({ assetId: p.assetId, reason: 'low-quality' as const }));
+  return { keep: photos.filter((p) => !culledIds.has(p.assetId)), culled };
+}
+
 /** The "non-blurry" pool for opener/cover picking: everyone, unless blur scores are
  *  available and distinguish a clearly sharper subset (same relative rule as
  *  `cullBlurry`, but non-destructive — this never removes a photo from the plan, it only
@@ -327,17 +411,35 @@ function nonBlurryPool(photos: AutoLayoutPhoto[]): AutoLayoutPhoto[] {
   return sharp.length > 0 ? sharp : photos;
 }
 
-/** Highest-resolution photo among the non-blurry pool; ties broken by assetId for
- *  determinism (mirrors `pickHighestResolution` in `lib/book-autolayout.ts`). */
+/**
+ * The single best photo of a pool, for section openers and the cover hero
+ * (docs/PHOTO_BOOK_PLAN.md §6: "prefer coverCandidate + high aestheticScore … falling
+ * back to the PR2 resolution-based pick when no analysis"). When NOTHING in the pool has
+ * an `analysis`, this is byte-for-byte the PR2 heuristic (highest resolution, assetId
+ * tiebreak) — the exact case every PR2 test exercises. As soon as at least one photo in
+ * the pool is scored, `coverCandidate` (then `aestheticScore`, unscored photos treated as
+ * neutral — see `NEUTRAL_AESTHETIC_SCORE`) becomes the primary ranking, with resolution/
+ * assetId only as the final tiebreak — so a book whose vision pass is still catching up
+ * on a handful of photos already benefits from whatever scores it has.
+ */
 function pickBestPhoto(photos: AutoLayoutPhoto[]): AutoLayoutPhoto | null {
   if (photos.length === 0) return null;
   const pool = nonBlurryPool(photos);
+  const anyAnalyzed = pool.some((p) => p.analysis != null);
+
   return pool.reduce((best, p) => {
+    if (anyAnalyzed) {
+      const pCover = p.analysis?.coverCandidate ? 1 : 0;
+      const bestCover = best.analysis?.coverCandidate ? 1 : 0;
+      if (pCover !== bestCover) return pCover > bestCover ? p : best;
+      const pAesthetic = p.analysis?.aestheticScore ?? NEUTRAL_AESTHETIC_SCORE;
+      const bestAesthetic = best.analysis?.aestheticScore ?? NEUTRAL_AESTHETIC_SCORE;
+      if (pAesthetic !== bestAesthetic) return pAesthetic > bestAesthetic ? p : best;
+    }
     const r = p.width * p.height;
     const br = best.width * best.height;
-    if (r > br) return p;
-    if (r === br && p.assetId < best.assetId) return p;
-    return best;
+    if (r !== br) return r > br ? p : best;
+    return p.assetId < best.assetId ? p : best;
   });
 }
 
@@ -397,15 +499,28 @@ function paceSection(photos: AutoLayoutPhoto[]): PhotoPagePlan[] {
   return pages;
 }
 
+/**
+ * The deterministic time/GPS-based photo groupings (sectioning, tiny-section merge,
+ * section-count cap) — exactly the grouping `buildPhotoBookAutoLayout` uses for its own
+ * sections, exposed standalone so the AI design pass (`lib/photo-book-ai-layout.ts`) can
+ * label each photo with a candidate cluster in its prompt, giving the model a sensible
+ * starting point for its own section boundaries instead of inventing groupings from raw
+ * timestamps itself. Excluding already-excluded photos is the caller's job — this groups
+ * whatever `photos` it's given.
+ */
+export function computeCandidateSections(photos: AutoLayoutPhoto[]): AutoLayoutPhoto[][] {
+  const { dated, undated } = splitByCaptureTime(photos);
+  let groups = mergeTinySections(sectionizeByBoundary(dated));
+  if (undated.length > 0) groups = [...groups, undated];
+  return capSectionCount(groups);
+}
+
 /** Builds a full photo-book layout plan from a book's currently-available photos. */
 export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): PhotoBookAutoLayoutResult {
   const locale = input.dateLocale ?? 'de-DE';
   const undatedTitle = input.undatedSectionTitle ?? 'Weitere Fotos';
 
-  const { dated, undated } = splitByCaptureTime(input.photos);
-  let groups = mergeTinySections(sectionizeByBoundary(dated));
-  if (undated.length > 0) groups = [...groups, undated];
-  groups = capSectionCount(groups);
+  const groups = computeCandidateSections(input.photos);
 
   const culled: CulledPhoto[] = [];
   const survivorsForCover: AutoLayoutPhoto[] = [];
@@ -423,7 +538,13 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
     culled.push(...dupResult.culled);
     const blurResult = cullBlurry(dupResult.keep);
     culled.push(...blurResult.culled);
-    const keep = blurResult.keep;
+    // The two score-aware cullers below are no-ops whenever `analysis` is absent (see
+    // their own doc comments) — a book with no vision data yet culls identically to PR2.
+    const eyesResult = cullEyesClosed(blurResult.keep);
+    culled.push(...eyesResult.culled);
+    const aestheticResult = cullLowAesthetic(eyesResult.keep);
+    culled.push(...aestheticResult.culled);
+    const keep = aestheticResult.keep;
     if (keep.length === 0) continue;
 
     survivorsForCover.push(...keep);

@@ -22,7 +22,14 @@ import {
 import { canContribute, type AccessRole } from '@/lib/permissions';
 import { MAX_PHOTOS_PER_BOOK } from '@/lib/uploads';
 import { deleteObject } from '@/lib/s3';
-import { enqueueDesignBook, enqueuePhotoMeta, enqueueRenderBook, enqueueThumbnail } from '@/lib/queue';
+import {
+  enqueueDesignBook,
+  enqueueDesignPhotoBook,
+  enqueuePhotoMeta,
+  enqueueRenderBook,
+  enqueueThumbnail,
+} from '@/lib/queue';
+import { enqueuePendingPhotoVisionBatches } from '@/lib/photo-vision';
 import { quoteBookPrice, type BookFormat, type BookQuote } from '@/lib/gelato';
 import {
   buildAndPersistAutoPlan,
@@ -639,6 +646,14 @@ export async function addBookPhotos(input: {
     await enqueueThumbnail({ s3Key: a.s3Key });
     await enqueuePhotoMeta({ assetId: a.id });
   }
+  // Vision scoring (docs/PHOTO_BOOK_PLAN.md §4) — batched separately from the per-photo
+  // jobs above since it's one model request per ~10 photos, not one per photo. Only ever
+  // called with assetIds this call just freshly inserted (never an id already in the
+  // book — see the idempotent-by-s3Key dedup above), so a retried uploader flush can't
+  // double-enqueue the same photo's scoring.
+  if (inserted.length > 0) {
+    await enqueuePendingPhotoVisionBatches(inserted.map((a) => a.id));
+  }
 
   return { ok: true, value: { added: inserted.length } };
 }
@@ -654,13 +669,15 @@ export interface BookPhotoItem {
   excluded: boolean;
   excludedReason: string | null;
   takenAt: Date | null;
-  /** True once the `photo-meta` job has *settled* for this photo — either it
-   *  recorded a perceptual hash, or it permanently gave up after exhausting its
-   *  retries (`markPhotoMetaFailed`, `lib/photo-meta.ts`). The builder's "X / Y
-   *  analyzed" progress indicator counts these, so a genuinely undecodable photo
-   *  can't leave the poll spinning forever. */
+  /** True once the `photo-vision` pass has *settled* for this photo — it either
+   *  produced a score (`analysisStatus === 'done'`) or permanently gave up after
+   *  exhausting its retries (`analysisStatus === 'failed'` — either the vision job's
+   *  own retries, or the interim state `photo-meta` sets when IT gives up first, see
+   *  `lib/photo-meta.ts`'s `markPhotoMetaFailed`). The builder's "X / Y analyzed"
+   *  progress indicator counts these, so a genuinely unscoreable photo can't leave the
+   *  poll spinning forever. */
   metaSettled: boolean;
-  /** True when photo-meta gave up on this photo — the builder shows this
+  /** True when analysis permanently failed for this photo — the builder shows this
    *  distinctly from "still analyzing". */
   metaFailed: boolean;
 }
@@ -692,7 +709,6 @@ export async function listBookPhotos(
       excluded: bookPhotos.excluded,
       excludedReason: bookPhotos.excludedReason,
       takenAt: bookPhotos.takenAt,
-      phash: bookPhotos.phash,
       analysisStatus: bookPhotos.analysisStatus,
     })
     .from(bookPhotos)
@@ -714,7 +730,7 @@ export async function listBookPhotos(
         excluded: r.excluded,
         excludedReason: r.excludedReason,
         takenAt: r.takenAt,
-        metaSettled: r.phash != null || r.analysisStatus === 'failed',
+        metaSettled: r.analysisStatus === 'done' || r.analysisStatus === 'failed',
         metaFailed: r.analysisStatus === 'failed',
       })),
     },
@@ -829,6 +845,41 @@ export async function regeneratePhotoBookLayout(input: { bookId: string; userId:
 
   const loaded = await loadPhotoBook(input.bookId);
   await buildAndPersistPhotoAutoPlan(input.bookId, loaded);
+  return { ok: true };
+}
+
+/**
+ * Queue the photo-book AI design pass (docs/PHOTO_BOOK_PLAN.md §6, producer #2) — the
+ * "Design my book" button. Mirrors `requestAiDesign` (the story-book counterpart): sets
+ * `design_requested_at` so the builder's poll can show a working state, then enqueues
+ * `design-photo-book`, whose worker handler (`handleDesignPhotoBook`, `worker/index.ts`)
+ * persists the AI's plan on success or falls back to a freshly-built auto plan on
+ * failure — either way `design_requested_at` is cleared when the job finishes.
+ *
+ * No manual-edit consent guard: like `regeneratePhotoBookLayout`, PR3 ships no targeted
+ * photo-book edit ops yet (that's PR4), so `layoutSource` is always `'auto'` or `'ai'`
+ * here, never `'edited'` — there's nothing a design pass could silently overwrite.
+ */
+export async function requestPhotoBookAiDesign(input: { bookId: string; userId: string }): Promise<Result> {
+  const gate = await editablePhotoBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+
+  const [row] = await db
+    .select({ designRequestedAt: books.designRequestedAt })
+    .from(books)
+    .where(eq(books.id, input.bookId))
+    .limit(1);
+  if (!row) return err('Book not found.');
+  if (row.designRequestedAt) return err('An AI design pass is already running for this book.');
+
+  const [{ count }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(bookPhotos)
+    .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.excluded, false)));
+  if (!count) return err('Add at least one photo before designing.');
+
+  await db.update(books).set({ designRequestedAt: new Date() }).where(eq(books.id, input.bookId));
+  await enqueueDesignPhotoBook({ bookId: input.bookId });
   return { ok: true };
 }
 
