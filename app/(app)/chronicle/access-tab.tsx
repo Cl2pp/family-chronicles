@@ -59,7 +59,10 @@ export function AccessTab({
   const [link, setLink] = useState<string | null>(null);
   // The link modal doubles as the resend view; this drives its title.
   const [resent, setResent] = useState(false);
-  const [invitePending, startInviteTransition] = useTransition();
+  // Which invitation is mid-flight, so only that row's controls react — a
+  // single boolean would spin every row's button at once.
+  const [busyInviteId, setBusyInviteId] = useState<string | null>(null);
+  const [, startInviteTransition] = useTransition();
   const [revokeTarget, setRevokeTarget] = useState<InviteRow | null>(null);
   const [linkTarget, setLinkTarget] = useState<MemberRow | null>(null);
   const [linkPersonId, setLinkPersonId] = useState<string | null>(null);
@@ -83,6 +86,7 @@ export function AccessTab({
 
   /** Look an outstanding invite's link back up (and revive its expiry) to send again. */
   function handleResend(row: InviteRow) {
+    setBusyInviteId(row.id);
     startInviteTransition(async () => {
       try {
         const { token } = await resendInviteAction({ chronicleId, invitationId: row.id });
@@ -94,6 +98,8 @@ export function AccessTab({
           color: 'red',
           message: e instanceof Error ? e.message : t.access.couldNotResendInvitation,
         });
+      } finally {
+        setBusyInviteId(null);
       }
     });
   }
@@ -101,6 +107,7 @@ export function AccessTab({
   function handleRevoke() {
     if (!revokeTarget) return;
     const invitationId = revokeTarget.id;
+    setBusyInviteId(invitationId);
     startInviteTransition(async () => {
       try {
         await revokeInviteAction({ chronicleId, invitationId });
@@ -111,6 +118,8 @@ export function AccessTab({
           color: 'red',
           message: e instanceof Error ? e.message : t.access.couldNotRevokeInvitation,
         });
+      } finally {
+        setBusyInviteId(null);
       }
     });
   }
@@ -282,7 +291,7 @@ export function AccessTab({
                           <Button
                             size="xs"
                             variant="default"
-                            loading={invitePending}
+                            loading={busyInviteId === i.id}
                             onClick={() => handleResend(i)}
                           >
                             {t.access.resendInvitation}
@@ -291,6 +300,9 @@ export function AccessTab({
                             size="xs"
                             variant="light"
                             color="red"
+                            // Blocked while this row's link is being fetched, so
+                            // it can't be revoked out from under the modal.
+                            disabled={busyInviteId === i.id}
                             onClick={() => setRevokeTarget(i)}
                           >
                             {t.access.revokeInvitation}
@@ -394,7 +406,11 @@ export function AccessTab({
             <Button variant="default" onClick={() => setRevokeTarget(null)}>
               {t.common.cancel}
             </Button>
-            <Button color="red" onClick={handleRevoke} loading={invitePending}>
+            <Button
+              color="red"
+              onClick={handleRevoke}
+              loading={revokeTarget !== null && busyInviteId === revokeTarget.id}
+            >
               {t.access.revokeInvitation}
             </Button>
           </Group>

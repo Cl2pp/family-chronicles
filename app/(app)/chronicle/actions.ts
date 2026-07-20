@@ -250,10 +250,16 @@ export async function revokeInviteAction(input: { chronicleId: string; invitatio
 
   const revoked = await revokeInvitation(input.chronicleId, input.invitationId);
   if (!revoked) {
+    // Revalidate before bailing: nothing matched because the invite was
+    // accepted (or revoked elsewhere) since this page rendered, so the row the
+    // owner just clicked is stale — without this it sits there erroring on
+    // every retry until a manual reload.
+    revalidatePath('/chronicle');
     throw new Error('That invitation is no longer pending — it may have been accepted already.');
   }
 
   revalidatePath('/chronicle');
+  captureServerEvent(user.id, 'invitation_revoked', { chronicle_id: input.chronicleId });
 }
 
 /**
@@ -267,10 +273,13 @@ export async function resendInviteAction(input: { chronicleId: string; invitatio
 
   const refreshed = await refreshInvitationLink(input.chronicleId, input.invitationId);
   if (!refreshed) {
+    // Same staleness case as revoking — drop the row the owner clicked.
+    revalidatePath('/chronicle');
     throw new Error('That invitation is no longer pending — it may have been accepted already.');
   }
 
   revalidatePath('/chronicle');
+  captureServerEvent(user.id, 'invitation_link_resent', { chronicle_id: input.chronicleId });
   return { token: refreshed.token };
 }
 
