@@ -21,7 +21,13 @@ import { IconCopy, IconMailPlus } from '@tabler/icons-react';
 import type { AccessRole } from '@/lib/permissions';
 import { useI18n } from '@/lib/i18n/client';
 import { personFullName } from '@/lib/person-name';
-import { invite, linkMemberPersonAction, unlinkMemberPersonAction } from './actions';
+import {
+  invite,
+  linkMemberPersonAction,
+  resendInviteAction,
+  revokeInviteAction,
+  unlinkMemberPersonAction,
+} from './actions';
 import type { InviteRow, MemberRow } from './types';
 import { initials } from './utils';
 
@@ -51,6 +57,10 @@ export function AccessTab({
   const [pending, startTransition] = useTransition();
   const [linkPending, startLinkTransition] = useTransition();
   const [link, setLink] = useState<string | null>(null);
+  // The link modal doubles as the resend view; this drives its title.
+  const [resent, setResent] = useState(false);
+  const [invitePending, startInviteTransition] = useTransition();
+  const [revokeTarget, setRevokeTarget] = useState<InviteRow | null>(null);
   const [linkTarget, setLinkTarget] = useState<MemberRow | null>(null);
   const [linkPersonId, setLinkPersonId] = useState<string | null>(null);
   const form = useForm({
@@ -67,7 +77,42 @@ export function AccessTab({
   function openInvite() {
     form.reset();
     setLink(null);
+    setResent(false);
     setOpened(true);
+  }
+
+  /** Look an outstanding invite's link back up (and revive its expiry) to send again. */
+  function handleResend(row: InviteRow) {
+    startInviteTransition(async () => {
+      try {
+        const { token } = await resendInviteAction({ chronicleId, invitationId: row.id });
+        setLink(`${window.location.origin}/invite/${token}`);
+        setResent(true);
+        setOpened(true);
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : t.access.couldNotResendInvitation,
+        });
+      }
+    });
+  }
+
+  function handleRevoke() {
+    if (!revokeTarget) return;
+    const invitationId = revokeTarget.id;
+    startInviteTransition(async () => {
+      try {
+        await revokeInviteAction({ chronicleId, invitationId });
+        setRevokeTarget(null);
+        notifications.show({ message: t.access.invitationRevoked });
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : t.access.couldNotRevokeInvitation,
+        });
+      }
+    });
   }
 
   function handleSubmit(values: typeof form.values) {
@@ -214,9 +259,36 @@ export function AccessTab({
                       )}
                     </Table.Td>
                     <Table.Td style={{ textAlign: 'right' }}>
-                      <Badge variant="outline" color="slate">
-                        {t.roles[i.role]}
-                      </Badge>
+                      <Group justify="flex-end" gap="xs" wrap="nowrap">
+                        {manage && (
+                          <>
+                            <Button
+                              size="compact-xs"
+                              variant="subtle"
+                              loading={invitePending}
+                              onClick={() => handleResend(i)}
+                            >
+                              {t.access.resendInvitation}
+                            </Button>
+                            <Button
+                              size="compact-xs"
+                              variant="subtle"
+                              color="red"
+                              onClick={() => setRevokeTarget(i)}
+                            >
+                              {t.access.revokeInvitation}
+                            </Button>
+                          </>
+                        )}
+                        {i.expired && (
+                          <Badge variant="light" color="red">
+                            {t.access.inviteExpired}
+                          </Badge>
+                        )}
+                        <Badge variant="outline" color="slate">
+                          {t.roles[i.role]}
+                        </Badge>
+                      </Group>
                     </Table.Td>
                   </Table.Tr>
                 ))}
@@ -229,12 +301,12 @@ export function AccessTab({
       <Modal
         opened={opened}
         onClose={() => setOpened(false)}
-        title={t.access.inviteModalTitle}
+        title={resent ? t.access.resendModalTitle : t.access.inviteModalTitle}
         radius="md"
       >
         {link ? (
           <Stack>
-            <Text size="sm">{t.access.shareLinkText}</Text>
+            <Text size="sm">{resent ? t.access.resendLinkText : t.access.shareLinkText}</Text>
             <TextInput value={link} readOnly />
             <Group justify="flex-end">
               <CopyButton value={link}>
@@ -286,6 +358,27 @@ export function AccessTab({
             </Stack>
           </form>
         )}
+      </Modal>
+
+      <Modal
+        opened={revokeTarget !== null}
+        onClose={() => setRevokeTarget(null)}
+        title={t.access.revokeModalTitle}
+        radius="md"
+      >
+        <Stack>
+          <Text size="sm">
+            {revokeTarget ? t.access.revokeConfirmText(revokeTarget.email) : ''}
+          </Text>
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={() => setRevokeTarget(null)}>
+              {t.common.cancel}
+            </Button>
+            <Button color="red" onClick={handleRevoke} loading={invitePending}>
+              {t.access.revokeInvitation}
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
 
       <Modal

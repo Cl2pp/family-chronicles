@@ -21,7 +21,7 @@ import {
   type Gender,
   type PersonRelation,
 } from '@/lib/people';
-import { createInvitation } from '@/lib/invitations';
+import { createInvitation, refreshInvitationLink, revokeInvitation } from '@/lib/invitations';
 import type { AccessRole } from '@/lib/permissions';
 import { partsToEventDate, type EventDateParts } from '@/lib/dates';
 import { captureServerEvent } from '@/lib/posthog-server';
@@ -241,6 +241,37 @@ export async function invite(input: {
     role: input.role,
   });
   return { token: created.token };
+}
+
+/** Withdraw an outstanding invitation. Owner only. */
+export async function revokeInviteAction(input: { chronicleId: string; invitationId: string }) {
+  const user = await requireUser();
+  await requireOwner(input.chronicleId, user.id);
+
+  const revoked = await revokeInvitation(input.chronicleId, input.invitationId);
+  if (!revoked) {
+    throw new Error('That invitation is no longer pending — it may have been accepted already.');
+  }
+
+  revalidatePath('/chronicle');
+}
+
+/**
+ * Look a pending invitation's link back up (and extend its expiry) so an owner
+ * can send it again. Owner only — the token is a bearer credential, which is
+ * why `listPendingInvitations` never ships it to the page.
+ */
+export async function resendInviteAction(input: { chronicleId: string; invitationId: string }) {
+  const user = await requireUser();
+  await requireOwner(input.chronicleId, user.id);
+
+  const refreshed = await refreshInvitationLink(input.chronicleId, input.invitationId);
+  if (!refreshed) {
+    throw new Error('That invitation is no longer pending — it may have been accepted already.');
+  }
+
+  revalidatePath('/chronicle');
+  return { token: refreshed.token };
 }
 
 /** Link a member's account to an unlinked tree person. Owner only. */
