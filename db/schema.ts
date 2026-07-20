@@ -533,8 +533,13 @@ export const bookOrders = pgTable(
  * Photo books — per-photo state + analysis (docs/PHOTO_BOOK_PLAN.md §2/§4)
  * ────────────────────────────────────────────────────────────────────────── */
 
-/** Vision-analysis lifecycle for one photo. PR1 only ever leaves this at `pending` —
- *  the `photo-vision` job that advances it is a later PR. */
+/** Vision-analysis lifecycle for one photo. PR1 leaves this at `pending` for every
+ *  photo EXCEPT one interim case: `markPhotoMetaFailed` (`lib/photo-meta.ts`) sets it
+ *  to `'failed'` when the deterministic `photo-meta` pass exhausts its retries on a
+ *  genuinely undecodable photo, purely so the builder's analysis-progress poll can
+ *  terminate instead of spinning forever. The `photo-vision` job that otherwise owns
+ *  this column end-to-end is a later PR (PR3), which must treat that interim
+ *  `'failed'` as "meta gave up", not as a vision result. */
 export const photoAnalysisStatus = pgEnum('photo_analysis_status', [
   'pending',
   'analyzing',

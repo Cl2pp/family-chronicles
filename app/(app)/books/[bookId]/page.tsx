@@ -32,7 +32,8 @@ export default async function BookBuilderPage({
           ? await presignGet(p.thumbS3Key, 'image/webp')
           : await presignGet(p.s3Key, p.mimeType),
         excluded: p.excluded,
-        analyzed: p.analyzed,
+        metaSettled: p.metaSettled,
+        metaFailed: p.metaFailed,
       })),
     );
     return (

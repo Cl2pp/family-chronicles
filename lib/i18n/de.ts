@@ -691,10 +691,21 @@ export const de: Dictionary = {
           n === 1
             ? '1 Foto konnte nicht hochgeladen werden.'
             : `${n} Fotos konnten nicht hochgeladen werden.`,
+        invalidSkipped: (n: number) =>
+          n === 1
+            ? '1 Foto konnte nicht hochgeladen werden (nicht unterstützt oder zu groß).'
+            : `${n} Fotos konnten nicht hochgeladen werden (nicht unterstützt oder zu groß).`,
+        selectionCapped: (max: number) =>
+          `Es wurden nur die ersten ${max} Fotos hinzugefügt — wähle für den Rest weniger auf einmal aus.`,
         uploadFailed: 'Hochladen fehlgeschlagen — versuch es bitte noch einmal.',
         photos: 'Fotos',
         analyzedProgress: (analyzed: number, total: number) => `${analyzed} / ${total} analysiert`,
         analyzing: 'Wird analysiert…',
+        analysisFailed: 'Konnte nicht analysiert werden',
+        someUnanalyzed: (n: number) =>
+          n === 1
+            ? '1 Foto konnte nicht analysiert werden — es funktioniert im Buch trotzdem einwandfrei.'
+            : `${n} Fotos konnten nicht analysiert werden — sie funktionieren im Buch trotzdem einwandfrei.`,
         noPhotosYet: 'Noch keine Fotos',
         noPhotosHint: 'Füge oben Fotos hinzu, um dieses Buch zu füllen.',
         exclude: 'Aus dem Buch ausschließen',

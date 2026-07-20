@@ -5,15 +5,10 @@ import { useRouter } from 'next/navigation';
 import { Alert, Button, Group, Progress, Stack, Text } from '@mantine/core';
 import { IconAlertCircle, IconPhotoPlus } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
-import { PHOTO_ACCEPT, readDimensions } from '@/lib/uploads';
+import { MAX_PHOTOS_PER_BOOK, PHOTO_ACCEPT, readDimensions } from '@/lib/uploads';
 import { readClientExif } from '@/lib/exif-client';
 import { addBookPhotosAction, presignBookPhotosAction } from '@/app/(app)/books/actions';
 import type { AddBookPhotoInput } from '@/lib/books';
-
-/** Hard cap per selection — bounds analysis cost and render memory (open decision,
- *  docs/PHOTO_BOOK_PLAN.md §12.1, plan default). A book can still grow past this by
- *  uploading again. */
-const MAX_PHOTOS = 300;
 /** How many files upload in parallel — plenty of throughput without saturating the
  *  browser or the presigned-PUT-per-object S3 backend. */
 const CONCURRENCY = 5;
@@ -53,13 +48,15 @@ export function BulkPhotoUploader({ bookId }: { bookId: string }) {
 
   async function handleFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return;
-    const files = Array.from(fileList).slice(0, MAX_PHOTOS);
+    const capped = fileList.length > MAX_PHOTOS_PER_BOOK;
+    const files = Array.from(fileList).slice(0, MAX_PHOTOS_PER_BOOK);
     setBusy(true);
     setError(null);
     setTotal(files.length);
     setSettled(0);
 
     let failedCount = 0;
+    let invalidCount = 0;
     let settledCount = 0;
     let registerError: string | null = null;
 
@@ -91,8 +88,12 @@ export function BulkPhotoUploader({ bookId }: { bookId: string }) {
           const index = cursor++;
           const file = files[index];
           const slot = slots[index];
-          if (!slot) {
-            failedCount++;
+          // A missing slot is unexpected (the server always echoes one per file); a
+          // present-but-`ok: false` slot is the expected per-file validation failure
+          // (unsupported type / over the size limit) — either way this file is
+          // skipped without aborting the rest of the batch.
+          if (!slot || !slot.ok) {
+            invalidCount++;
             settledCount++;
             setSettled(settledCount);
             continue;
@@ -126,8 +127,12 @@ export function BulkPhotoUploader({ bookId }: { bookId: string }) {
       await flush(true);
 
       router.refresh();
-      if (registerError) setError(registerError);
-      else if (failedCount > 0) setError(tp.someFailed(failedCount));
+      const messages: string[] = [];
+      if (capped) messages.push(tp.selectionCapped(MAX_PHOTOS_PER_BOOK));
+      if (invalidCount > 0) messages.push(tp.invalidSkipped(invalidCount));
+      if (failedCount > 0) messages.push(tp.someFailed(failedCount));
+      if (registerError) messages.push(registerError);
+      if (messages.length > 0) setError(messages.join(' '));
     } catch (err) {
       setError(err instanceof Error ? err.message : tp.uploadFailed);
     } finally {

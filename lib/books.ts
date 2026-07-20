@@ -20,6 +20,7 @@ import {
   type StoryAccessInput,
 } from '@/lib/story-access';
 import { canContribute, type AccessRole } from '@/lib/permissions';
+import { MAX_PHOTOS_PER_BOOK } from '@/lib/uploads';
 import { deleteObject } from '@/lib/s3';
 import { enqueueDesignBook, enqueuePhotoMeta, enqueueRenderBook, enqueueThumbnail } from '@/lib/queue';
 import { quoteBookPrice, type BookFormat, type BookQuote } from '@/lib/gelato';
@@ -529,6 +530,12 @@ export async function editablePhotoBook(
  *
  * Idempotent by `s3Key`: an `s3Key` this book already holds an asset for is skipped,
  * so a retried batch (e.g. after a flaky network response) never double-adds photos.
+ *
+ * The uploader flushes every 10 photos while up to 5 uploads run concurrently, so
+ * more than one call can race for the same book — a `SELECT ... FOR UPDATE` on the
+ * book row serializes the `position`-assignment count read and the `MAX_PHOTOS_PER_BOOK`
+ * cap check within the transaction, so concurrent flushes neither overlap positions
+ * nor jointly sneak the book over the cap.
  */
 export async function addBookPhotos(input: {
   bookId: string;
@@ -544,7 +551,7 @@ export async function addBookPhotos(input: {
     return err('Invalid upload.');
   }
 
-  const inserted = await db.transaction(async (tx) => {
+  const txResult = await db.transaction(async (tx) => {
     const keys = input.photos.map((p) => p.s3Key);
     const existing = await tx
       .select({ s3Key: assets.s3Key })
@@ -552,13 +559,30 @@ export async function addBookPhotos(input: {
       .where(and(eq(assets.bookId, input.bookId), inArray(assets.s3Key, keys)));
     const existingKeys = new Set(existing.map((e) => e.s3Key));
     const fresh = input.photos.filter((p) => !existingKeys.has(p.s3Key));
-    if (fresh.length === 0) return [];
+    if (fresh.length === 0) return { ok: true as const, rows: [] };
+
+    // Lock the book row for the rest of this transaction so concurrent flushes (the
+    // uploader registers every 10 photos, 5 uploads running in parallel) serialize
+    // here instead of both reading the same `count(*)` under READ COMMITTED and
+    // assigning overlapping `position`s — see docs/PHOTO_BOOK_PLAN.md's ingestion
+    // notes and the PR1 review that flagged this race.
+    await tx.select({ id: books.id }).from(books).where(eq(books.id, input.bookId)).for('update');
 
     const [{ count }] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(bookPhotos)
       .where(eq(bookPhotos.bookId, input.bookId));
     const startPosition = count ?? 0;
+
+    // Same lock covers the cap check: without it, two concurrent transactions could
+    // both read a count just under the cap and each insert a batch that pushes the
+    // book over it.
+    if (startPosition + fresh.length > MAX_PHOTOS_PER_BOOK) {
+      return {
+        ok: false as const,
+        error: `This book can hold at most ${MAX_PHOTOS_PER_BOOK} photos (it already has ${startPosition}).`,
+      };
+    }
 
     const assetRows = await tx
       .insert(assets)
@@ -590,8 +614,11 @@ export async function addBookPhotos(input: {
         };
       }),
     );
-    return assetRows;
+    return { ok: true as const, rows: assetRows };
   });
+
+  if (!txResult.ok) return err(txResult.error);
+  const inserted = txResult.rows;
 
   if (inserted.length > 0) {
     await db.update(books).set({ updatedAt: new Date() }).where(eq(books.id, input.bookId));
@@ -616,9 +643,15 @@ export interface BookPhotoItem {
   excluded: boolean;
   excludedReason: string | null;
   takenAt: Date | null;
-  /** True once the `photo-meta` job has recorded a perceptual hash for this photo —
-   *  the builder's "X / Y analyzed" progress indicator counts these. */
-  analyzed: boolean;
+  /** True once the `photo-meta` job has *settled* for this photo — either it
+   *  recorded a perceptual hash, or it permanently gave up after exhausting its
+   *  retries (`markPhotoMetaFailed`, `lib/photo-meta.ts`). The builder's "X / Y
+   *  analyzed" progress indicator counts these, so a genuinely undecodable photo
+   *  can't leave the poll spinning forever. */
+  metaSettled: boolean;
+  /** True when photo-meta gave up on this photo — the builder shows this
+   *  distinctly from "still analyzing". */
+  metaFailed: boolean;
 }
 
 /** Every photo of a photo book, in upload order, for the builder's grid. */
@@ -649,6 +682,7 @@ export async function listBookPhotos(
       excludedReason: bookPhotos.excludedReason,
       takenAt: bookPhotos.takenAt,
       phash: bookPhotos.phash,
+      analysisStatus: bookPhotos.analysisStatus,
     })
     .from(bookPhotos)
     .innerJoin(assets, eq(bookPhotos.assetId, assets.id))
@@ -669,7 +703,8 @@ export async function listBookPhotos(
         excluded: r.excluded,
         excludedReason: r.excludedReason,
         takenAt: r.takenAt,
-        analyzed: r.phash != null,
+        metaSettled: r.phash != null || r.analysisStatus === 'failed',
+        metaFailed: r.analysisStatus === 'failed',
       })),
     },
   };

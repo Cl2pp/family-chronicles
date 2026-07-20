@@ -46,6 +46,12 @@ export const MAX_PHOTO_BYTES = RULES.photo.maxBytes;
 export const MAX_AVATAR_BYTES = RULES.avatar.maxBytes;
 export const MAX_AUDIO_BYTES = RULES.audio.maxBytes;
 
+/** Hard cap of photos per photo book (docs/PHOTO_BOOK_PLAN.md §12.1, plan default) —
+ *  bounds analysis cost and render memory. Enforced server-side, race-safely, in
+ *  `addBookPhotos` (`lib/books.ts`); the bulk uploader reuses this constant for an
+ *  instant client-side check, but the server check is the one that actually holds. */
+export const MAX_PHOTOS_PER_BOOK = 300;
+
 /** Accept for `<input type="file">`, so the picker matches what the server allows. */
 export const PHOTO_ACCEPT = Object.keys(PHOTO_TYPES).join(',');
 

@@ -1,4 +1,5 @@
-import sharp from 'sharp';
+import sharp, { type Sharp } from 'sharp';
+import decodeHeic from 'heic-decode';
 import { parse as exifrParse } from 'exifr';
 
 /**
@@ -12,15 +13,48 @@ import { parse as exifrParse } from 'exifr';
  *  raw-pixel buffers small regardless of the original's resolution. */
 const ANALYSIS_MAX_EDGE = 256;
 
+/** iPhone camera formats — sharp's prebuilt libvips has no HEVC codec for these
+ *  (mirrors `HEIC_TYPES` in `lib/thumbnails.ts`). */
+const HEIC_TYPES = new Set(['image/heic', 'image/heif']);
+
+function isHeic(mimeType: string): boolean {
+  return HEIC_TYPES.has(mimeType.split(';')[0].trim().toLowerCase());
+}
+
+/**
+ * Decode one photo into an upright sharp pipeline, ready to `.clone()` into as many
+ * downstream pixel transforms as needed without re-decoding the original. Mirrors
+ * `lib/thumbnails.ts`'s HEIC handling exactly: sharp's prebuilt libvips has no HEVC
+ * pixel codec, so HEIC/HEIF (the dominant iPhone camera format) is decoded through
+ * libheif's WASM decoder first — otherwise `computeDHash`/`computeBlurScore` throw on
+ * every photo an iPhone actually produces. libheif already applies the container's
+ * rotation; every other, EXIF-carrying format still needs sharp's `.rotate()`.
+ *
+ * Exported so `lib/photo-meta.ts` can decode a photo once and hand the same pipeline
+ * to both `computeDHash` and `computeBlurScore` — decoding a HEIC original is the
+ * expensive step here, and running it twice (once per metric) would double that cost
+ * per photo for no reason.
+ */
+export async function decodeForAnalysis(buffer: Buffer, mimeType: string): Promise<Sharp> {
+  if (isHeic(mimeType)) {
+    const { width, height, data } = await decodeHeic({ buffer });
+    return sharp(Buffer.from(data), { raw: { width, height, channels: 4 } });
+  }
+  return sharp(buffer, { failOn: 'none' }).rotate();
+}
+
 /**
  * Perceptual hash (dHash): downscale to 9×8 greyscale, compare each pixel to its
  * right neighbor, pack the 64 comparison bits into a 16-hex-digit string. Near-
  * duplicate photos land on hashes with a small Hamming distance (see
  * `hammingDistance`) — pure code, no AI, ~20 lines.
+ *
+ * Takes an already-`decodeForAnalysis`'d image (`.clone()`d internally) rather than
+ * raw bytes, so callers that also need `computeBlurScore` decode the original once.
  */
-export async function computeDHash(buffer: Buffer): Promise<string> {
-  const { data } = await sharp(buffer, { failOn: 'none' })
-    .rotate()
+export async function computeDHash(image: Sharp): Promise<string> {
+  const { data } = await image
+    .clone()
     .greyscale()
     .resize(9, 8, { fit: 'fill' })
     .raw()
@@ -61,10 +95,13 @@ export function hammingDistance(a: string, b: string): number {
  * Variance of the Laplacian over a greyscale downscale — a standard, cheap blur
  * proxy: sharp edges produce a high-variance second derivative, blur flattens it.
  * Lower scores mean blurrier. Pure code, no dependency beyond sharp.
+ *
+ * Takes an already-`decodeForAnalysis`'d image (`.clone()`d internally) rather than
+ * raw bytes — see `computeDHash`.
  */
-export async function computeBlurScore(buffer: Buffer): Promise<number> {
-  const { data, info } = await sharp(buffer, { failOn: 'none' })
-    .rotate()
+export async function computeBlurScore(image: Sharp): Promise<number> {
+  const { data, info } = await image
+    .clone()
     .greyscale()
     .resize(ANALYSIS_MAX_EDGE, ANALYSIS_MAX_EDGE, { fit: 'inside', withoutEnlargement: true })
     .raw()

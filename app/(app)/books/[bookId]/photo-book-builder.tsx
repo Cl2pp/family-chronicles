@@ -30,8 +30,11 @@ export interface PhotoBookPhotoView {
   assetId: string;
   url: string;
   excluded: boolean;
-  /** True once the `photo-meta` job has recorded this photo's perceptual hash. */
-  analyzed: boolean;
+  /** True once the `photo-meta` job has settled for this photo — hashed
+   *  successfully, or permanently gave up after its retries. */
+  metaSettled: boolean;
+  /** True when photo-meta gave up on this photo. */
+  metaFailed: boolean;
 }
 
 interface PhotoBookInfo {
@@ -61,16 +64,19 @@ export function PhotoBookBuilder({
 
   const locked = book.status === 'ordered';
   const totalCount = photos.length;
-  const analyzedCount = photos.filter((p) => p.analyzed).length;
+  const settledCount = photos.filter((p) => p.metaSettled).length;
+  const failedCount = photos.filter((p) => p.metaFailed).length;
 
   // Analysis runs server-side (the `photo-meta` worker job) with no other signal the
-  // client can see — poll while photos are still unanalyzed, same pattern as the
-  // story-book builder's "designing" poll (book-builder.tsx).
+  // client can see — poll while photos are still unsettled, same pattern as the
+  // story-book builder's "designing" poll (book-builder.tsx). A photo whose analysis
+  // permanently failed still counts as settled (see `metaSettled`), so a genuinely
+  // undecodable photo can't leave this polling forever.
   useEffect(() => {
-    if (totalCount === 0 || analyzedCount >= totalCount) return;
+    if (totalCount === 0 || settledCount >= totalCount) return;
     const timer = setInterval(() => router.refresh(), 4000);
     return () => clearInterval(timer);
-  }, [totalCount, analyzedCount, router]);
+  }, [totalCount, settledCount, router]);
 
   function toggleExcluded(assetId: string, excluded: boolean) {
     startTransition(async () => {
@@ -135,10 +141,15 @@ export function PhotoBookBuilder({
           <Title order={4}>{tp.photos}</Title>
           {totalCount > 0 && (
             <Text fz={13} c="dimmed">
-              {tp.analyzedProgress(analyzedCount, totalCount)}
+              {tp.analyzedProgress(settledCount, totalCount)}
             </Text>
           )}
         </Group>
+        {failedCount > 0 && (
+          <Text fz={12} c="dimmed" mb="sm">
+            {tp.someUnanalyzed(failedCount)}
+          </Text>
+        )}
 
         {totalCount === 0 ? (
           <Stack align="center" gap={4} py="xl">
@@ -179,7 +190,7 @@ export function PhotoBookBuilder({
                     </ActionIcon>
                   </Tooltip>
                 )}
-                {!p.analyzed && (
+                {!p.metaSettled && (
                   <Badge
                     size="xs"
                     variant="light"
@@ -187,6 +198,16 @@ export function PhotoBookBuilder({
                     style={{ position: 'absolute', bottom: 4, left: 4 }}
                   >
                     {tp.analyzing}
+                  </Badge>
+                )}
+                {p.metaFailed && (
+                  <Badge
+                    size="xs"
+                    variant="light"
+                    color="red"
+                    style={{ position: 'absolute', bottom: 4, left: 4 }}
+                  >
+                    {tp.analysisFailed}
                   </Badge>
                 )}
               </Box>

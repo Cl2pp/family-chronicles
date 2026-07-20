@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { eq } from 'drizzle-orm';
+import type { JobWithMetadata } from 'pg-boss';
 import { db } from '@/db';
 import { books, stories } from '@/db/schema';
 import {
@@ -21,7 +22,7 @@ import { styleContextForStory } from '@/lib/stories';
 import { sweepOrphanedObjects } from '@/lib/orphans';
 import { transcodeAudioObject } from '@/lib/transcode';
 import { generateThumbnail } from '@/lib/thumbnails';
-import { analyzePhotoMeta } from '@/lib/photo-meta';
+import { analyzePhotoMeta, markPhotoMetaFailed } from '@/lib/photo-meta';
 
 async function markFailed(storyId: string, err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
@@ -141,16 +142,32 @@ async function handleThumbnail(data: ThumbnailJob) {
   }
 }
 
-/** Extract deterministic metadata (dimensions, EXIF, phash, blur score) for one
- *  book photo. Cheap and idempotent — safe to run at normal worker concurrency. */
-async function handlePhotoMeta(data: PhotoMetaJob) {
+/**
+ * Extract deterministic metadata (dimensions, EXIF, phash, blur score) for one book
+ * photo. Cheap and idempotent — safe to run at normal worker concurrency.
+ *
+ * Retries are bounded by the `photo-meta` queue's `retryLimit`/`retryDelay`
+ * (`lib/queue.ts`), so a transient S3/network error recovers on its own. Errors are
+ * rethrown (not swallowed) so pg-boss actually counts and schedules those retries —
+ * once they're exhausted, this marks the photo settled-but-failed
+ * (`markPhotoMetaFailed`) so the builder's "X / Y analyzed" poll can terminate
+ * instead of waiting forever on a photo that will never decode.
+ */
+async function handlePhotoMeta(job: JobWithMetadata<PhotoMetaJob>) {
+  const { assetId } = job.data;
   try {
-    const result = await analyzePhotoMeta(data.assetId);
-    console.log(`[worker] photo-meta ${data.assetId}: ${result}`);
+    const result = await analyzePhotoMeta(assetId);
+    console.log(`[worker] photo-meta ${assetId}: ${result}`);
   } catch (err) {
-    // The photo still uploaded fine — it just stays unanalyzed (no phash/EXIF) until
-    // a retry; nothing is lost.
-    console.error(`[worker] photo-meta failed for ${data.assetId}:`, err);
+    const attempt = job.retryCount + 1;
+    const maxAttempts = job.retryLimit + 1;
+    console.error(`[worker] photo-meta failed for ${assetId} (attempt ${attempt}/${maxAttempts}):`, err);
+    if (job.retryCount >= job.retryLimit) {
+      await markPhotoMetaFailed(assetId).catch((markErr) =>
+        console.error(`[worker] failed to mark photo-meta as failed for ${assetId}:`, markErr),
+      );
+    }
+    throw err;
   }
 }
 
@@ -198,9 +215,15 @@ async function main() {
     },
   );
 
-  await boss.work<PhotoMetaJob>(QUEUES.photoMeta, async (jobs) => {
-    for (const job of jobs) await handlePhotoMeta(job.data);
-  });
+  // includeMetadata: true so handlePhotoMeta can see retryCount/retryLimit and tell
+  // a mid-retry failure from the final, exhausted one.
+  await boss.work(
+    QUEUES.photoMeta,
+    { includeMetadata: true } as const,
+    async (jobs: JobWithMetadata<PhotoMetaJob>[]) => {
+      for (const job of jobs) await handlePhotoMeta(job);
+    },
+  );
 
   await boss.work(QUEUES.sweepOrphans, async () => {
     await handleSweepOrphans();

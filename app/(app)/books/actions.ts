@@ -78,20 +78,23 @@ export async function createPhotoBookAction(): Promise<{ error: string } | never
   redirect(`/books/${result.value.bookId}`);
 }
 
-/** One presigned upload slot for the bulk photo uploader. */
-export interface PresignedBookPhoto {
-  /** Echoes the request so the client can match a slot back to its `File`. */
-  index: number;
-  url: string;
-  s3Key: string;
-  mimeType: string;
-}
+/** One presigned upload slot for the bulk photo uploader — a per-file result, not an
+ *  all-or-nothing batch: `index` always echoes the request position so the client can
+ *  match a slot back to its `File` even when some slots failed and others didn't. */
+export type PresignedBookPhoto =
+  | { index: number; ok: true; url: string; s3Key: string; mimeType: string }
+  | { index: number; ok: false; error: string };
 
 /**
  * Batch presign: one round trip signs N book-photo uploads (§3, "Batch presign
  * server action"). Each file is validated against the same allowlist/15 MB limit as
  * every other photo upload (`lib/uploads.ts`) — only the object key prefix differs
  * (`books/photos/` instead of `stories/photos/`).
+ *
+ * Validation happens per file, not batch-wide: a 300-file selection commonly has a
+ * handful of unsupported/oversized outliers (screenshots, videos picked by mistake,
+ * a 40 MP original over the limit), and one bad file must not reject presigning for
+ * the other 299 — each slot reports its own success/failure instead.
  */
 export async function presignBookPhotosAction(input: {
   bookId: string;
@@ -102,19 +105,19 @@ export async function presignBookPhotosAction(input: {
   if (!gate.ok) return { error: gate.error };
   if (input.files.length === 0) return { uploads: [] };
 
-  try {
-    const uploads = await Promise.all(
-      input.files.map(async (file, index) => {
+  const uploads = await Promise.all(
+    input.files.map(async (file, index): Promise<PresignedBookPhoto> => {
+      try {
         const validated = validateUpload('photo', file.mimeType, file.bytes);
         const s3Key = buildKey('books/photos', validated.ext);
         const url = await presignPut(s3Key, validated.mimeType, validated.bytes);
-        return { index, url, s3Key, mimeType: validated.mimeType };
-      }),
-    );
-    return { uploads };
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Invalid upload.' };
-  }
+        return { index, ok: true, url, s3Key, mimeType: validated.mimeType };
+      } catch (err) {
+        return { index, ok: false, error: err instanceof Error ? err.message : 'Invalid upload.' };
+      }
+    }),
+  );
+  return { uploads };
 }
 
 /** Attach already-uploaded photos (via `presignBookPhotosAction`) to a photo book. */

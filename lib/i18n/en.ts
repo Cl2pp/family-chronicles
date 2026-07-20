@@ -673,10 +673,21 @@ export const en = {
         uploadProgress: (done: number, total: number) => `${done} / ${total} uploaded`,
         someFailed: (n: number) =>
           n === 1 ? '1 photo could not be uploaded.' : `${n} photos could not be uploaded.`,
+        invalidSkipped: (n: number) =>
+          n === 1
+            ? '1 photo could not be uploaded (unsupported or too large).'
+            : `${n} photos could not be uploaded (unsupported or too large).`,
+        selectionCapped: (max: number) =>
+          `Only the first ${max} photos were added — select fewer at a time to add the rest.`,
         uploadFailed: 'Upload failed — please try again.',
         photos: 'Photos',
         analyzedProgress: (analyzed: number, total: number) => `${analyzed} / ${total} analyzed`,
         analyzing: 'Analyzing…',
+        analysisFailed: 'Could not be analyzed',
+        someUnanalyzed: (n: number) =>
+          n === 1
+            ? '1 photo could not be analyzed — it still works fine in the book.'
+            : `${n} photos could not be analyzed — they still work fine in the book.`,
         noPhotosYet: 'No photos yet',
         noPhotosHint: 'Add photos above to start building this book.',
         exclude: 'Exclude from book',
