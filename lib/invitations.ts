@@ -61,6 +61,7 @@ export async function listPendingInvitations(chronicleId: string) {
       email: invitations.email,
       accessRole: invitations.accessRole,
       personId: invitations.personId,
+      expiresAt: invitations.expiresAt,
       personFirstName: people.firstName,
       personFamilyName: people.familyName,
     })
@@ -68,12 +69,64 @@ export async function listPendingInvitations(chronicleId: string) {
     .leftJoin(people, eq(invitations.personId, people.id))
     .where(and(eq(invitations.chronicleId, chronicleId), isNull(invitations.acceptedAt)));
 
-  return rows.map(({ personFirstName, personFamilyName, ...i }) => ({
+  const now = Date.now();
+  return rows.map(({ personFirstName, personFamilyName, expiresAt, ...i }) => ({
     ...i,
+    // Past its TTL the invite still shows — an owner can revoke it or resend
+    // it, and resending revives the same link.
+    expired: expiresAt.getTime() < now,
     personName: personFirstName
       ? personFullName({ firstName: personFirstName, familyName: personFamilyName })
       : null,
   }));
+}
+
+/**
+ * Withdraw an outstanding invitation, killing its link. Scoped to the chronicle
+ * and to unaccepted rows: an accepted invite is the provenance of a membership
+ * (and of a tree-person link), so it is never deleted — revoking access after
+ * the fact is a membership concern, not an invitation one.
+ *
+ * Returns false if there was no such pending invite (already accepted, already
+ * revoked, or another chronicle's).
+ */
+export async function revokeInvitation(chronicleId: string, invitationId: string) {
+  const deleted = await db
+    .delete(invitations)
+    .where(
+      and(
+        eq(invitations.id, invitationId),
+        eq(invitations.chronicleId, chronicleId),
+        isNull(invitations.acceptedAt),
+      ),
+    )
+    .returning({ id: invitations.id });
+
+  return deleted.length > 0;
+}
+
+/**
+ * Look the shareable link of a pending invitation back up so an owner can send
+ * it again, and push its expiry out by a fresh TTL — a resent link that is
+ * already dead helps nobody. Same token, so a recipient who still has the
+ * original mail is not locked out.
+ *
+ * Returns null if there is no such pending invite (accepted or revoked).
+ */
+export async function refreshInvitationLink(chronicleId: string, invitationId: string) {
+  const [refreshed] = await db
+    .update(invitations)
+    .set({ expiresAt: new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000) })
+    .where(
+      and(
+        eq(invitations.id, invitationId),
+        eq(invitations.chronicleId, chronicleId),
+        isNull(invitations.acceptedAt),
+      ),
+    )
+    .returning({ token: invitations.token, email: invitations.email });
+
+  return refreshed ?? null;
 }
 
 export type InvitePreview =

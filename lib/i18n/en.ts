@@ -370,6 +370,18 @@ export const en = {
     createInvitation: 'Create invitation',
     invitationCreated: 'Invitation created',
     couldNotCreateInvitation: 'Could not create invitation',
+    resendInvitation: 'Show link',
+    resendModalTitle: 'Invitation link',
+    resendLinkText:
+      'Send this link again — it is the same link as before, valid for another 14 days:',
+    couldNotResendInvitation: 'Could not look up that invitation link',
+    revokeInvitation: 'Revoke',
+    revokeModalTitle: 'Revoke this invitation?',
+    revokeConfirmText: (email: string) =>
+      `The link sent to ${email} will stop working. You can always invite them again.`,
+    invitationRevoked: 'Invitation revoked',
+    couldNotRevokeInvitation: 'Could not revoke that invitation',
+    inviteExpired: 'Expired',
     treePersonLabel: 'Who is this in the family tree?',
     treePersonPlaceholder: 'Pick a person',
     notInTreeYet: 'Not in the tree yet',

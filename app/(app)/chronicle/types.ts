@@ -39,6 +39,8 @@ export interface InviteRow {
   role: AccessRole;
   /** The tree person the invitee will be linked to on accept, if chosen. */
   personName: string | null;
+  /** Past its TTL: still listed, but the link is dead until it is resent. */
+  expired: boolean;
 }
 
 export interface PersonRow {

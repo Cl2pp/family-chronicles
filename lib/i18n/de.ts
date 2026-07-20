@@ -372,6 +372,18 @@ export const de: Dictionary = {
     createInvitation: 'Einladung erstellen',
     invitationCreated: 'Einladung erstellt',
     couldNotCreateInvitation: 'Einladung konnte nicht erstellt werden',
+    resendInvitation: 'Link anzeigen',
+    resendModalTitle: 'Einladungslink',
+    resendLinkText:
+      'Sende diesen Link noch einmal — es ist derselbe Link wie zuvor, weitere 14 Tage gültig:',
+    couldNotResendInvitation: 'Der Einladungslink konnte nicht abgerufen werden',
+    revokeInvitation: 'Zurückziehen',
+    revokeModalTitle: 'Diese Einladung zurückziehen?',
+    revokeConfirmText: (email: string) =>
+      `Der an ${email} gesendete Link funktioniert dann nicht mehr. Du kannst die Person jederzeit erneut einladen.`,
+    invitationRevoked: 'Einladung zurückgezogen',
+    couldNotRevokeInvitation: 'Die Einladung konnte nicht zurückgezogen werden',
+    inviteExpired: 'Abgelaufen',
     treePersonLabel: 'Wer ist das im Stammbaum?',
     treePersonPlaceholder: 'Person auswählen',
     notInTreeYet: 'Noch nicht im Stammbaum',

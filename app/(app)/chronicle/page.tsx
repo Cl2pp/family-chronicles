@@ -57,6 +57,7 @@ export default async function ChroniclePage() {
           email: i.email,
           role: i.accessRole as AccessRole,
           personName: i.personName,
+          expired: i.expired,
         }))}
         currentUserId={user.id}
       />

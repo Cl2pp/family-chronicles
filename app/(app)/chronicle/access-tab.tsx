@@ -21,7 +21,13 @@ import { IconCopy, IconMailPlus } from '@tabler/icons-react';
 import type { AccessRole } from '@/lib/permissions';
 import { useI18n } from '@/lib/i18n/client';
 import { personFullName } from '@/lib/person-name';
-import { invite, linkMemberPersonAction, unlinkMemberPersonAction } from './actions';
+import {
+  invite,
+  linkMemberPersonAction,
+  resendInviteAction,
+  revokeInviteAction,
+  unlinkMemberPersonAction,
+} from './actions';
 import type { InviteRow, MemberRow } from './types';
 import { initials } from './utils';
 
@@ -51,6 +57,13 @@ export function AccessTab({
   const [pending, startTransition] = useTransition();
   const [linkPending, startLinkTransition] = useTransition();
   const [link, setLink] = useState<string | null>(null);
+  // The link modal doubles as the resend view; this drives its title.
+  const [resent, setResent] = useState(false);
+  // Which invitation is mid-flight, so only that row's controls react — a
+  // single boolean would spin every row's button at once.
+  const [busyInviteId, setBusyInviteId] = useState<string | null>(null);
+  const [, startInviteTransition] = useTransition();
+  const [revokeTarget, setRevokeTarget] = useState<InviteRow | null>(null);
   const [linkTarget, setLinkTarget] = useState<MemberRow | null>(null);
   const [linkPersonId, setLinkPersonId] = useState<string | null>(null);
   const form = useForm({
@@ -67,7 +80,48 @@ export function AccessTab({
   function openInvite() {
     form.reset();
     setLink(null);
+    setResent(false);
     setOpened(true);
+  }
+
+  /** Look an outstanding invite's link back up (and revive its expiry) to send again. */
+  function handleResend(row: InviteRow) {
+    setBusyInviteId(row.id);
+    startInviteTransition(async () => {
+      try {
+        const { token } = await resendInviteAction({ chronicleId, invitationId: row.id });
+        setLink(`${window.location.origin}/invite/${token}`);
+        setResent(true);
+        setOpened(true);
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : t.access.couldNotResendInvitation,
+        });
+      } finally {
+        setBusyInviteId(null);
+      }
+    });
+  }
+
+  function handleRevoke() {
+    if (!revokeTarget) return;
+    const invitationId = revokeTarget.id;
+    setBusyInviteId(invitationId);
+    startInviteTransition(async () => {
+      try {
+        await revokeInviteAction({ chronicleId, invitationId });
+        setRevokeTarget(null);
+        notifications.show({ message: t.access.invitationRevoked });
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : t.access.couldNotRevokeInvitation,
+        });
+      } finally {
+        setBusyInviteId(null);
+      }
+    });
   }
 
   function handleSubmit(values: typeof form.values) {
@@ -212,11 +266,61 @@ export function AccessTab({
                           {t.access.willJoinAs(i.personName)}
                         </Text>
                       )}
+                      {/* A phone has no room for a third column, so the badges
+                          ride under the address there and the dedicated column
+                          takes over from `sm` up. */}
+                      <Group gap="xs" mt={6} hiddenFrom="sm">
+                        {i.expired && (
+                          <Badge variant="light" color="red">
+                            {t.access.inviteExpired}
+                          </Badge>
+                        )}
+                        <Badge variant="outline" color="slate">
+                          {t.roles[i.role]}
+                        </Badge>
+                      </Group>
                     </Table.Td>
-                    <Table.Td style={{ textAlign: 'right' }}>
-                      <Badge variant="outline" color="slate">
-                        {t.roles[i.role]}
-                      </Badge>
+                    {/* Actions get their own centred column so they line up down
+                        the list — sharing a cell with the badges let a row's
+                        "expired" badge shove its buttons out of alignment. */}
+                    <Table.Td style={{ textAlign: 'center' }}>
+                      {manage && (
+                        // Allowed to wrap: side by side wherever there is room,
+                        // stacked on a phone rather than clipped at the edge.
+                        <Group justify="center" gap="xs">
+                          <Button
+                            size="xs"
+                            variant="default"
+                            loading={busyInviteId === i.id}
+                            onClick={() => handleResend(i)}
+                          >
+                            {t.access.resendInvitation}
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="light"
+                            color="red"
+                            // Blocked while this row's link is being fetched, so
+                            // it can't be revoked out from under the modal.
+                            disabled={busyInviteId === i.id}
+                            onClick={() => setRevokeTarget(i)}
+                          >
+                            {t.access.revokeInvitation}
+                          </Button>
+                        </Group>
+                      )}
+                    </Table.Td>
+                    <Table.Td visibleFrom="sm" style={{ textAlign: 'right' }}>
+                      <Group justify="flex-end" gap="xs" wrap="nowrap">
+                        {i.expired && (
+                          <Badge variant="light" color="red">
+                            {t.access.inviteExpired}
+                          </Badge>
+                        )}
+                        <Badge variant="outline" color="slate">
+                          {t.roles[i.role]}
+                        </Badge>
+                      </Group>
                     </Table.Td>
                   </Table.Tr>
                 ))}
@@ -229,12 +333,12 @@ export function AccessTab({
       <Modal
         opened={opened}
         onClose={() => setOpened(false)}
-        title={t.access.inviteModalTitle}
+        title={resent ? t.access.resendModalTitle : t.access.inviteModalTitle}
         radius="md"
       >
         {link ? (
           <Stack>
-            <Text size="sm">{t.access.shareLinkText}</Text>
+            <Text size="sm">{resent ? t.access.resendLinkText : t.access.shareLinkText}</Text>
             <TextInput value={link} readOnly />
             <Group justify="flex-end">
               <CopyButton value={link}>
@@ -286,6 +390,31 @@ export function AccessTab({
             </Stack>
           </form>
         )}
+      </Modal>
+
+      <Modal
+        opened={revokeTarget !== null}
+        onClose={() => setRevokeTarget(null)}
+        title={t.access.revokeModalTitle}
+        radius="md"
+      >
+        <Stack>
+          <Text size="sm">
+            {revokeTarget ? t.access.revokeConfirmText(revokeTarget.email) : ''}
+          </Text>
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={() => setRevokeTarget(null)}>
+              {t.common.cancel}
+            </Button>
+            <Button
+              color="red"
+              onClick={handleRevoke}
+              loading={revokeTarget !== null && busyInviteId === revokeTarget.id}
+            >
+              {t.access.revokeInvitation}
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
 
       <Modal
