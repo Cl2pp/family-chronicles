@@ -710,6 +710,7 @@ export const en = {
         noPhotosHint: 'Add photos above to start building this book.',
         exclude: 'Exclude from book',
         include: 'Include in book',
+        toggleExcludedFailed: 'Couldn’t update this photo. Please try again.',
         preview: 'Preview',
         previewHint: 'Generated automatically from your photos — pick a style and regenerate any time.',
         style: 'Style',

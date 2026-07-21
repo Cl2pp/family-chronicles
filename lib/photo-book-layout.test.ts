@@ -156,4 +156,64 @@ describe('renderPhotoBookHtml', () => {
     const html = renderPhotoBookHtml(baseInput({ images: new Map() }));
     expect(html).toContain('ph-missing');
   });
+
+  // Regression coverage for the pagination-crash bug: the self-hosted Paged.js polyfill
+  // (screen only — preview/print render through Chromium's own native paged-media engine,
+  // `lib/book-render.ts`) cannot reliably paginate a document that uses CSS's named-page
+  // mechanism (`page: <ident>` + a matching `@page <ident> { margin: 0 }` rule per bleed
+  // page) — reproduced headlessly: pagination stalled after page one and Paged.js's own
+  // repeated-layout guard cloned the same page over and over instead of erroring cleanly
+  // (`Layout repeated at:` in the console), which is what made a generated book look
+  // "just a cover" (bug 3) and made the preview go blank on remount (bug 2). `screen` must
+  // never emit ANY named `@page` rule or `page:` declaration; `preview`/`print` still must
+  // (that's the real bleed mechanism, and Chromium's native engine handles it fine).
+  describe('named @page bleed mechanism (screen vs. preview/print)', () => {
+    it('screen never emits a `page:` declaration or a named `@page` rule', () => {
+      const html = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
+      expect(html).not.toMatch(/style="page:/);
+      expect(html).not.toMatch(/@page pb-bleed-\d+/);
+    });
+
+    it('preview and print still emit `page:` declarations and matching named `@page { margin: 0; }` rules', () => {
+      for (const variant of ['preview', 'print'] as const) {
+        const html = renderPhotoBookHtml(baseInput({ variant }));
+        expect(html).toMatch(/style="page: pb-bleed-0"/);
+        expect(html).toMatch(/@page pb-bleed-0 \{ margin: 0; \}/);
+        // Cover front, cover back, and the one section's divider — 3 named bleed pages
+        // for this fixture's plan (the section's full-bleed photo page is a 4th).
+        expect(html).toMatch(/@page pb-bleed-3 \{ margin: 0; \}/);
+      }
+    });
+
+    it("screen's base @page rule has margin 0 for every page; preview/print keep the content-box margin as the base and override to 0 per named bleed page", () => {
+      const screenHtml = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
+      const printHtml = renderPhotoBookHtml(baseInput({ variant: 'print' }));
+
+      // `[^}]*` (not `[\s\S]*?`) deliberately can't cross a `}` — this must only match
+      // within the SAME unnamed `@page { ... }` block, never spill into an unrelated
+      // named `@page pb-bleed-N { margin: 0; }` rule later in the stylesheet.
+      expect(screenHtml).toMatch(/@page \{[^}]*margin: 0;[^}]*\}/);
+      expect(printHtml).not.toMatch(/@page \{[^}]*margin: 0;[^}]*\}/);
+    });
+
+    it("a content-box (non-bleed) photo page's own margin/size is unaffected by the screen-only @page change", () => {
+      // The fix relies on `.photo-page:not(.pb-fullbleed):not(.pb-divider-page)` already
+      // fully implementing the content-box inset via its own CSS — this just pins that
+      // down so a future edit can't quietly break it.
+      const screenHtml = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
+      expect(screenHtml).toContain(
+        `margin: ${PHOTO_BOOK_CONTENT_MARGIN_MM.top}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.outer}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.bottom}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.inner}mm;`,
+      );
+    });
+  });
+
+  // Regression coverage for bug 4 ("preview is cropped/zoomed"): the old fitPages() only
+  // scaled `.pagedjs_pages` to fit the iframe's WIDTH, never its height, so a fixed-height
+  // host container cropped most of the page below the fold. The fix fits BOTH axes (like
+  // object-fit: contain) so a whole page is always visible.
+  it('screen fits pages to both width AND height of the iframe viewport, not just width', () => {
+    const html = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
+    expect(html).toContain('var PAGE_H_PX');
+    expect(html).toMatch(/Math\.min\(1, availW \/ PAGE_W_PX, availH \/ PAGE_H_PX\)/);
+  });
 });
