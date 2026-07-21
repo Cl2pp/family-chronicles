@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -9,33 +9,19 @@ import {
   Badge,
   Box,
   Button,
-  Card,
   Group,
-  Image,
   Modal,
-  Overlay,
-  SimpleGrid,
-  Stack,
+  Stepper,
   Text,
   Title,
   Tooltip,
 } from '@mantine/core';
-import {
-  IconArrowLeft,
-  IconDownload,
-  IconExternalLink,
-  IconEye,
-  IconEyeOff,
-  IconPhoto,
-  IconShoppingCart,
-  IconSparkles,
-  IconTrash,
-} from '@tabler/icons-react';
+import { IconArrowLeft, IconTrash } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
 import { isBookPrintFresh } from '@/lib/book-print-status';
-import { PHOTO_BOOK_STYLES, type PhotoBookStyle } from '@/lib/photo-book-plan';
-import { BulkPhotoUploader } from '@/components/bulk-photo-uploader';
+import type { PhotoBookStyle } from '@/lib/photo-book-plan';
+import type { BookQuote } from '@/lib/gelato';
 import {
   deleteBookAction,
   regeneratePhotoBookLayoutAction,
@@ -44,7 +30,10 @@ import {
   setPhotoBookStyleAction,
   setPhotoExcludedAction,
 } from '../actions';
-import { PhotoBookChat } from './photo-book-chat';
+import type { OrderBook } from './order/order-view';
+import { PhotoBookUploadStep } from './photo-book-upload-step';
+import { PhotoBookCreateStep } from './photo-book-create-step';
+import { PhotoBookOrderStep } from './photo-book-order-step';
 
 export interface PhotoBookPhotoView {
   assetId: string;
@@ -58,7 +47,7 @@ export interface PhotoBookPhotoView {
   metaFailed: boolean;
 }
 
-interface PhotoBookInfo {
+export interface PhotoBookInfo {
   id: string;
   title: string;
   status: 'draft' | 'rendering' | 'preview_ready' | 'render_failed' | 'ordered';
@@ -73,7 +62,8 @@ interface PhotoBookInfo {
   designing: boolean;
   /** Who last wrote the layout plan — 'edited' once a chat op has touched it (PR4).
    *  Drives the "replace your manual edits?" consent modal below, same as the story
-   *  book's `layoutSource`. */
+   *  book's `layoutSource`. Also gates the step 2 auto-design trigger: it only ever
+   *  fires when this is still 'auto' (never AI-designed or manually edited yet). */
   layoutSource: 'auto' | 'ai' | 'edited';
   /** True when the book's content changed since its stored layout plan was built — a
    *  `preview_ready` PDF built before that change is stale and must be re-rendered
@@ -84,19 +74,33 @@ interface PhotoBookInfo {
 }
 
 /**
- * The photo-book builder: bulk upload + a grid to review what's in the book so far
- * (exclude/include toggle, analysis-progress indicator — PR1 scope), plus the live
- * auto-generated preview, a style-suite picker, and a regenerate button (PR2 scope), an
- * AI "Design my book" pass whose progress is polled the same way the story builder polls
- * its own design pass (PR3 scope), and an embedded chat for typed/voice refinement via
- * targeted layout edits (PR4 scope, docs/PHOTO_BOOK_PLAN.md).
+ * The photo-book builder: a 3-step wizard — **1. Foto-Upload → 2. Fotobuch erstellen →
+ * 3. Bestellen** — shown as a `Stepper` across the top so the user always sees where they
+ * are. This file is the orchestrator: it owns every mutation (upload progress lives in
+ * `BulkPhotoUploader`/step 1, everything else — style, design, regenerate, exclude/
+ * include, delete, download — is a server action call + `router.refresh()`, same pattern
+ * the old single-scroll builder used) and hands step-specific slices of state down to
+ * `PhotoBookUploadStep` / `PhotoBookCreateStep` / `PhotoBookOrderStep`.
+ *
+ * Step gating: step 2 (and 3) only become reachable once every photo is *settled*
+ * (`metaSettled` — scored or permanently failed, see `PhotoBookPhotoView`'s doc comment)
+ * — `analysisComplete` below. The header steps themselves are fully controlled
+ * (`active={step}`, `onStepClick`) rather than relying on Mantine's own
+ * `allowNextStepsSelect`, so clicking a locked step is a deliberate no-op instead of
+ * silently doing nothing.
  */
 export function PhotoBookBuilder({
   book,
   photos,
+  order,
+  quote,
+  contactEmail,
 }: {
   book: PhotoBookInfo;
   photos: PhotoBookPhotoView[];
+  order: OrderBook;
+  quote: BookQuote | null;
+  contactEmail: string;
 }) {
   const { t } = useI18n();
   const tb = t.books.builder;
@@ -113,12 +117,13 @@ export function PhotoBookBuilder({
   // (as opposed to `downloadRequesting`, which only covers the initial "kick off the
   // render" request — the render itself runs in the worker and is polled for below).
   const [awaitingDownload, setAwaitingDownload] = useState(false);
+  const [step, setStep] = useState(0);
   const isEdited = book.layoutSource === 'edited';
 
   const locked = book.status === 'ordered';
   const totalCount = photos.length;
   const settledCount = photos.filter((p) => p.metaSettled).length;
-  const failedCount = photos.filter((p) => p.metaFailed).length;
+  const analysisComplete = totalCount > 0 && settledCount >= totalCount;
 
   // Analysis runs server-side (the `photo-meta` and `photo-vision` worker jobs) with no
   // other signal the client can see — poll while photos are still unsettled, same
@@ -176,6 +181,30 @@ export function PhotoBookBuilder({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- triggerDownload/tp are stable for this component's lifetime
   }, [awaitingDownload, book.id, router]);
 
+  // Auto-start the AI design pass the first time the user reaches step 2 with every
+  // photo analyzed and no design pass has run yet on this plan (`layoutSource === 'auto'`
+  // — deliberately excludes both 'ai' — a design pass already ran — and 'edited' — the
+  // user's own manual edits, which must never be silently overwritten; see
+  // `requestPhotoBookAiDesignAction`'s consent guard, unchanged and still reachable via
+  // the manual "Design my book" button in step 2 for that case). `autoDesignTriggered`
+  // fires this at most ONCE per mount of this component: without it, the gap between
+  // calling the action and `book.designing` actually turning true on the next server
+  // round trip could let the effect's dependencies re-evaluate and queue a second design
+  // pass before the first one's `design_requested_at` has landed — a duplicate-trigger
+  // race the ref closes off by flipping synchronously before the async call even starts.
+  const autoDesignTriggered = useRef(false);
+  useEffect(() => {
+    if (step !== 1) return;
+    if (autoDesignTriggered.current) return;
+    if (!analysisComplete) return;
+    if (book.designing) return;
+    if (book.layoutSource !== 'auto') return;
+    if (locked) return;
+    autoDesignTriggered.current = true;
+    designBook();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- designBook is stable for this component's lifetime; re-running on every dep change would defeat the once-only ref guard
+  }, [step, analysisComplete, book.designing, book.layoutSource, locked]);
+
   /** Saves the current print PDF to disk via a throwaway anchor — same pattern as any
    *  same-origin `download`-attribute link, just triggered from code once a render we
    *  were waiting on has finished. */
@@ -188,21 +217,21 @@ export function PhotoBookBuilder({
     a.remove();
   }
 
-  /** The "Download PDF" button (docs/PHOTO_BOOK_PLAN.md PR5, the v1 deliverable): if the
-   *  book already has a fresh print PDF (`preview_ready` and not `layoutStale`), download
-   *  it immediately. Otherwise trigger a render first (`renderPreviewAction` — the same
-   *  action the order page's "prepare print proof" button calls, generalized in
-   *  `lib/books.ts`'s `requestPreview` to cover photo books) and wait for it, so a book
-   *  with a stale plan (photos added/excluded, a chat edit) never hands back an outdated
-   *  PDF. */
+  /** The "Download PDF" button (docs/PHOTO_BOOK_PLAN.md PR5, the v1 deliverable, now
+   *  living in step 3): if the book already has a fresh print PDF (`preview_ready` and
+   *  not `layoutStale`), download it immediately. Otherwise trigger a render first
+   *  (`renderPreviewAction` — the same action the order page's "prepare print proof"
+   *  button calls, generalized in `lib/books.ts`'s `requestPreview` to cover photo books)
+   *  and wait for it, so a book with a stale plan (photos added/excluded, a chat edit)
+   *  never hands back an outdated PDF. */
   function downloadPdf() {
     if (isBookPrintFresh('photo', book.status, book.layoutStale)) {
       triggerDownload();
       return;
     }
     if (book.status === 'rendering') {
-      // Some other trigger (the order page, a previous click) already has a render in
-      // flight — just wait for it instead of surfacing "already rendering" as an error.
+      // Some other trigger (a previous click) already has a render in flight — just
+      // wait for it instead of surfacing "already rendering" as an error.
       setAwaitingDownload(true);
       return;
     }
@@ -310,9 +339,21 @@ export function PhotoBookBuilder({
     });
   }
 
+  /** The header steps are fully controlled — clicking a step beyond what's unlocked is a
+   *  deliberate no-op (with a toast explaining why) rather than relying on Mantine's own
+   *  `allowNextStepsSelect`, so the gating rule lives in one place (`analysisComplete`)
+   *  instead of being split between this component and the Stepper's internal logic. */
+  function goToStep(index: number) {
+    if (index >= 1 && !analysisComplete) {
+      notifications.show({ message: tp.waitingForAnalysis, color: 'yellow' });
+      return;
+    }
+    setStep(index);
+  }
+
   return (
-    <Stack gap="md">
-      <Group justify="space-between" wrap="wrap">
+    <Box>
+      <Group justify="space-between" wrap="wrap" mb="md">
         <Group gap="sm">
           <Anchor component={Link} href="/books" fz={13} c="dimmed">
             <Group gap={4}>
@@ -323,211 +364,70 @@ export function PhotoBookBuilder({
           <Title order={2}>{book.title}</Title>
           <Badge variant="light">{t.books.status[book.status]}</Badge>
         </Group>
-        <Group gap="sm">
-          {!locked && (
-            <Tooltip label={tb.deleteBook}>
-              <ActionIcon
-                variant="subtle"
-                color="red"
-                size="lg"
-                aria-label={tb.deleteBook}
-                disabled={pending}
-                onClick={() => setDeleteOpen(true)}
-              >
-                <IconTrash size={18} />
-              </ActionIcon>
-            </Tooltip>
-          )}
-          <Button
-            variant="default"
-            leftSection={<IconDownload size={16} />}
-            loading={downloadRequesting || awaitingDownload}
-            disabled={totalCount === 0}
-            onClick={downloadPdf}
-          >
-            {tp.downloadPdf}
-          </Button>
-          <Button
-            component={Link}
-            href={`/books/${book.id}/order`}
-            leftSection={<IconShoppingCart size={16} />}
-            disabled={!isBookPrintFresh('photo', book.status, book.layoutStale)}
-          >
-            {tb.orderCta}
-          </Button>
-        </Group>
+        {!locked && (
+          <Tooltip label={tb.deleteBook}>
+            <ActionIcon
+              variant="subtle"
+              color="red"
+              size="lg"
+              aria-label={tb.deleteBook}
+              disabled={pending}
+              onClick={() => setDeleteOpen(true)}
+            >
+              <IconTrash size={18} />
+            </ActionIcon>
+          </Tooltip>
+        )}
       </Group>
 
-      {!locked && (
-        <Card withBorder radius="md" p="md">
-          <BulkPhotoUploader bookId={book.id} />
-        </Card>
-      )}
-
-      <Card withBorder radius="md" p="md">
-        <Group justify="space-between" mb="sm" wrap="wrap">
-          <Title order={4}>{tp.photos}</Title>
-          {totalCount > 0 && (
-            <Text fz={13} c="dimmed">
-              {tp.analyzedProgress(settledCount, totalCount)}
-            </Text>
-          )}
-        </Group>
-        {failedCount > 0 && (
-          <Text fz={12} c="dimmed" mb="sm">
-            {tp.someUnanalyzed(failedCount)}
-          </Text>
-        )}
-
-        {totalCount === 0 ? (
-          <Stack align="center" gap={4} py="xl">
-            <IconPhoto size={28} stroke={1.4} color="var(--mantine-color-slate-4)" />
-            <Text c="dimmed" ta="center">
-              {tp.noPhotosYet}
-            </Text>
-            <Text fz={12} c="dimmed" ta="center">
-              {tp.noPhotosHint}
-            </Text>
-          </Stack>
-        ) : (
-          <SimpleGrid cols={{ base: 2, xs: 3, sm: 4, md: 5 }} spacing="xs">
-            {photos.map((p) => (
-              <Box key={p.assetId} pos="relative">
-                <Card
-                  withBorder
-                  p={0}
-                  radius="sm"
-                  style={{ overflow: 'hidden', aspectRatio: '1 / 1' }}
-                >
-                  <Image src={p.url} alt="" w="100%" h="100%" fit="cover" />
-                  {p.excluded && <Overlay color="#000" backgroundOpacity={0.5} />}
-                </Card>
-                {!locked && (
-                  <Tooltip label={p.excluded ? tp.include : tp.exclude}>
-                    <ActionIcon
-                      variant="filled"
-                      color={p.excluded ? 'gray' : 'dark'}
-                      size="sm"
-                      radius="xl"
-                      aria-label={p.excluded ? tp.include : tp.exclude}
-                      disabled={pending}
-                      style={{ position: 'absolute', top: 4, right: 4 }}
-                      onClick={() => toggleExcluded(p.assetId, !p.excluded)}
-                    >
-                      {p.excluded ? <IconEye size={14} /> : <IconEyeOff size={14} />}
-                    </ActionIcon>
-                  </Tooltip>
-                )}
-                {!p.metaSettled && (
-                  <Badge
-                    size="xs"
-                    variant="light"
-                    color="gray"
-                    style={{ position: 'absolute', bottom: 4, left: 4 }}
-                  >
-                    {tp.analyzing}
-                  </Badge>
-                )}
-                {p.metaFailed && (
-                  <Badge
-                    size="xs"
-                    variant="light"
-                    color="red"
-                    style={{ position: 'absolute', bottom: 4, left: 4 }}
-                  >
-                    {tp.analysisFailed}
-                  </Badge>
-                )}
-              </Box>
-            ))}
-          </SimpleGrid>
-        )}
-      </Card>
-
-      <Card withBorder radius="md" p="md">
-        <Group justify="space-between" mb="sm" wrap="wrap">
-          <Title order={4}>{tp.preview}</Title>
-          <Anchor href={`/api/books/${book.id}/preview-html`} target="_blank" fz={13}>
-            <Group gap={4}>
-              <IconExternalLink size={14} />
-              {tb.openInNewTab}
-            </Group>
-          </Anchor>
-        </Group>
-        <Text fz={12} c="dimmed" mb="sm">
-          {tp.previewHint}
-        </Text>
-
-        <Text fz={13} fw={500} mb={6}>
-          {tp.style}
-        </Text>
-        <Group gap={8} mb="md">
-          {PHOTO_BOOK_STYLES.map((style) => (
-            <Button
-              key={style}
-              size="compact-sm"
-              variant={style === book.style ? 'filled' : 'default'}
-              disabled={locked || pending}
-              onClick={() => setStyle(style)}
-            >
-              {tp.styleNames[style]}
-            </Button>
-          ))}
-        </Group>
-
-        <Group mb="sm">
-          <Tooltip label={tb.designBookHint} disabled={locked}>
-            <Button
-              variant="light"
-              size="sm"
-              leftSection={<IconSparkles size={16} />}
-              loading={book.designing}
-              disabled={locked || totalCount === 0 || designPending}
-              onClick={designBook}
-            >
-              {book.designing ? tb.designingBook : tb.designBook}
-            </Button>
-          </Tooltip>
-          <Tooltip label={tp.regenerateHint} disabled={locked}>
-            <Button
-              variant="light"
-              size="sm"
-              leftSection={<IconSparkles size={16} />}
-              loading={regenerating}
-              disabled={locked || totalCount === 0}
-              onClick={regenerate}
-            >
-              {regenerating ? tp.regenerating : tp.regenerate}
-            </Button>
-          </Tooltip>
-        </Group>
-
-        {settledCount > 0 ? (
-          <Box
-            component="iframe"
-            key={book.previewVersion}
-            src={`/api/books/${book.id}/preview-html?v=${book.previewVersion}`}
-            style={{
-              width: '100%',
-              height: 560,
-              border: '1px solid var(--mantine-color-slate-2)',
-              borderRadius: 8,
-              background: '#fff',
-            }}
-            title={tp.preview}
+      {/* `keepMounted`: each step's content stays mounted (just hidden) instead of
+          unmounting when you navigate away — the upload progress bar and the chat
+          conversation (both local component state, nothing persisted server-side, see
+          PhotoBookChat's doc comment) survive moving back and forth between steps. */}
+      <Stepper active={step} onStepClick={goToStep} mb="lg" allowNextStepsSelect={false} keepMounted>
+        <Stepper.Step label={tp.steps.upload} description={tp.stepUploadDescription}>
+          <PhotoBookUploadStep
+            bookId={book.id}
+            photos={photos}
+            locked={locked}
+            pending={pending}
+            onToggleExcluded={toggleExcluded}
+            settledCount={settledCount}
+            totalCount={totalCount}
+            analysisComplete={analysisComplete}
+            onNext={() => goToStep(1)}
           />
-        ) : (
-          <Stack align="center" gap={4} py="xl">
-            <IconPhoto size={28} stroke={1.4} color="var(--mantine-color-slate-4)" />
-            <Text c="dimmed" ta="center">
-              {tp.waitingForPhotos}
-            </Text>
-          </Stack>
-        )}
-      </Card>
-
-      {/* ── Full-width AI chat: the way to change the book beyond the settings ── */}
-      <PhotoBookChat bookId={book.id} locked={locked} />
+        </Stepper.Step>
+        <Stepper.Step label={tp.steps.create} description={tp.stepCreateDescription}>
+          <PhotoBookCreateStep
+            bookId={book.id}
+            book={book}
+            photos={photos}
+            locked={locked}
+            pending={pending}
+            onToggleExcluded={toggleExcluded}
+            regenerating={regenerating}
+            onRegenerate={regenerate}
+            designPending={designPending}
+            onDesignBook={designBook}
+            onSetStyle={setStyle}
+            onBack={() => setStep(0)}
+            onNext={() => goToStep(2)}
+          />
+        </Stepper.Step>
+        <Stepper.Step label={tp.steps.order} description={tp.stepOrderDescription}>
+          <PhotoBookOrderStep
+            order={order}
+            quote={quote}
+            contactEmail={contactEmail}
+            totalCount={totalCount}
+            downloadPdf={downloadPdf}
+            downloadRequesting={downloadRequesting}
+            awaitingDownload={awaitingDownload}
+            onBack={() => setStep(1)}
+          />
+        </Stepper.Step>
+      </Stepper>
 
       <Modal
         opened={deleteOpen}
@@ -579,6 +479,6 @@ export function PhotoBookBuilder({
           </Button>
         </Group>
       </Modal>
-    </Stack>
+    </Box>
   );
 }

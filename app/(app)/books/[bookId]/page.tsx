@@ -5,6 +5,7 @@ import { db } from '@/db';
 import { assets } from '@/db/schema';
 import { requireUser } from '@/lib/session';
 import {
+  estimatePageCount,
   getBookForUser,
   getBookLayoutSummary,
   getPhotoBookStyle,
@@ -12,9 +13,13 @@ import {
   readyStoriesForChronicle,
 } from '@/lib/books';
 import { loadStoryAccessContext } from '@/lib/story-access';
+import { isBookPrintFresh } from '@/lib/book-print-status';
+import { quoteBookPrice, FORMAT_LABELS } from '@/lib/gelato';
+import { env } from '@/lib/env';
 import { presignGet } from '@/lib/s3';
 import { BookBuilder, type CoverOption } from './book-builder';
 import { PhotoBookBuilder, type PhotoBookPhotoView } from './photo-book-builder';
+import type { OrderBook } from './order/order-view';
 
 export default async function BookBuilderPage({
   params,
@@ -45,8 +50,36 @@ export default async function BookBuilderPage({
         metaFailed: p.metaFailed,
       })),
     );
+
+    // Step 3 ("Bestellen") embeds the same quote/mailto screen the standalone
+    // `/books/[bookId]/order` route shows (`order/page.tsx`) — computed here too so the
+    // builder page doesn't have to redirect there just to price the book. Mirrors that
+    // route's own `fresh`/`pageCount`/`quote` logic exactly (see its comments for why
+    // `layoutStale` matters for photo books specifically).
+    const fresh = isBookPrintFresh('photo', book.status, book.layoutStale);
+    const pageCount = fresh && book.pageCount != null ? book.pageCount : await estimatePageCount(book);
+    const quote = fresh ? await quoteBookPrice({ format: book.format, pageCount }) : null;
+    const photoCount = photos.filter((p) => !p.excluded).length;
+    const order: OrderBook = {
+      id: book.id,
+      title: book.title,
+      kind: book.kind,
+      format: book.format,
+      formatLabel: FORMAT_LABELS[book.format],
+      pageCount,
+      storyCount: 0,
+      photoCount,
+      status: book.status,
+      layoutStale: book.layoutStale,
+      errorMessage: book.errorMessage,
+      // Photo books have no hidden-chapter concept (docs/PHOTO_BOOK_PLAN.md §2 — every
+      // chronicle member with book access sees every photo), always false.
+      accessBlocked: false,
+      hasPrint: Boolean(book.printS3Key),
+    };
+
     return (
-      <Box p="lg" maw={1200} mx="auto">
+      <Box p="lg" maw={1500} mx="auto">
         <PhotoBookBuilder
           book={{
             id: book.id,
@@ -61,6 +94,9 @@ export default async function BookBuilderPage({
             hasPrint: Boolean(book.printS3Key),
           }}
           photos={photos}
+          order={order}
+          quote={quote}
+          contactEmail={env.BOOK_ORDER_CONTACT_EMAIL}
         />
       </Box>
     );

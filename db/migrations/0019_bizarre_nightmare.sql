@@ -1,0 +1,1 @@
+ALTER TABLE "book_photos" ADD COLUMN "user_decision" text;

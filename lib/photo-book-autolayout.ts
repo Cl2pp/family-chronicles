@@ -24,10 +24,18 @@ import type { PhotoBookPlan, PhotoBookStyle, PhotoPagePlan, PhotoSectionPlan } f
  * `buildLayoutPlan`) while still giving the "excluded ≠ deleted, one tap to re-include"
  * UX the plan calls for — and once persisted, an omitted photo is `excluded = true` in
  * the DB, so the NEXT call to this function (fed only `book_photos.excluded = false`
- * rows by the loader) never sees it again and can't re-cull it in an endless loop; a
- * user explicitly re-including it makes it eligible for culling again on the next
- * rebuild, which is the correct behavior (maybe the "duplicate" it used to lose to was
- * itself excluded by the user in the meantime).
+ * rows by the loader) never sees it again.
+ *
+ * A user's manual re-include is NOT just "excluded = false" though — without a separate
+ * marker, the very next rebuild would run this photo back through the same cullers that
+ * excluded it in the first place (still a duplicate, still blurry) and silently exclude it
+ * again, which is exactly the bug `userDecision` fixes: `book_photos.user_decision` records
+ * the user's OWN choice, independent of `excluded`, and a photo with `userDecision:
+ * 'include'` (see `AutoLayoutPhoto.userDecision`) is immune to every culler below no matter
+ * what its scores/hashes say — "the user insisted" always wins. A photo with `userDecision:
+ * 'exclude'` is dropped before culling even runs (it isn't a *cull*, the user already
+ * decided) and never resurfaces on its own. Only photos with no explicit decision
+ * (`userDecision` unset) are subject to automatic culling, exactly as before.
  */
 
 export interface AutoLayoutPhoto {
@@ -53,6 +61,22 @@ export interface AutoLayoutPhoto {
    *  reads this treats its absence as "no opinion", not as a bad score — see the module
    *  header comment. */
   analysis?: PhotoAnalysis | null;
+  /** The user's own explicit include/exclude choice (`book_photos.user_decision`),
+   *  independent of everything else here — `undefined`/`null` means "no explicit choice,
+   *  auto-culling decides" (the PR2/PR3 behavior, unchanged). `'include'` makes a photo
+   *  IMMUNE to every culler below (duplicate/blurry/eyes-closed/low-quality) — the user
+   *  explicitly asked for it back, so it must survive a rebuild even if it would
+   *  otherwise be culled again. `'exclude'` is filtered out before culling even runs (see
+   *  `buildPhotoBookAutoLayout`) — defense in depth, since a force-excluded photo should
+   *  already have `excluded = true` and never reach this input at all (the loader only
+   *  ever passes `excluded = false` rows — see `buildAndPersistPhotoAutoPlan`). */
+  userDecision?: 'include' | 'exclude' | null;
+}
+
+/** True when the user has explicitly pinned this photo IN — it must survive every
+ *  culler below no matter what its scores/hashes say. */
+function isForceIncluded(p: AutoLayoutPhoto): boolean {
+  return p.userDecision === 'include';
 }
 
 export interface PhotoBookAutoLayoutInput {
@@ -296,6 +320,10 @@ function cullDuplicates(photos: AutoLayoutPhoto[]): { keep: AutoLayoutPhoto[]; c
       .slice()
       .sort((a, b) => (b.blurScore ?? -Infinity) - (a.blurScore ?? -Infinity) || a.position - b.position);
     for (const loser of sorted.slice(1)) {
+      // A force-included loser stays — the user insisted on this exact photo, duplicate
+      // or not (docs/PHOTO_BOOK_PLAN.md re-include fix). The cluster's winner is
+      // unaffected either way, so this can leave both in the book, which is correct.
+      if (isForceIncluded(loser)) continue;
       culledIds.add(loser.assetId);
       culled.push({ assetId: loser.assetId, reason: 'duplicate' });
     }
@@ -318,6 +346,7 @@ function cullBlurry(photos: AutoLayoutPhoto[]): { keep: AutoLayoutPhoto[]; culle
   for (const p of photos) {
     if (p.blurScore == null) continue;
     if (survivorCount <= MIN_SURVIVORS) break;
+    if (isForceIncluded(p)) continue;
     if (p.blurScore < maxBlur * BLUR_RELATIVE_THRESHOLD) {
       culledIds.add(p.assetId);
       culled.push({ assetId: p.assetId, reason: 'blurry' });
@@ -358,7 +387,7 @@ function cullEyesClosed(
   let survivorCount = photos.length;
   for (const p of photos) {
     if (survivorCount <= MIN_SURVIVORS) break;
-    if (p.assetId === protectedId) continue;
+    if (p.assetId === protectedId || isForceIncluded(p)) continue;
     if (p.analysis?.eyesClosed === true) {
       culledIds.add(p.assetId);
       culled.push({ assetId: p.assetId, reason: 'eyes-closed' });
@@ -405,7 +434,7 @@ function cullLowAesthetic(
 
   const surplus = photos.length - MAX_SCORED_SECTION_PHOTOS;
   const sorted = photos
-    .filter((p) => p.assetId !== protectedId)
+    .filter((p) => p.assetId !== protectedId && !isForceIncluded(p))
     .sort(
       (a, b) =>
         (a.analysis?.aestheticScore ?? NEUTRAL_AESTHETIC_SCORE) -
@@ -540,7 +569,15 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   const locale = input.dateLocale ?? 'de-DE';
   const undatedTitle = input.undatedSectionTitle ?? 'Weitere Fotos';
 
-  const groups = computeCandidateSections(input.photos);
+  // A force-excluded photo is dropped before anything else runs — it must never be
+  // sectioned, culled (it's not a "cull", the user already decided), placed, or picked as
+  // cover. In practice the loader (`buildAndPersistPhotoAutoPlan`) only ever passes
+  // `excluded = false` rows, so `userDecision === 'exclude'` alongside `excluded === false`
+  // shouldn't occur — this filter is defense in depth so the pure function's own contract
+  // ("a force-excluded photo is ALWAYS excluded") holds regardless of caller behavior.
+  const usablePhotos = input.photos.filter((p) => p.userDecision !== 'exclude');
+
+  const groups = computeCandidateSections(usablePhotos);
 
   // Resolved up front (before any culling runs) so the score-aware cullers below can
   // protect it from their own candidacy — see `cullEyesClosed`'s doc comment for why. A

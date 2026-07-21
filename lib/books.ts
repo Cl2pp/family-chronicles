@@ -815,6 +815,12 @@ export async function setPhotoExcluded(input: {
     .set({
       excluded: input.excluded,
       excludedReason: input.excluded ? 'user' : null,
+      // Root-cause fix for "excluding then re-including a photo doesn't stick": this is
+      // the USER's own explicit decision, recorded independently of `excluded` itself, so
+      // the next auto-layout rebuild (`buildAndPersistPhotoAutoPlan`) knows a re-included
+      // duplicate/blurry photo must survive culling rather than being silently excluded
+      // again (see `lib/photo-book-autolayout.ts`'s module header).
+      userDecision: input.excluded ? 'exclude' : 'include',
       updatedAt: new Date(),
     })
     .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.assetId, input.assetId)))
@@ -1215,7 +1221,16 @@ export async function updatePhotoBookLayout(input: {
     for (const [assetId, excluded] of exclusionChanges) {
       await tx
         .update(bookPhotos)
-        .set({ excluded, excludedReason: excluded ? 'user' : null, updatedAt: new Date() })
+        .set({
+          excluded,
+          excludedReason: excluded ? 'user' : null,
+          // Same user-decision marker as `setPhotoExcluded` above — a chat
+          // exclude_photo/include_photo op is just as much the user's own explicit
+          // choice as the builder's toggle, and must survive a later regenerate/AI
+          // design pass the same way.
+          userDecision: excluded ? 'exclude' : 'include',
+          updatedAt: new Date(),
+        })
         .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.assetId, assetId)));
     }
     const set: Partial<typeof books.$inferInsert> = {

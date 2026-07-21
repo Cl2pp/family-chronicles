@@ -877,3 +877,115 @@ describe('buildPhotoBookAutoLayout — FIX 1: pinned/carried-over hero survives 
     assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
   });
 });
+
+describe('buildPhotoBookAutoLayout — userDecision overrides (re-include fix regression)', () => {
+  it('a force-included ("include") near-duplicate survives, alongside its cluster winner', () => {
+    const photos = [
+      photo({ assetId: 'sharp', position: 0, takenAt: new Date(t0), phash: 'aaaaaaaaaaaaaaaa', blurScore: 200 }),
+      photo({
+        assetId: 'blurry-dup',
+        position: 1,
+        takenAt: new Date(t0 + 60_000),
+        phash: 'aaaaaaaaaaaaaaaa',
+        blurScore: 50,
+        userDecision: 'include',
+      }),
+    ];
+    const { plan, culled } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'sharp' });
+    expect(culled).toEqual([]);
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    expect(placed).toContain('blurry-dup');
+    expect(checkPhotoBookPlanConsistency(plan, {
+      availableAssetIds: photos.map((p) => p.assetId),
+      allAssetIds: photos.map((p) => p.assetId),
+    })).toEqual([]);
+  });
+
+  it('a force-included ("include") clearly-blurry photo survives blur culling', () => {
+    const photos = [
+      photo({ assetId: 'sharp1', position: 0, takenAt: new Date(t0), blurScore: 100 }),
+      photo({ assetId: 'sharp2', position: 1, takenAt: new Date(t0 + 60_000), blurScore: 90 }),
+      photo({
+        assetId: 'blurry',
+        position: 2,
+        takenAt: new Date(t0 + 120_000),
+        blurScore: 5,
+        userDecision: 'include',
+      }),
+    ];
+    const { culled, plan } = buildPhotoBookAutoLayout(baseInput(photos));
+    expect(culled).toEqual([]);
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    expect(placed).toContain('blurry');
+  });
+
+  it('a force-included ("include") eyes-closed photo survives, with an open-eyed sibling present', () => {
+    const photos = [
+      photo({ assetId: 'open', position: 0, takenAt: new Date(t0), analysis: analysis({ eyesClosed: false }) }),
+      photo({
+        assetId: 'closed',
+        position: 1,
+        takenAt: new Date(t0 + 60_000),
+        analysis: analysis({ eyesClosed: true }),
+        userDecision: 'include',
+      }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'open' });
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    expect(placed).toContain('closed');
+  });
+
+  it('a force-included ("include") low-aesthetic photo survives the oversized-section surplus cull', () => {
+    const photos = Array.from({ length: 45 }, (_, i) => {
+      const assetId = i === 0 ? 'forced-low' : `p${i}`;
+      return photo({
+        assetId,
+        position: i,
+        takenAt: new Date(t0 + i * HOUR),
+        // Every other photo outscores the forced one, so it would be the very first
+        // pick for the low-aesthetic surplus cull if it weren't protected.
+        analysis: analysis({ aestheticScore: i === 0 ? -1 : i }),
+        userDecision: i === 0 ? 'include' : undefined,
+      });
+    });
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), coverAssetId: 'p1' };
+    const { plan, culled } = buildPhotoBookAutoLayout(input);
+    expect(culled.some((c) => c.assetId === 'forced-low')).toBe(false);
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    expect(placed).toContain('forced-low');
+  });
+
+  it('a force-excluded ("exclude") photo is never placed, even as the only/best candidate', () => {
+    const photos = [
+      photo({
+        assetId: 'excluded-best',
+        position: 0,
+        takenAt: new Date(t0),
+        width: 4000,
+        height: 3000,
+        userDecision: 'exclude',
+      }),
+      photo({ assetId: 'kept', position: 1, takenAt: new Date(t0 + 60_000), width: 800, height: 600 }),
+    ];
+    const { plan, culled } = buildPhotoBookAutoLayout(baseInput(photos));
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    expect(placed).not.toContain('excluded-best');
+    expect(plan.cover.heroAssetId).not.toBe('excluded-best');
+    // Force-exclusion isn't a "cull" the layouter reports/persists — the photo is simply
+    // never considered, so it's absent from `culled` too (it already has excluded=true
+    // upstream in the DB; nothing further needs writing for it).
+    expect(culled.some((c) => c.assetId === 'excluded-best')).toBe(false);
+  });
+
+  it('a photo with no explicit userDecision (undefined/null) still auto-culls exactly as before', () => {
+    const photosUndefined = [
+      photo({ assetId: 'sharp', position: 0, takenAt: new Date(t0), phash: 'aaaaaaaaaaaaaaaa', blurScore: 200 }),
+      photo({ assetId: 'blurry-dup', position: 1, takenAt: new Date(t0 + 60_000), phash: 'aaaaaaaaaaaaaaaa', blurScore: 50 }),
+    ];
+    const photosNull: AutoLayoutPhoto[] = photosUndefined.map((p) => ({ ...p, userDecision: null }));
+    for (const photos of [photosUndefined, photosNull]) {
+      const { culled } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'sharp' });
+      expect(culled).toEqual([{ assetId: 'blurry-dup', reason: 'duplicate' }]);
+    }
+  });
+});

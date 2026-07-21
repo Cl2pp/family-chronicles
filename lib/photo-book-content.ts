@@ -33,6 +33,10 @@ export interface PhotoBookPhotoRef {
   position: number;
   excluded: boolean;
   excludedReason: string | null;
+  /** The user's own explicit include/exclude choice (`book_photos.user_decision`) —
+   *  `null` means no explicit choice, auto-culling decides (docs/PHOTO_BOOK_PLAN.md
+   *  re-include fix, see `lib/photo-book-autolayout.ts`'s module header). */
+  userDecision: 'include' | 'exclude' | null;
   takenAt: Date | null;
   gpsLat: number | null;
   gpsLng: number | null;
@@ -71,6 +75,7 @@ export async function loadPhotoBook(bookId: string): Promise<LoadedPhotoBook> {
       position: bookPhotos.position,
       excluded: bookPhotos.excluded,
       excludedReason: bookPhotos.excludedReason,
+      userDecision: bookPhotos.userDecision,
       takenAt: bookPhotos.takenAt,
       gpsLat: bookPhotos.gpsLat,
       gpsLng: bookPhotos.gpsLng,
@@ -85,8 +90,20 @@ export async function loadPhotoBook(bookId: string): Promise<LoadedPhotoBook> {
 
   return {
     row,
-    photos: rows.map((r) => ({ ...r, analysis: parseStoredPhotoAnalysis(r.analysis) })),
+    photos: rows.map((r) => ({
+      ...r,
+      userDecision: normalizeUserDecision(r.userDecision),
+      analysis: parseStoredPhotoAnalysis(r.analysis),
+    })),
   };
+}
+
+/** `book_photos.user_decision` is an untyped `text` column (like `excluded_reason`) — this
+ *  narrows a stored value down to the two the app ever writes, so a stray/legacy value
+ *  degrades to "no explicit choice" instead of typing as something the rest of the code
+ *  never expects. */
+function normalizeUserDecision(value: string | null): 'include' | 'exclude' | null {
+  return value === 'include' || value === 'exclude' ? value : null;
 }
 
 /** A plan with no cover hero and no sections — used as a last-resort fallback if the
@@ -165,6 +182,7 @@ export async function buildAndPersistPhotoAutoPlan(
       phash: p.phash,
       blurScore: p.blurScore,
       analysis: p.analysis,
+      userDecision: p.userDecision,
     }));
 
   const existing = row.layoutPlan ? validatePhotoBookPlan(row.layoutPlan) : null;

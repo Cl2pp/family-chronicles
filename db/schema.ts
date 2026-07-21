@@ -573,6 +573,18 @@ export const bookPhotos = pgTable(
     excluded: boolean('excluded').notNull().default(false),
     /** 'duplicate' | 'blurry' | 'eyes-closed' | 'low-quality' | 'user' */
     excludedReason: text('excluded_reason'),
+    /** The USER's own explicit choice, independent of `excluded`/`excludedReason` above —
+     *  'include' | 'exclude' | null (null = no explicit choice, auto-culling decides).
+     *  This is what makes a manual re-include stick: without it, `excluded` alone can't
+     *  tell "the user asked for this photo back" apart from "never touched", so the next
+     *  auto-layout rebuild (`buildAndPersistPhotoAutoPlan`) would re-cull a re-included
+     *  duplicate/blurry photo right back to `excluded = true`. `'include'` makes a photo
+     *  immune to auto-culling (duplicate/blurry/eyes-closed/low-quality) even if it would
+     *  otherwise be culled; `'exclude'` keeps a photo out permanently, same as today.
+     *  Written by `setPhotoExcluded` and the chat agent's `exclude_photo`/`include_photo`
+     *  ops (`updatePhotoBookLayout`) — never by the auto-layouter or the AI design pass,
+     *  which only ever READ it. */
+    userDecision: text('user_decision'),
     /** EXIF capture metadata, extracted server-side (authoritative) by `photo-meta`. */
     takenAt: timestamp('taken_at'),
     gpsLat: doublePrecision('gps_lat'),

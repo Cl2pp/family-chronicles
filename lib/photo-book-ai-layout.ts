@@ -16,6 +16,7 @@ import {
   type PhotoBookPlan,
   type PhotoPlanContent,
 } from '@/lib/photo-book-plan';
+import { referencedPhotoAssetIds } from '@/lib/photo-book-content';
 
 /**
  * The photo-book AI design pass (docs/PHOTO_BOOK_PLAN.md §6, producer #2) — the
@@ -63,10 +64,16 @@ function orientation(width: number, height: number): 'landscape' | 'portrait' | 
  *  hero/opener selection, so the photos the model gets to actually SEE are the ones most
  *  likely to matter for its hero/opener choices. */
 function visionRank(photo: AutoLayoutPhoto): number {
+  // A force-included photo (docs/PHOTO_BOOK_PLAN.md re-include fix) always wins the pick —
+  // the user explicitly asked for it, so if it can ride along as an actual image within
+  // the MAX_VISION_IMAGES cap, it should, giving the model the best shot at actually
+  // placing it (see the completeness check in `proposePhotoBookPlan` below, which falls
+  // back to the auto layout if the model leaves a force-included photo out anyway).
+  const forced = photo.userDecision === 'include' ? 1_000_000 : 0;
   const cover = photo.analysis?.coverCandidate ? 1 : 0;
   const aesthetic = photo.analysis?.aestheticScore ?? NEUTRAL_RANK_SCORE;
   const resolutionTiebreak = (photo.width * photo.height) / 1e8; // sub-1 nudge, never flips a real ranking
-  return cover * 1000 + aesthetic * 10 + resolutionTiebreak;
+  return forced + cover * 1000 + aesthetic * 10 + resolutionTiebreak;
 }
 
 /** Picks which photos get sent as actual vision input, capped and spread across the
@@ -149,6 +156,7 @@ const HARD_RULES = `Hard rules — a plan that breaks any of these will be disca
 - Every section must have at least one page.
 - A page's "assetIds" length must exactly match its template's photo count (see the template list).
 - If "captions" is present on a page, it must have exactly as many entries as "assetIds".
+- Any photo marked "[MUST BE INCLUDED — the user manually re-added this photo]" in the photo list below MUST appear somewhere in your plan (as the cover hero, a cover back photo, or on a section page) — never leave one of these out, no matter how weak/blurry/redundant it looks. This is a hard requirement, not a suggestion: a plan missing one of these photos is discarded just like an invalid one.
 - Output ONLY the JSON object. No markdown code fences, no explanation before or after, nothing but the JSON.`;
 
 /** Fetches the chronicle's story-language setting (`chronicles.story_language`) for a
@@ -192,7 +200,9 @@ function photoTableLine(photo: AutoLayoutPhoto, clusterIndex: number): string {
   const analysisText = a
     ? `aesthetic ${a.aestheticScore.toFixed(1)}, ${a.sharpness}, eyesClosed=${a.eyesClosed}, people=${a.peopleCount}, cover=${a.coverCandidate}, tags=[${a.sceneTags.join(', ')}], "${a.shortDescription}"`
     : 'not yet scored';
-  return `  - assetId: ${photo.assetId}, taken: ${taken}, gps: ${gps}, cluster: ${clusterIndex}, size: ${size}, ${analysisText}`;
+  // See the HARD_RULES entry this exact phrase is matched against in the system prompt.
+  const forcedTag = photo.userDecision === 'include' ? ' [MUST BE INCLUDED — the user manually re-added this photo]' : '';
+  return `  - assetId: ${photo.assetId}, taken: ${taken}, gps: ${gps}, cluster: ${clusterIndex}, size: ${size}, ${analysisText}${forcedTag}`;
 }
 
 /** Converts a `PhotoBookPhotoRef` (as loaded by `loadPhotoBook`) into the shape
@@ -215,6 +225,7 @@ function toAutoLayoutPhotos(
       phash: p.phash,
       blurScore: p.blurScore,
       analysis: p.analysis,
+      userDecision: p.userDecision,
       s3Key: p.s3Key,
       thumbS3Key: p.thumbS3Key,
     }));
@@ -365,6 +376,29 @@ export async function proposePhotoBookPlan(bookId: string): Promise<PhotoBookPla
     if (problems.length > 0) {
       console.error(`[photo-book-ai-layout] design pass for ${bookId} failed consistency check:`, problems);
       return null;
+    }
+
+    // Completeness check for force-included photos (docs/PHOTO_BOOK_PLAN.md re-include
+    // fix): unlike the deterministic auto-layouter, this is a model's free-form judgment
+    // call, and HARD_RULES telling it a photo "MUST BE INCLUDED" is a strong hint, not a
+    // guarantee — `checkPhotoBookPlanConsistency` above only verifies the model didn't
+    // reference anything it shouldn't, not that it placed everything it was told to. A
+    // force-included photo the model still left out breaks the "the user insisted"
+    // contract just as much as an invalid plan would, so this is treated the same way:
+    // discard and fall back to `buildAndPersistPhotoAutoPlan`, which — thanks to the same
+    // `userDecision` threading in `lib/photo-book-autolayout.ts` — is guaranteed to place
+    // every force-included photo somewhere.
+    const forcedIncludeIds = available.filter((p) => p.userDecision === 'include').map((p) => p.assetId);
+    if (forcedIncludeIds.length > 0) {
+      const referenced = referencedPhotoAssetIds(plan);
+      const missing = forcedIncludeIds.filter((id) => !referenced.has(id));
+      if (missing.length > 0) {
+        console.error(
+          `[photo-book-ai-layout] design pass for ${bookId} omitted ${missing.length} force-included photo(s), discarding:`,
+          missing,
+        );
+        return null;
+      }
     }
 
     return plan;

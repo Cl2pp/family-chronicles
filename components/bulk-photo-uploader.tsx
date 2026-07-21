@@ -1,9 +1,9 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useRef, useState, type DragEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { Alert, Button, Group, Progress, Stack, Text } from '@mantine/core';
-import { IconAlertCircle, IconPhotoPlus } from '@tabler/icons-react';
+import { Alert, Box, Button, Group, Progress, Stack, Text } from '@mantine/core';
+import { IconAlertCircle, IconPhotoPlus, IconUpload } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
 import { MAX_PHOTOS_PER_BOOK, PHOTO_ACCEPT, readDimensions } from '@/lib/uploads';
 import { readClientExif } from '@/lib/exif-client';
@@ -23,7 +23,9 @@ const MAX_RETRIES = 2;
  * dimensions + EXIF client-side, uploads straight to storage via presigned PUTs
  * through a bounded concurrency pool (so a 150–300 file selection never blocks the
  * main thread or opens hundreds of connections at once), and registers finished
- * uploads with `addBookPhotos` in batches.
+ * uploads with `addBookPhotos` in batches. A native HTML5 drag-and-drop zone sits
+ * alongside the click-to-select button — both funnel into the exact same
+ * `handleFiles`/upload pipeline, just a different source of `FileList`/`File[]`.
  */
 export function BulkPhotoUploader({ bookId }: { bookId: string }) {
   const { t } = useI18n();
@@ -34,6 +36,8 @@ export function BulkPhotoUploader({ bookId }: { bookId: string }) {
   const [total, setTotal] = useState(0);
   const [settled, setSettled] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounter = useRef(0);
 
   async function uploadWithRetry(url: string, mimeType: string, file: File, attempt = 0): Promise<void> {
     try {
@@ -46,8 +50,12 @@ export function BulkPhotoUploader({ bookId }: { bookId: string }) {
     }
   }
 
-  async function handleFiles(fileList: FileList | null) {
+  async function handleFiles(fileList: FileList | File[] | null) {
     if (!fileList || fileList.length === 0) return;
+    // Same pipeline for both sources (click-to-select and drag-and-drop) — a dropped
+    // non-image file isn't pre-filtered here; it goes through the exact same per-file
+    // presign validation as a picked one, so it surfaces via the existing
+    // `invalidSkipped` message instead of silently vanishing.
     const capped = fileList.length > MAX_PHOTOS_PER_BOOK;
     const files = Array.from(fileList).slice(0, MAX_PHOTOS_PER_BOOK);
     setBusy(true);
@@ -140,6 +148,34 @@ export function BulkPhotoUploader({ bookId }: { bookId: string }) {
     }
   }
 
+  // Native HTML5 drag-and-drop — no `@mantine/dropzone` dependency (not currently
+  // installed; this keeps the bundle/build untouched). `dragCounter` tracks nested
+  // enter/leave pairs (the drop zone has child elements, so the browser fires
+  // dragenter/dragleave once per child boundary crossed, not just once for the zone as a
+  // whole) so the highlighted state doesn't flicker off while the pointer is still over a
+  // child.
+  function handleDragEnter(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    if (busy) return;
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes('Files')) setDragOver(true);
+  }
+  function handleDragOver(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+  }
+  function handleDragLeave(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    dragCounter.current = Math.max(0, dragCounter.current - 1);
+    if (dragCounter.current === 0) setDragOver(false);
+  }
+  function handleDrop(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setDragOver(false);
+    if (busy) return;
+    void handleFiles(e.dataTransfer.files);
+  }
+
   return (
     <Stack gap="xs">
       <input
@@ -153,20 +189,57 @@ export function BulkPhotoUploader({ bookId }: { bookId: string }) {
           e.currentTarget.value = '';
         }}
       />
-      <Group>
-        <Button
-          leftSection={<IconPhotoPlus size={16} />}
-          loading={busy}
-          onClick={() => fileRef.current?.click()}
-        >
-          {tp.addPhotos}
-        </Button>
-        {busy && total > 0 && (
+      <Box
+        role="button"
+        tabIndex={0}
+        aria-label={tp.dropzoneTitle}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        onClick={() => !busy && fileRef.current?.click()}
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && !busy) fileRef.current?.click();
+        }}
+        style={{
+          border: `2px dashed var(--mantine-color-${dragOver ? 'brand-5' : 'slate-3'})`,
+          borderRadius: 'var(--mantine-radius-md)',
+          padding: 'var(--mantine-spacing-lg)',
+          textAlign: 'center',
+          cursor: busy ? 'default' : 'pointer',
+          backgroundColor: dragOver ? 'var(--mantine-color-brand-0)' : 'transparent',
+          opacity: busy ? 0.6 : 1,
+          transition: 'background-color 120ms ease, border-color 120ms ease',
+        }}
+      >
+        <Stack align="center" gap={4}>
+          <IconUpload size={26} stroke={1.4} color="var(--mantine-color-slate-5)" />
+          <Text fw={500} fz={14}>
+            {tp.dropzoneTitle}
+          </Text>
+          <Text fz={12} c="dimmed">
+            {tp.dropzoneHint}
+          </Text>
+          <Button
+            mt={6}
+            leftSection={<IconPhotoPlus size={16} />}
+            loading={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              fileRef.current?.click();
+            }}
+          >
+            {tp.addPhotos}
+          </Button>
+        </Stack>
+      </Box>
+      {busy && total > 0 && (
+        <Group>
           <Text fz={13} c="dimmed">
             {tp.uploadProgress(settled, total)}
           </Text>
-        )}
-      </Group>
+        </Group>
+      )}
       {busy && total > 0 && <Progress value={(settled / total) * 100} size="sm" />}
       {error && (
         <Alert color="red" icon={<IconAlertCircle size={16} />}>

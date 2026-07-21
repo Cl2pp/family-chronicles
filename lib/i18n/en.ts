@@ -669,6 +669,25 @@ export const en = {
       overwriteEditsConfirm: 'Replace edits',
       overwriteEditsCancel: 'Cancel',
       photoBook: {
+        steps: {
+          upload: 'Upload photos',
+          create: 'Create book',
+          order: 'Order',
+        },
+        stepUploadDescription: 'Add and review your photos',
+        stepCreateDescription: 'Design the layout with AI',
+        stepOrderDescription: 'Download or order',
+        next: 'Next',
+        back: 'Back',
+        waitingForAnalysis: 'Wait until every photo has been analyzed before continuing.',
+        dropzoneTitle: 'Drag photos here',
+        dropzoneHint: 'or click to choose files from your device',
+        collapseChat: 'Collapse chat',
+        expandChat: 'Expand chat',
+        showChatMobile: 'Show AI chat',
+        hideChatMobile: 'Hide AI chat',
+        orderStepIntro:
+          'This is where you\'ll be able to order a printed copy soon — for now, download the full-resolution PDF below and (optionally) request a quote by email.',
         addPhotos: 'Add photos',
         uploadProgress: (done: number, total: number) => `${done} / ${total} uploaded`,
         someFailed: (n: number) =>
