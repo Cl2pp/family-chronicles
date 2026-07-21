@@ -124,6 +124,8 @@ to `main` now deploys automatically.
 
 - The image is shared by both apps; only the start command differs (`npm run start` vs
   `npm run worker`). Keep them on the same env vars.
-- First deploy: run `npm run db:migrate` once (the web container also runs this on every startup;
-  it's a no-op when there's nothing new).
+- Migrations are **automatic on every deploy** — the web container runs `npm run db:migrate` on
+  startup and Drizzle skips already-applied ones. For a normal change you just commit the
+  generated migration and push `main`; you do **not** run `db:migrate` against prod by hand.
+  (Only exception: the very first deploy, or break-glass recovery, may run it once manually.)
 - `cax21` is ARM — the stack is all JS, so it builds and runs natively on ARM.
