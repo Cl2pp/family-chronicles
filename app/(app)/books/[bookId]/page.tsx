@@ -55,6 +55,7 @@ export default async function BookBuilderPage({
             style: styleResult.ok ? styleResult.value.style : 'classic',
             previewVersion: book.updatedAt.getTime(),
             designing: book.designRequestedAt != null,
+            layoutSource: book.layoutSource,
           }}
           photos={photos}
         />

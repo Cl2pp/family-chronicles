@@ -28,13 +28,15 @@ import {
   type LayoutOp,
 } from '@/lib/books';
 import type { PhotoBookStyle } from '@/lib/photo-book-plan';
-import { runBookAgent, type ChatTurn } from '@/lib/ai/agent';
+import { runBookAgent, runPhotoBookAgent, type ChatTurn } from '@/lib/ai/agent';
 import type { Receipt, ToolContext } from '@/lib/ai/tools';
 import { getI18n } from '@/lib/i18n/server';
 import type { BookFormat } from '@/lib/gelato';
 import { captureServerEvent } from '@/lib/posthog-server';
-import { buildKey, presignPut } from '@/lib/s3';
+import { buildKey, getObjectBuffer, presignPut } from '@/lib/s3';
 import { validateUpload } from '@/lib/uploads';
+import { transcribeAudio } from '@/lib/ai/groq';
+import { compressForTranscription, TRANSCRIBE_COMPRESS_THRESHOLD_BYTES } from '@/lib/transcode';
 
 /** UI actions are thin wrappers over lib/books.ts — the agent tools wrap the same functions. */
 
@@ -173,21 +175,30 @@ export async function setPhotoBookStyleAction(input: {
   return result.ok ? {} : { error: result.error };
 }
 
-/** Rebuild the photo book's layout from scratch (the builder's "Regenerate" button). */
-export async function regeneratePhotoBookLayoutAction(bookId: string): Promise<{ error?: string }> {
+/** Rebuild the photo book's layout from scratch (the builder's "Regenerate" button).
+ *  Fails asking for confirmation if the layout has manual (chat) edits — pass
+ *  `overwriteEdits: true` only once the user has confirmed replacing them. */
+export async function regeneratePhotoBookLayoutAction(input: {
+  bookId: string;
+  overwriteEdits?: boolean;
+}): Promise<{ error?: string }> {
   const user = await requireUser();
-  const result = await regeneratePhotoBookLayout({ bookId, userId: user.id });
-  if (result.ok) revalidatePath(`/books/${bookId}`);
+  const result = await regeneratePhotoBookLayout({ ...input, userId: user.id });
+  if (result.ok) revalidatePath(`/books/${input.bookId}`);
   return result.ok ? {} : { error: result.error };
 }
 
-/** Queue the photo book's AI design pass (the builder's "Design my book" button). */
-export async function requestPhotoBookAiDesignAction(bookId: string): Promise<{ error?: string }> {
+/** Queue the photo book's AI design pass (the builder's "Design my book" button). Same
+ *  manual-edit consent guard as above. */
+export async function requestPhotoBookAiDesignAction(input: {
+  bookId: string;
+  overwriteEdits?: boolean;
+}): Promise<{ error?: string }> {
   const user = await requireUser();
-  const result = await requestPhotoBookAiDesign({ bookId, userId: user.id });
-  revalidatePath(`/books/${bookId}`);
+  const result = await requestPhotoBookAiDesign({ ...input, userId: user.id });
+  revalidatePath(`/books/${input.bookId}`);
   if (result.ok) {
-    captureServerEvent(user.id, 'photo_book_ai_design_requested', { book_id: bookId });
+    captureServerEvent(user.id, 'photo_book_ai_design_requested', { book_id: input.bookId });
   }
   return result.ok ? {} : { error: result.error };
 }
@@ -322,4 +333,125 @@ export async function bookChatAction(input: {
     console.error(`Book chat failed for book ${input.bookId}:`, err);
     return { error: t.books.builder.chat.error };
   }
+}
+
+/** One prior turn of the photo-book builder's chat (client-held; same per-visit contract
+ *  as `BookChatTurn` — nothing is persisted, the book itself is the durable state). */
+export interface PhotoBookChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** Turns beyond this are dropped from the front, same reasoning as `MAX_BOOK_CHAT_TURNS`. */
+const MAX_PHOTO_BOOK_CHAT_TURNS = 24;
+
+/** Shared by the text and voice entry points below: build the turn list, run the
+ *  photo-book-scoped agent, revalidate so the live preview re-keys with any edits. */
+async function runPhotoBookChatTurn(input: {
+  bookId: string;
+  history: PhotoBookChatTurn[];
+  message: string;
+}): Promise<{ reply?: string; receipts?: Receipt[]; error?: string }> {
+  const user = await requireUser();
+  const { t } = await getI18n();
+  const tc = t.books.builder.photoBook.chat;
+  const message = input.message.trim();
+  if (!message) return { error: tc.error };
+  const book = await getBookForUser(input.bookId, user.id);
+  if (!book || book.kind !== 'photo') return { error: tc.error };
+  if (book.status === 'ordered') return { error: t.books.builder.orderedNote };
+
+  // The photo book chat never creates or switches chronicles (no such tools in its
+  // set), so the context is pinned to the book's chronicle and this is a no-op.
+  const ctx: ToolContext = {
+    userId: user.id,
+    userName: user.name,
+    conversationId: null,
+    activeChronicleId: book.chronicleId,
+    activeChronicleName: book.chronicleName,
+    setActiveChronicle() {},
+  };
+
+  const history: ChatTurn[] = [
+    ...input.history
+      .filter((turn) => (turn.role === 'user' || turn.role === 'assistant') && typeof turn.content === 'string')
+      .slice(-MAX_PHOTO_BOOK_CHAT_TURNS)
+      .map((turn) => ({ role: turn.role, content: turn.content })),
+    { role: 'user' as const, content: message },
+  ];
+
+  try {
+    const result = await runPhotoBookAgent(history, ctx, { id: book.id, title: book.title });
+    revalidatePath(`/books/${input.bookId}`);
+    return { reply: result.reply, receipts: result.receipts };
+  } catch (err) {
+    console.error(`Photo book chat failed for book ${input.bookId}:`, err);
+    return { error: tc.error };
+  }
+}
+
+/**
+ * The photo-book builder's embedded chat, typed message — mirrors `bookChatAction`
+ * exactly, just running the photo-book-scoped agent (`lib/ai/agent.ts`'s
+ * `runPhotoBookAgent`, photo-book tools only) instead of the story one.
+ */
+export async function photoBookChatAction(input: {
+  bookId: string;
+  history: PhotoBookChatTurn[];
+  message: string;
+}): Promise<{ reply?: string; receipts?: Receipt[]; error?: string }> {
+  return runPhotoBookChatTurn(input);
+}
+
+/**
+ * The photo-book builder's embedded chat, VOICE message (docs/PHOTO_BOOK_PLAN.md §9):
+ * the client already uploaded the recording via the existing audio presign path (the
+ * SAME `presignUpload` the main chat uses, `app/(app)/chat/actions.ts` — reused as-is,
+ * no book-specific upload plumbing needed) and hands this the resulting `s3Key`. This
+ * transcribes it with Groq Whisper (compressing first if it's large, exactly like
+ * `transcribeVoiceMessage` in `app/(app)/chat/respond.ts`) and feeds the transcript to
+ * the agent as the user's message, same as a typed one.
+ *
+ * Unlike the main chat, there is no `messages`/`message_attachments` row to point at
+ * this recording — the photo-book chat is per-visit, nothing persisted (see
+ * `PhotoBookChatTurn`'s doc comment) — so the uploaded object is NOT durably kept: it
+ * lives under the same `chat/audio/` prefix the orphan sweeper already reclaims
+ * anything unreferenced from after ~24h (`lib/orphans.ts`). Only the transcript survives
+ * (in the client's in-memory chat transcript for that visit), which matches the design
+ * the rest of this chat already has — the book itself is the only durable state.
+ */
+export async function photoBookChatVoiceAction(input: {
+  bookId: string;
+  history: PhotoBookChatTurn[];
+  s3Key: string;
+  mimeType: string;
+}): Promise<{ reply?: string; receipts?: Receipt[]; transcript?: string; error?: string }> {
+  const { t } = await getI18n();
+  const tc = t.books.builder.photoBook.chat;
+  await requireUser();
+  if (!input.s3Key.startsWith('chat/audio/')) return { error: tc.error };
+
+  let transcript: string;
+  try {
+    let buffer = await getObjectBuffer(input.s3Key);
+    let filename = input.s3Key.split('/').pop() ?? 'audio';
+    let mimeType = input.mimeType;
+    if (buffer.length > TRANSCRIBE_COMPRESS_THRESHOLD_BYTES) {
+      try {
+        ({ buffer, filename, mimeType } = await compressForTranscription(buffer, mimeType));
+      } catch (err) {
+        // Send the original and let Groq decide — same fallback as the main chat's
+        // transcribeVoiceMessage.
+        console.error(`Audio compression failed for ${input.s3Key} — sending original:`, err);
+      }
+    }
+    transcript = await transcribeAudio(buffer, filename, mimeType);
+  } catch (err) {
+    console.error(`Photo book voice transcription failed for ${input.s3Key}:`, err);
+    const tooLarge = (err as { status?: number })?.status === 413;
+    return { error: tooLarge ? tc.transcriptionTooLong : tc.transcriptionFailed };
+  }
+
+  const result = await runPhotoBookChatTurn({ bookId: input.bookId, history: input.history, message: transcript });
+  return { ...result, transcript };
 }

@@ -40,6 +40,7 @@ import {
   setPhotoBookStyleAction,
   setPhotoExcludedAction,
 } from '../actions';
+import { PhotoBookChat } from './photo-book-chat';
 
 export interface PhotoBookPhotoView {
   assetId: string;
@@ -65,15 +66,19 @@ interface PhotoBookInfo {
   previewVersion: number;
   /** True while an AI design pass is queued/running (books.design_requested_at). */
   designing: boolean;
+  /** Who last wrote the layout plan — 'edited' once a chat op has touched it (PR4).
+   *  Drives the "replace your manual edits?" consent modal below, same as the story
+   *  book's `layoutSource`. */
+  layoutSource: 'auto' | 'ai' | 'edited';
 }
 
 /**
  * The photo-book builder: bulk upload + a grid to review what's in the book so far
  * (exclude/include toggle, analysis-progress indicator — PR1 scope), plus the live
- * auto-generated preview, a style-suite picker, and a regenerate button (PR2 scope), and
- * an AI "Design my book" pass whose progress is polled the same way the story builder
- * polls its own design pass (PR3 scope, docs/PHOTO_BOOK_PLAN.md). Chat/voice refinement
- * and targeted layout edits are a later PR.
+ * auto-generated preview, a style-suite picker, and a regenerate button (PR2 scope), an
+ * AI "Design my book" pass whose progress is polled the same way the story builder polls
+ * its own design pass (PR3 scope), and an embedded chat for typed/voice refinement via
+ * targeted layout edits (PR4 scope, docs/PHOTO_BOOK_PLAN.md).
  */
 export function PhotoBookBuilder({
   book,
@@ -90,6 +95,9 @@ export function PhotoBookBuilder({
   const [regenerating, startRegenerate] = useTransition();
   const [designPending, startDesign] = useTransition();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [designConsentOpen, setDesignConsentOpen] = useState(false);
+  const [regenerateConsentOpen, setRegenerateConsentOpen] = useState(false);
+  const isEdited = book.layoutSource === 'edited';
 
   const locked = book.status === 'ordered';
   const totalCount = photos.length;
@@ -125,9 +133,29 @@ export function PhotoBookBuilder({
     return () => clearInterval(timer);
   }, [book.designing, book.id, router]);
 
+  /** Runs the AI design pass; if it fails with the "manual edits" consent error, opens
+   *  the confirm modal instead of just showing the error — the retry (with
+   *  overwriteEdits) happens from `confirmDesignOverwrite` below. Mirrors
+   *  book-builder.tsx's `designBook`/`confirmOverwrite`. */
   function designBook() {
     startDesign(async () => {
-      const result = await requestPhotoBookAiDesignAction(book.id);
+      const result = await requestPhotoBookAiDesignAction({ bookId: book.id });
+      if (!result.error) {
+        router.refresh();
+        return;
+      }
+      if (isEdited && result.error.toLowerCase().includes('manual edit')) {
+        setDesignConsentOpen(true);
+        return;
+      }
+      notifications.show({ message: result.error, color: 'red' });
+    });
+  }
+
+  function confirmDesignOverwrite() {
+    setDesignConsentOpen(false);
+    startDesign(async () => {
+      const result = await requestPhotoBookAiDesignAction({ bookId: book.id, overwriteEdits: true });
       if (result.error) {
         notifications.show({ message: result.error, color: 'red' });
         return;
@@ -150,7 +178,23 @@ export function PhotoBookBuilder({
 
   function regenerate() {
     startRegenerate(async () => {
-      const result = await regeneratePhotoBookLayoutAction(book.id);
+      const result = await regeneratePhotoBookLayoutAction({ bookId: book.id });
+      if (!result.error) {
+        router.refresh();
+        return;
+      }
+      if (isEdited && result.error.toLowerCase().includes('manual edit')) {
+        setRegenerateConsentOpen(true);
+        return;
+      }
+      notifications.show({ message: result.error, color: 'red' });
+    });
+  }
+
+  function confirmRegenerateOverwrite() {
+    setRegenerateConsentOpen(false);
+    startRegenerate(async () => {
+      const result = await regeneratePhotoBookLayoutAction({ bookId: book.id, overwriteEdits: true });
       if (result.error) {
         notifications.show({ message: result.error, color: 'red' });
         return;
@@ -379,6 +423,9 @@ export function PhotoBookBuilder({
         )}
       </Card>
 
+      {/* ── Full-width AI chat: the way to change the book beyond the settings ── */}
+      <PhotoBookChat bookId={book.id} locked={locked} />
+
       <Modal
         opened={deleteOpen}
         onClose={() => setDeleteOpen(false)}
@@ -392,6 +439,40 @@ export function PhotoBookBuilder({
           </Button>
           <Button color="red" onClick={confirmDelete} loading={pending}>
             {tb.deleteConfirm}
+          </Button>
+        </Group>
+      </Modal>
+
+      <Modal
+        opened={designConsentOpen}
+        onClose={() => setDesignConsentOpen(false)}
+        title={tb.overwriteEditsTitle}
+        centered
+      >
+        <Text size="sm">{tb.overwriteEditsBody}</Text>
+        <Group justify="flex-end" mt="lg">
+          <Button variant="default" onClick={() => setDesignConsentOpen(false)} disabled={designPending}>
+            {tb.overwriteEditsCancel}
+          </Button>
+          <Button color="red" onClick={confirmDesignOverwrite} loading={designPending}>
+            {tb.overwriteEditsConfirm}
+          </Button>
+        </Group>
+      </Modal>
+
+      <Modal
+        opened={regenerateConsentOpen}
+        onClose={() => setRegenerateConsentOpen(false)}
+        title={tb.overwriteEditsTitle}
+        centered
+      >
+        <Text size="sm">{tb.overwriteEditsBody}</Text>
+        <Group justify="flex-end" mt="lg">
+          <Button variant="default" onClick={() => setRegenerateConsentOpen(false)} disabled={regenerating}>
+            {tb.overwriteEditsCancel}
+          </Button>
+          <Button color="red" onClick={confirmRegenerateOverwrite} loading={regenerating}>
+            {tb.overwriteEditsConfirm}
           </Button>
         </Group>
       </Modal>
