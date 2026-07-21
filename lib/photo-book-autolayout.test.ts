@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildPhotoBookAutoLayout, type AutoLayoutPhoto, type PhotoBookAutoLayoutInput } from './photo-book-autolayout';
+import {
+  buildPhotoBookAutoLayout,
+  computeCandidateSections,
+  type AutoLayoutPhoto,
+  type PhotoBookAutoLayoutInput,
+} from './photo-book-autolayout';
 import { checkPhotoBookPlanConsistency } from './photo-book-plan';
+import type { PhotoAnalysis } from './photo-analysis';
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -15,6 +21,19 @@ function photo(overrides: Partial<AutoLayoutPhoto> & { assetId: string }): AutoL
     gpsLng: null,
     phash: null,
     blurScore: null,
+    ...overrides,
+  };
+}
+
+function analysis(overrides: Partial<PhotoAnalysis> = {}): PhotoAnalysis {
+  return {
+    aestheticScore: 5,
+    sharpness: 'sharp',
+    eyesClosed: false,
+    peopleCount: 1,
+    sceneTags: [],
+    shortDescription: '',
+    coverCandidate: false,
     ...overrides,
   };
 }
@@ -506,5 +525,355 @@ describe('buildPhotoBookAutoLayout — plan consistency (regression)', () => {
     expect(plan.cover.heroAssetId).toBe('q3');
     const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
     expect(interior).not.toContain('q3');
+  });
+});
+
+describe('computeCandidateSections', () => {
+  it('is the exact grouping buildPhotoBookAutoLayout uses for its own sections', () => {
+    // 8 photos/cluster (16 total) — comfortably clears the section-count cap
+    // (ceil(16 / SECTION_CAP_DIVISOR=8) = 2), so this isolates boundary detection.
+    const cluster1 = Array.from({ length: 8 }, (_, i) =>
+      photo({ assetId: `a${i}`, position: i, takenAt: new Date(t0 + i * HOUR) }),
+    );
+    const cluster2 = Array.from({ length: 8 }, (_, i) =>
+      photo({ assetId: `b${i}`, position: 8 + i, takenAt: new Date(t0 + 3 * DAY + i * HOUR) }),
+    );
+    const sections = computeCandidateSections([...cluster1, ...cluster2]);
+    expect(sections).toHaveLength(2);
+    expect(sections[0].map((p) => p.assetId)).toEqual(cluster1.map((p) => p.assetId));
+    expect(sections[1].map((p) => p.assetId)).toEqual(cluster2.map((p) => p.assetId));
+  });
+
+  it('returns an empty array for no photos', () => {
+    expect(computeCandidateSections([])).toEqual([]);
+  });
+});
+
+describe('buildPhotoBookAutoLayout — score-aware culling (PR3)', () => {
+  it('is a complete no-op when no photo has analysis (backward compatibility)', () => {
+    // Same fixture as the existing "culls a clearly-blurry photo" test — asserting the
+    // score-aware cullers don't change anything when `analysis` is absent anywhere.
+    const photos = [
+      photo({ assetId: 'sharp1', position: 0, takenAt: new Date(t0), blurScore: 100 }),
+      photo({ assetId: 'sharp2', position: 1, takenAt: new Date(t0 + 60_000), blurScore: 90 }),
+      photo({ assetId: 'blurry', position: 2, takenAt: new Date(t0 + 120_000), blurScore: 5 }),
+    ];
+    const { culled } = buildPhotoBookAutoLayout(baseInput(photos));
+    expect(culled).toEqual([{ assetId: 'blurry', reason: 'blurry' }]);
+  });
+
+  it('culls an eyes-closed photo when a sharp-eyed sibling exists in the same section', () => {
+    const photos = [
+      photo({ assetId: 'open', position: 0, takenAt: new Date(t0), analysis: analysis({ eyesClosed: false }) }),
+      photo({ assetId: 'closed', position: 1, takenAt: new Date(t0 + 60_000), analysis: analysis({ eyesClosed: true }) }),
+      photo({ assetId: 'other', position: 2, takenAt: new Date(t0 + 120_000), analysis: analysis({ eyesClosed: false }) }),
+    ];
+    const { culled } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
+    expect(culled).toContainEqual({ assetId: 'closed', reason: 'eyes-closed' });
+  });
+
+  it('never culls an eyes-closed photo when nothing in the section has open eyes', () => {
+    const photos = [
+      photo({ assetId: 'a', position: 0, takenAt: new Date(t0), analysis: analysis({ eyesClosed: true }) }),
+      photo({ assetId: 'b', position: 1, takenAt: new Date(t0 + 60_000), analysis: analysis({ eyesClosed: true }) }),
+    ];
+    const { culled } = buildPhotoBookAutoLayout(baseInput(photos));
+    expect(culled.filter((c) => c.reason === 'eyes-closed')).toEqual([]);
+  });
+
+  it('never eyes-closed-culls a photo with no analysis, even alongside scored siblings', () => {
+    const photos = [
+      photo({ assetId: 'unscored', position: 0, takenAt: new Date(t0) }),
+      photo({ assetId: 'open', position: 1, takenAt: new Date(t0 + 60_000), analysis: analysis({ eyesClosed: false }) }),
+    ];
+    const { culled } = buildPhotoBookAutoLayout(baseInput(photos));
+    expect(culled.some((c) => c.assetId === 'unscored')).toBe(false);
+  });
+
+  it('drops the lowest-aestheticScore surplus of an oversized, mostly-scored section', () => {
+    // 45 photos, all scored, one section (same-hour timestamps) — comfortably over
+    // MAX_SCORED_SECTION_PHOTOS (40), so the 5 lowest-scored should be dropped.
+    const photos = Array.from({ length: 45 }, (_, i) =>
+      photo({
+        assetId: `p${i}`,
+        position: i,
+        takenAt: new Date(t0 + i * 1000),
+        analysis: analysis({ aestheticScore: i / 10 }), // 0.0 .. 4.4, strictly increasing
+      }),
+    );
+    const { culled } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
+    const lowQuality = culled.filter((c) => c.reason === 'low-quality');
+    expect(lowQuality).toHaveLength(5);
+    // The 5 lowest-scored (p0..p4) are exactly the ones dropped.
+    expect(lowQuality.map((c) => c.assetId).sort()).toEqual(['p0', 'p1', 'p2', 'p3', 'p4']);
+  });
+
+  it('does not trim an oversized section when too few of its photos are scored', () => {
+    const photos = Array.from({ length: 45 }, (_, i) =>
+      photo({
+        assetId: `p${i}`,
+        position: i,
+        takenAt: new Date(t0 + i * 1000),
+        // Only score a small minority — under the 80% threshold.
+        analysis: i < 5 ? analysis({ aestheticScore: 1 }) : undefined,
+      }),
+    );
+    const { culled } = buildPhotoBookAutoLayout(baseInput(photos));
+    expect(culled.filter((c) => c.reason === 'low-quality')).toEqual([]);
+  });
+
+  it('does not trim a section at or under the cap even if fully scored', () => {
+    const photos = Array.from({ length: 40 }, (_, i) =>
+      photo({ assetId: `p${i}`, position: i, takenAt: new Date(t0 + i * 1000), analysis: analysis({ aestheticScore: i / 10 }) }),
+    );
+    const { culled } = buildPhotoBookAutoLayout(baseInput(photos));
+    expect(culled.filter((c) => c.reason === 'low-quality')).toEqual([]);
+  });
+});
+
+describe('buildPhotoBookAutoLayout — score-aware hero/opener selection (PR3)', () => {
+  it('prefers a coverCandidate photo over a higher-resolution non-candidate', () => {
+    const photos = [
+      photo({ assetId: 'big', position: 0, takenAt: new Date(t0), width: 4000, height: 3000, analysis: analysis({ coverCandidate: false, aestheticScore: 9 }) }),
+      photo({ assetId: 'candidate', position: 1, takenAt: new Date(t0 + HOUR), width: 800, height: 600, analysis: analysis({ coverCandidate: true, aestheticScore: 6 }) }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
+    expect(plan.cover.heroAssetId).toBe('candidate');
+  });
+
+  it('among non-candidates, prefers the higher aestheticScore over resolution', () => {
+    const photos = [
+      photo({ assetId: 'big-lower-score', position: 0, takenAt: new Date(t0), width: 4000, height: 3000, analysis: analysis({ aestheticScore: 4 }) }),
+      photo({ assetId: 'small-higher-score', position: 1, takenAt: new Date(t0 + HOUR), width: 800, height: 600, analysis: analysis({ aestheticScore: 8 }) }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
+    expect(plan.cover.heroAssetId).toBe('small-higher-score');
+  });
+
+  it('falls back to the pure resolution heuristic when nothing in the pool is analyzed', () => {
+    const photos = [
+      photo({ assetId: 'big', position: 0, takenAt: new Date(t0), width: 4000, height: 3000 }),
+      photo({ assetId: 'small', position: 1, takenAt: new Date(t0 + HOUR), width: 400, height: 300 }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
+    expect(plan.cover.heroAssetId).toBe('big');
+  });
+
+  it('treats an unscored photo as neutral (score 5), not as worthless', () => {
+    const photos = [
+      photo({ assetId: 'unscored', position: 0, takenAt: new Date(t0), width: 4000, height: 3000 }),
+      photo({ assetId: 'low-scored', position: 1, takenAt: new Date(t0 + HOUR), width: 800, height: 600, analysis: analysis({ aestheticScore: 1 }) }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
+    // Neutral (5) beats an explicit low score (1) — the unscored photo wins.
+    expect(plan.cover.heroAssetId).toBe('unscored');
+  });
+
+  it('an explicit cover pin still always wins over scores', () => {
+    const photos = [
+      photo({ assetId: 'a', position: 0, takenAt: new Date(t0), analysis: analysis({ coverCandidate: true, aestheticScore: 10 }) }),
+      photo({ assetId: 'b', position: 1, takenAt: new Date(t0 + HOUR), analysis: analysis({ coverCandidate: false, aestheticScore: 1 }) }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'b' });
+    expect(plan.cover.heroAssetId).toBe('b');
+  });
+});
+
+describe('buildPhotoBookAutoLayout — plan consistency with analysis present (regression)', () => {
+  // Extends PR2's consistency regression coverage to the analysis-present path: every
+  // culling/hero-selection decision score-aware logic makes must still leave a plan that
+  // passes checkPhotoBookPlanConsistency, and must never reintroduce the duplicate-hero
+  // bug (docs/PHOTO_BOOK_PLAN.md PR3 scope).
+
+  function checkConsistency(input: PhotoBookAutoLayoutInput) {
+    const { plan, culled } = buildPhotoBookAutoLayout(input);
+    const culledIds = new Set(culled.map((c) => c.assetId));
+    const allAssetIds = input.photos.map((p) => p.assetId);
+    const availableAssetIds = allAssetIds.filter((id) => !culledIds.has(id));
+    const problems = checkPhotoBookPlanConsistency(plan, { availableAssetIds, allAssetIds });
+    return { plan, problems };
+  }
+
+  function randomish(n: number, seed: number): number {
+    return ((seed * 9301 + 49297) * (n + 1)) % 233280;
+  }
+
+  it('is consistent for a fully-analyzed, oversized single section (triggers every culler)', () => {
+    const photos = Array.from({ length: 60 }, (_, i) =>
+      photo({
+        assetId: `p${i}`,
+        position: i,
+        takenAt: new Date(t0 + i * 1000),
+        width: 800 + (randomish(i, 1) % 3000),
+        height: 600 + (randomish(i, 2) % 2200),
+        blurScore: 20 + (randomish(i, 3) % 180),
+        phash: (i % 7 === 0 ? 'a' : (randomish(i, 4) % 16).toString(16)).repeat(16),
+        analysis: analysis({
+          aestheticScore: (randomish(i, 5) % 100) / 10,
+          eyesClosed: i % 4 === 0,
+          coverCandidate: i % 11 === 0,
+        }),
+      }),
+    );
+    const { plan, problems } = checkConsistency(baseInput(photos));
+    expect(problems).toEqual([]);
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
+  });
+
+  it('is consistent across multiple sections with a mix of analyzed and unanalyzed photos', () => {
+    const clusters = [0, 1, 2].map((cluster) =>
+      Array.from({ length: 8 }, (_, i) =>
+        photo({
+          assetId: `c${cluster}-${i}`,
+          position: cluster * 8 + i,
+          takenAt: new Date(t0 + cluster * 3 * DAY + i * HOUR),
+          width: 1000 + (randomish(i, cluster + 10) % 3000),
+          height: 800 + (randomish(i, cluster + 20) % 2200),
+          blurScore: 40 + (randomish(i, cluster + 30) % 160),
+          // Only half of each cluster gets a vision score — the mixed-analysis case.
+          analysis: i % 2 === 0 ? analysis({ aestheticScore: (randomish(i, cluster + 40) % 100) / 10, eyesClosed: i % 6 === 0 }) : undefined,
+        }),
+      ),
+    ).flat();
+    const { plan, problems } = checkConsistency(baseInput(clusters));
+    expect(problems).toEqual([]);
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
+  });
+
+  it('is consistent when every photo in a section is eyes-closed except the pinned cover', () => {
+    const photos = Array.from({ length: 6 }, (_, i) =>
+      photo({
+        assetId: `q${i}`,
+        position: i,
+        takenAt: new Date(t0 + i * HOUR),
+        analysis: analysis({ eyesClosed: i !== 0 }),
+      }),
+    );
+    const { plan, problems } = checkConsistency({ ...baseInput(photos), coverAssetId: 'q0' });
+    expect(problems).toEqual([]);
+    expect(plan.cover.heroAssetId).toBe('q0');
+  });
+
+  it('is consistent for a large, many-photo, fully-analyzed book spanning many sections', () => {
+    const photos = Array.from({ length: 150 }, (_, i) => {
+      const cluster = Math.floor(i / 15);
+      return photo({
+        assetId: `l${i}`,
+        position: i,
+        takenAt: new Date(t0 + cluster * 2 * DAY + (i % 15) * HOUR),
+        gpsLat: 48 + cluster * 2,
+        gpsLng: 11 + cluster * 2,
+        width: 900 + (randomish(i, 40) % 3500),
+        height: 700 + (randomish(i, 50) % 2800),
+        blurScore: 30 + (randomish(i, 60) % 170),
+        analysis: analysis({
+          aestheticScore: (randomish(i, 70) % 100) / 10,
+          eyesClosed: i % 5 === 0,
+          coverCandidate: i % 23 === 0,
+        }),
+      });
+    });
+    const { plan, problems } = checkConsistency(baseInput(photos));
+    expect(problems).toEqual([]);
+    expect(plan.sections.length).toBeGreaterThan(1);
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
+  });
+});
+
+describe('buildPhotoBookAutoLayout — FIX 1: pinned/carried-over hero survives culling (regression)', () => {
+  // docs/PHOTO_BOOK_PLAN.md PR3 blocker: `heroAssetId` is resolved from
+  // `input.coverAssetId` / `input.existingHeroAssetId` AFTER `cullEyesClosed` /
+  // `cullLowAesthetic` have already run, so — before this fix — a pinned or
+  // carried-over hero that itself scored eyesClosed / lowest-aesthetic got excluded by
+  // those cullers while `plan.cover.heroAssetId` still pointed at it, which
+  // `checkPhotoBookPlanConsistency` flags as "Cover references an excluded photo" and
+  // collapses the whole plan to `emptyPlan()`. Every test below asserts all three
+  // things the fix guarantees: (a) zero consistency problems, (b) the protected id is
+  // the cover hero and is NOT in `culled`, (c) it is not placed on any interior page.
+
+  function assertHeroProtected(
+    result: ReturnType<typeof buildPhotoBookAutoLayout>,
+    allPhotos: AutoLayoutPhoto[],
+    heroId: string,
+  ) {
+    const { plan, culled } = result;
+    const culledIds = new Set(culled.map((c) => c.assetId));
+    expect(culledIds.has(heroId)).toBe(false);
+    expect(plan.cover.heroAssetId).toBe(heroId);
+
+    const allAssetIds = allPhotos.map((p) => p.assetId);
+    const availableAssetIds = allAssetIds.filter((id) => !culledIds.has(id));
+    const problems = checkPhotoBookPlanConsistency(plan, { availableAssetIds, allAssetIds });
+    expect(problems).toEqual([]);
+
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    expect(interior).not.toContain(heroId);
+  }
+
+  it('protects a PINNED (coverAssetId) hero that itself scores eyesClosed:true with open-eyed siblings', () => {
+    const photos = [
+      photo({ assetId: 'hero', position: 0, takenAt: new Date(t0), analysis: analysis({ eyesClosed: true }) }),
+      photo({ assetId: 'sib1', position: 1, takenAt: new Date(t0 + HOUR), analysis: analysis({ eyesClosed: false }) }),
+      photo({ assetId: 'sib2', position: 2, takenAt: new Date(t0 + 2 * HOUR), analysis: analysis({ eyesClosed: false }) }),
+    ];
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), coverAssetId: 'hero' };
+    assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
+  });
+
+  it('protects a CARRIED-OVER (existingHeroAssetId) hero that itself scores eyesClosed:true with open-eyed siblings', () => {
+    const photos = [
+      photo({ assetId: 'hero', position: 0, takenAt: new Date(t0), analysis: analysis({ eyesClosed: true }) }),
+      photo({ assetId: 'sib1', position: 1, takenAt: new Date(t0 + HOUR), analysis: analysis({ eyesClosed: false }) }),
+      photo({ assetId: 'sib2', position: 2, takenAt: new Date(t0 + 2 * HOUR), analysis: analysis({ eyesClosed: false }) }),
+    ];
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), existingHeroAssetId: 'hero' };
+    assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
+  });
+
+  it('protects a PINNED (coverAssetId) hero that itself has the lowest aestheticScore in an oversized, mostly-scored section', () => {
+    const photos = Array.from({ length: 45 }, (_, i) => {
+      const assetId = i === 0 ? 'hero' : `p${i}`;
+      return photo({
+        assetId,
+        position: i,
+        takenAt: new Date(t0 + i * HOUR),
+        // Every non-hero photo scores strictly higher than the hero, so an unprotected
+        // hero would always land in the culled bottom-5 surplus.
+        analysis: analysis({ aestheticScore: i === 0 ? -1 : i }),
+      });
+    });
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), coverAssetId: 'hero' };
+    assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
+  });
+
+  it('protects a CARRIED-OVER (existingHeroAssetId) hero that itself has the lowest aestheticScore in an oversized, mostly-scored section', () => {
+    const photos = Array.from({ length: 45 }, (_, i) => {
+      const assetId = i === 0 ? 'hero' : `p${i}`;
+      return photo({
+        assetId,
+        position: i,
+        takenAt: new Date(t0 + i * HOUR),
+        analysis: analysis({ aestheticScore: i === 0 ? -1 : i }),
+      });
+    });
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), existingHeroAssetId: 'hero' };
+    assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
+  });
+
+  it('protects a pinned hero that is BOTH eyesClosed AND the lowest-aesthetic photo in an oversized section', () => {
+    const photos = Array.from({ length: 45 }, (_, i) => {
+      const assetId = i === 0 ? 'hero' : `p${i}`;
+      return photo({
+        assetId,
+        position: i,
+        takenAt: new Date(t0 + i * HOUR),
+        analysis: analysis({ aestheticScore: i === 0 ? -1 : i, eyesClosed: i === 0 }),
+      });
+    });
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), coverAssetId: 'hero' };
+    assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
   });
 });

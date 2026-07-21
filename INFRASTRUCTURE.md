@@ -159,6 +159,7 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 | `NEXT_PUBLIC_GOOGLE_AUTH_ENABLED` | show the Google button | `true` to render "Continue with Google" on login/signup. Set together with the two `GOOGLE_*` secrets (it's build-time inlined, so a redeploy is needed to toggle) |
 | `OPENROUTER_API_KEY` | story styling | OpenRouter |
 | `STYLING_MODEL` | which LLM to style with | e.g. `anthropic/claude-opus-4-8` (swap for cost) |
+| `VISION_MODEL` | photo-book per-photo vision scoring (`photo-vision` job) | flash-lite-tier, e.g. `google/gemini-2.5-flash-lite` — deliberately cheaper than `STYLING_MODEL`, since this runs once per uploaded photo, not once per book |
 | `GROQ_API_KEY` | voice transcription | Groq (optional — voice only) |
 | `SMTP_URL` | verification emails (optional) | Resend: `smtp://resend:<API_KEY>@smtp.resend.com:587`. **Must be port 587 (STARTTLS)** — Hetzner Cloud blocks outbound 25/465 by default, and a blocked port doesn't error, it **hangs silently** (symptom: signup/resend just spins, no log line). Unset = emails are logged instead of sent |
 | `SMTP_FROM` | sender address | defaults to `Familienwerk <no-reply@familienwerk.co>` |

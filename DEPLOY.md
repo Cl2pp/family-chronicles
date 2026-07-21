@@ -90,6 +90,7 @@ BETTER_AUTH_SECRET=<openssl rand -base64 32>
 BETTER_AUTH_URL=https://<your-domain>
 OPENROUTER_API_KEY=...
 STYLING_MODEL=anthropic/claude-opus-4-8
+VISION_MODEL=google/gemini-2.5-flash-lite    # cheap, high-volume: scores every photo-book photo
 GROQ_API_KEY=...
 S3_ENDPOINT=...                             # MinIO/Hetzner/R2 endpoint
 S3_REGION=auto

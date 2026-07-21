@@ -36,6 +36,7 @@ import { BulkPhotoUploader } from '@/components/bulk-photo-uploader';
 import {
   deleteBookAction,
   regeneratePhotoBookLayoutAction,
+  requestPhotoBookAiDesignAction,
   setPhotoBookStyleAction,
   setPhotoExcludedAction,
 } from '../actions';
@@ -44,10 +45,11 @@ export interface PhotoBookPhotoView {
   assetId: string;
   url: string;
   excluded: boolean;
-  /** True once the `photo-meta` job has settled for this photo — hashed
-   *  successfully, or permanently gave up after its retries. */
+  /** True once the `photo-vision` pass has settled for this photo — scored
+   *  successfully, or permanently gave up after its retries (`lib/books.ts`'s
+   *  `BookPhotoItem.metaSettled`). */
   metaSettled: boolean;
-  /** True when photo-meta gave up on this photo. */
+  /** True when analysis permanently failed for this photo. */
   metaFailed: boolean;
 }
 
@@ -61,13 +63,17 @@ interface PhotoBookInfo {
   /** Cache-buster for the preview iframe — bumps whenever the book row changes
    *  (same pattern as the story builder's `previewVersion`). */
   previewVersion: number;
+  /** True while an AI design pass is queued/running (books.design_requested_at). */
+  designing: boolean;
 }
 
 /**
  * The photo-book builder: bulk upload + a grid to review what's in the book so far
  * (exclude/include toggle, analysis-progress indicator — PR1 scope), plus the live
- * auto-generated preview, a style-suite picker, and a regenerate button (PR2 scope,
- * docs/PHOTO_BOOK_PLAN.md). Chat/voice refinement and the AI design pass are later PRs.
+ * auto-generated preview, a style-suite picker, and a regenerate button (PR2 scope), and
+ * an AI "Design my book" pass whose progress is polled the same way the story builder
+ * polls its own design pass (PR3 scope, docs/PHOTO_BOOK_PLAN.md). Chat/voice refinement
+ * and targeted layout edits are a later PR.
  */
 export function PhotoBookBuilder({
   book,
@@ -82,6 +88,7 @@ export function PhotoBookBuilder({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [regenerating, startRegenerate] = useTransition();
+  const [designPending, startDesign] = useTransition();
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const locked = book.status === 'ordered';
@@ -89,16 +96,45 @@ export function PhotoBookBuilder({
   const settledCount = photos.filter((p) => p.metaSettled).length;
   const failedCount = photos.filter((p) => p.metaFailed).length;
 
-  // Analysis runs server-side (the `photo-meta` worker job) with no other signal the
-  // client can see — poll while photos are still unsettled, same pattern as the
-  // story-book builder's "designing" poll (book-builder.tsx). A photo whose analysis
-  // permanently failed still counts as settled (see `metaSettled`), so a genuinely
-  // undecodable photo can't leave this polling forever.
+  // Analysis runs server-side (the `photo-meta` and `photo-vision` worker jobs) with no
+  // other signal the client can see — poll while photos are still unsettled, same
+  // pattern as the story-book builder's "designing" poll (book-builder.tsx). A photo
+  // whose analysis permanently failed still counts as settled (see `metaSettled`), so a
+  // genuinely unscoreable photo can't leave this polling forever.
   useEffect(() => {
     if (totalCount === 0 || settledCount >= totalCount) return;
     const timer = setInterval(() => router.refresh(), 4000);
     return () => clearInterval(timer);
   }, [totalCount, settledCount, router]);
+
+  // The AI design pass rewrites the layout plan server-side (worker process) with no
+  // other signal the client can see — poll while `book.designing` is true and refresh
+  // once it clears, same pattern as the story builder's design poll (book-builder.tsx).
+  useEffect(() => {
+    if (!book.designing) return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/books/${book.id}/status`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { designing: boolean };
+        if (!data.designing) router.refresh();
+      } catch {
+        /* transient network error — next tick retries */
+      }
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [book.designing, book.id, router]);
+
+  function designBook() {
+    startDesign(async () => {
+      const result = await requestPhotoBookAiDesignAction(book.id);
+      if (result.error) {
+        notifications.show({ message: result.error, color: 'red' });
+        return;
+      }
+      router.refresh();
+    });
+  }
 
   function setStyle(style: PhotoBookStyle) {
     if (style === book.style) return;
@@ -293,6 +329,18 @@ export function PhotoBookBuilder({
         </Group>
 
         <Group mb="sm">
+          <Tooltip label={tb.designBookHint} disabled={locked}>
+            <Button
+              variant="light"
+              size="sm"
+              leftSection={<IconSparkles size={16} />}
+              loading={book.designing}
+              disabled={locked || totalCount === 0 || designPending}
+              onClick={designBook}
+            >
+              {book.designing ? tb.designingBook : tb.designBook}
+            </Button>
+          </Tooltip>
           <Tooltip label={tp.regenerateHint} disabled={locked}>
             <Button
               variant="light"

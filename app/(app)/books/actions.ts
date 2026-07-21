@@ -15,6 +15,7 @@ import {
   listBookPhotos,
   regeneratePhotoBookLayout,
   requestAiDesign,
+  requestPhotoBookAiDesign,
   requestPreview,
   resetBookLayout,
   setBookStories,
@@ -177,6 +178,17 @@ export async function regeneratePhotoBookLayoutAction(bookId: string): Promise<{
   const user = await requireUser();
   const result = await regeneratePhotoBookLayout({ bookId, userId: user.id });
   if (result.ok) revalidatePath(`/books/${bookId}`);
+  return result.ok ? {} : { error: result.error };
+}
+
+/** Queue the photo book's AI design pass (the builder's "Design my book" button). */
+export async function requestPhotoBookAiDesignAction(bookId: string): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await requestPhotoBookAiDesign({ bookId, userId: user.id });
+  revalidatePath(`/books/${bookId}`);
+  if (result.ok) {
+    captureServerEvent(user.id, 'photo_book_ai_design_requested', { book_id: bookId });
+  }
   return result.ok ? {} : { error: result.error };
 }
 
