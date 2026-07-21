@@ -564,6 +564,32 @@ export function computeCandidateSections(photos: AutoLayoutPhoto[]): AutoLayoutP
   return capSectionCount(groups);
 }
 
+/**
+ * Sanitizes a pinned (`books.cover_asset_id`) or carried-over (a prior plan's
+ * `cover.heroAssetId`) hero id down to one that's actually present-and-usable in the
+ * current photo set, or `null` if it isn't. Callers into `buildPhotoBookAutoLayout` MUST
+ * run both `coverAssetId` and `existingHeroAssetId` through this first:
+ * `buildPhotoBookAutoLayout` itself trusts whatever hero id it's given (see its own doc
+ * comment) — it protects that id from culling and echoes it straight to
+ * `plan.cover.heroAssetId` unconditionally, it never checks the id actually names a photo
+ * that's still in the book. A stale id (the photo was since excluded, or removed from the
+ * book entirely) making it through unfiltered means `plan.cover.heroAssetId` ends up
+ * pointing at a photo outside the surviving set, which `checkPhotoBookPlanConsistency`
+ * rejects — and `buildAndPersistPhotoAutoPlan` (`lib/photo-book-content.ts`) then discards
+ * the WHOLE plan for an empty one, not just the cover (docs/PHOTO_BOOK_PLAN.md PR3 FIX 1b:
+ * excluding the current cover-hero photo used to blank the entire regenerated book).
+ * Mirrors the guard `applyPhotoPlanCarryOver` (`lib/photo-book-ai-layout.ts`) already
+ * applies to the AI design path. `usablePhotos` should be the same present-and-non-excluded
+ * set `buildPhotoBookAutoLayout` will itself be called with.
+ */
+export function resolveUsableHeroId(
+  id: string | null | undefined,
+  usablePhotos: Pick<AutoLayoutPhoto, 'assetId'>[],
+): string | null {
+  if (!id) return null;
+  return usablePhotos.some((p) => p.assetId === id) ? id : null;
+}
+
 /** Builds a full photo-book layout plan from a book's currently-available photos. */
 export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): PhotoBookAutoLayoutResult {
   const locale = input.dateLocale ?? 'de-DE';
@@ -583,6 +609,15 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   // protect it from their own candidacy — see `cullEyesClosed`'s doc comment for why. A
   // pinned cover always wins over a carried-over one, same precedence `heroAssetId`
   // itself uses further down.
+  //
+  // NOTE: this function intentionally does NOT validate that `coverAssetId` /
+  // `existingHeroAssetId` reference a photo actually present in `input.photos` — it
+  // trusts the caller (unlike the `userDecision` filter above, which guards this
+  // function's OWN internal invariant). `buildAndPersistPhotoAutoPlan`
+  // (`lib/photo-book-content.ts`) is responsible for only ever passing a hero id that's
+  // present-and-non-excluded in the current photo set, via `resolveUsableHeroId` below —
+  // see that function's doc comment for the bug this guards against
+  // (docs/PHOTO_BOOK_PLAN.md PR3 FIX 1b).
   const protectedHeroId = input.coverAssetId ?? input.existingHeroAssetId ?? null;
 
   const culled: CulledPhoto[] = [];

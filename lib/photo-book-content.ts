@@ -9,7 +9,7 @@ import {
   type PhotoBookPlan,
   type PhotoPlanContent,
 } from '@/lib/photo-book-plan';
-import { buildPhotoBookAutoLayout, type AutoLayoutPhoto } from '@/lib/photo-book-autolayout';
+import { buildPhotoBookAutoLayout, resolveUsableHeroId, type AutoLayoutPhoto } from '@/lib/photo-book-autolayout';
 import { parseStoredPhotoAnalysis, type PhotoAnalysis } from '@/lib/photo-analysis';
 
 /**
@@ -188,11 +188,21 @@ export async function buildAndPersistPhotoAutoPlan(
   const existing = row.layoutPlan ? validatePhotoBookPlan(row.layoutPlan) : null;
   const existingPlan = existing?.ok ? existing.plan : null;
 
+  // A pinned (`row.coverAssetId`) or carried-over (`existingPlan.cover.heroAssetId`) hero
+  // must be dropped here if it's no longer present-and-non-excluded, via
+  // `resolveUsableHeroId` — see that function's doc comment for why (PR3 FIX 1b: a stale
+  // hero id passed through unfiltered makes `buildPhotoBookAutoLayout` echo it straight to
+  // `plan.cover.heroAssetId`, which then fails consistency and blanks the WHOLE plan, not
+  // just the cover). Mirrors the guard `applyPhotoPlanCarryOver`
+  // (`lib/photo-book-ai-layout.ts`) already applies to the AI path.
+  const coverAssetId = resolveUsableHeroId(row.coverAssetId, available);
+  const existingHeroAssetId = resolveUsableHeroId(existingPlan?.cover.heroAssetId, available) ?? undefined;
+
   const { plan: built, culled } = buildPhotoBookAutoLayout({
     title: row.title,
-    coverAssetId: row.coverAssetId,
+    coverAssetId,
     existingStyle: existingPlan?.style,
-    existingHeroAssetId: existingPlan?.cover.heroAssetId,
+    existingHeroAssetId,
     photos: autoLayoutPhotos,
   });
 

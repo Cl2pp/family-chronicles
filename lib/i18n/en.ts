@@ -685,7 +685,6 @@ export const en = {
         collapseChat: 'Collapse chat',
         expandChat: 'Expand chat',
         showChatMobile: 'Show AI chat',
-        hideChatMobile: 'Hide AI chat',
         orderStepIntro:
           'This is where you\'ll be able to order a printed copy soon — for now, download the full-resolution PDF below and (optionally) request a quote by email.',
         addPhotos: 'Add photos',

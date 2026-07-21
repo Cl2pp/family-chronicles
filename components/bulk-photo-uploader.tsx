@@ -189,18 +189,21 @@ export function BulkPhotoUploader({ bookId }: { bookId: string }) {
           e.currentTarget.value = '';
         }}
       />
+      {/* Not a keyboard-interactive control itself (no role="button"/tabIndex/onKeyDown)
+          — it wraps a real `<Button>` below, which is already natively focusable and
+          keyboard-activatable. Making the wrapper ALSO keyboard-interactive double-fires
+          on Enter/Space: the keydown bubbles from the focused inner `<button>` up to this
+          Box regardless of the inner Button's own `e.stopPropagation()` on click (that
+          only stops the click event, not the keydown that triggers it), so both handlers
+          would call `fileRef.current?.click()`. The `onClick` here is a mouse-only
+          convenience (click anywhere in the dropzone, not just the button) — harmless to
+          keep since it isn't the accessible path, which is the inner Button. */}
       <Box
-        role="button"
-        tabIndex={0}
-        aria-label={tp.dropzoneTitle}
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => !busy && fileRef.current?.click()}
-        onKeyDown={(e) => {
-          if ((e.key === 'Enter' || e.key === ' ') && !busy) fileRef.current?.click();
-        }}
         style={{
           border: `2px dashed var(--mantine-color-${dragOver ? 'brand-5' : 'slate-3'})`,
           borderRadius: 'var(--mantine-radius-md)',

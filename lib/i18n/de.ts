@@ -701,7 +701,6 @@ export const de: Dictionary = {
         collapseChat: 'Chat einklappen',
         expandChat: 'Chat ausklappen',
         showChatMobile: 'KI-Chat anzeigen',
-        hideChatMobile: 'KI-Chat verbergen',
         orderStepIntro:
           'Hier kannst du dein Fotobuch bald direkt bestellen — lade es bis dahin unten als PDF in voller Auflösung herunter und frag optional einen Preis per E-Mail an.',
         addPhotos: 'Fotos hinzufügen',

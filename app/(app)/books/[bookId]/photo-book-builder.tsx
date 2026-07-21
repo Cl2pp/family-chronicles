@@ -192,6 +192,20 @@ export function PhotoBookBuilder({
   // round trip could let the effect's dependencies re-evaluate and queue a second design
   // pass before the first one's `design_requested_at` has landed — a duplicate-trigger
   // race the ref closes off by flipping synchronously before the async call even starts.
+  //
+  // That ref alone only protects a single mount, though: a FAILED design pass falls back
+  // to `layoutSource: 'auto'` server-side (`requestPhotoBookAiDesignAction`'s worker-side
+  // fallback) — indistinguishable, from this effect's point of view, from "never
+  // designed" — so a fresh mount (page reload, or navigating away from and back to step
+  // 2) would see `layoutSource === 'auto'` again and re-fire the paid AI call, repeating
+  // on every visit for a persistently-failing book. A `sessionStorage` flag keyed by book
+  // id survives across remounts within the browser tab/session (unlike the ref), so it's
+  // set BEFORE firing to close that gap: "auto-start once per book per session" rather
+  // than "once per mount". Manual "Design"/"Regenerate" buttons remain available for an
+  // intentional retry regardless of this flag. Guarded in a try/catch (and only ever
+  // touched here, inside an effect, so it never runs during SSR) since `sessionStorage`
+  // can throw in some privacy modes — that failure degrades to the ref-only, once-per-mount
+  // behavior rather than blocking the design pass entirely.
   const autoDesignTriggered = useRef(false);
   useEffect(() => {
     if (step !== 1) return;
@@ -200,10 +214,17 @@ export function PhotoBookBuilder({
     if (book.designing) return;
     if (book.layoutSource !== 'auto') return;
     if (locked) return;
+    const storageKey = `photobook-autodesign-${book.id}`;
+    try {
+      if (sessionStorage.getItem(storageKey)) return;
+      sessionStorage.setItem(storageKey, '1');
+    } catch {
+      /* sessionStorage unavailable — fall back to the ref-only within-mount guard */
+    }
     autoDesignTriggered.current = true;
     designBook();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- designBook is stable for this component's lifetime; re-running on every dep change would defeat the once-only ref guard
-  }, [step, analysisComplete, book.designing, book.layoutSource, locked]);
+  }, [step, analysisComplete, book.designing, book.layoutSource, locked, book.id]);
 
   /** Saves the current print PDF to disk via a throwaway anchor — same pattern as any
    *  same-origin `download`-attribute link, just triggered from code once a render we
@@ -384,7 +405,14 @@ export function PhotoBookBuilder({
           unmounting when you navigate away — the upload progress bar and the chat
           conversation (both local component state, nothing persisted server-side, see
           PhotoBookChat's doc comment) survive moving back and forth between steps. */}
-      <Stepper active={step} onStepClick={goToStep} mb="lg" allowNextStepsSelect={false} keepMounted>
+      {/* `allowNextStepsSelect` (Mantine, default true) is left at its default — it
+          controls whether Mantine itself invokes `onStepClick` for a forward step; with it
+          left on, EVERY step click (forward or backward) reaches `goToStep`, which is the
+          single, fully-controlled gate (`analysisComplete`) described above. Explicitly
+          setting it `false` would make Mantine silently swallow forward clicks itself,
+          which would make `goToStep`'s own "finish analysis first" toast for the forward
+          case unreachable dead code. */}
+      <Stepper active={step} onStepClick={goToStep} mb="lg" keepMounted>
         <Stepper.Step label={tp.steps.upload} description={tp.stepUploadDescription}>
           <PhotoBookUploadStep
             bookId={book.id}

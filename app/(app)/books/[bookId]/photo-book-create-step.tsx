@@ -14,6 +14,7 @@ import {
   Text,
   Title,
   Tooltip,
+  useMantineTheme,
 } from '@mantine/core';
 import { useMediaQuery, useLocalStorage } from '@mantine/hooks';
 import {
@@ -32,9 +33,6 @@ import { PhotoBookChat } from './photo-book-chat';
 import { PhotoBookPhotoTile } from './photo-book-photo-tile';
 import type { PhotoBookInfo, PhotoBookPhotoView } from './photo-book-builder';
 
-/** Desktop gets the full 3-pane layout (chat | preview, tray below); narrower than this
- *  the chat pane moves into a Drawer instead of fighting the preview for width. */
-const DESKTOP_QUERY = '(min-width: 900px)';
 
 /**
  * Step 2 — Create (docs/PHOTO_BOOK_PLAN.md, builder restructure): the AI chat on the
@@ -75,7 +73,14 @@ export function PhotoBookCreateStep({
   const { t } = useI18n();
   const tb = t.books.builder;
   const tp = tb.photoBook;
-  const isDesktop = useMediaQuery(DESKTOP_QUERY, true);
+  const theme = useMantineTheme();
+  // Desktop gets the full 3-pane layout (chat | preview, tray below); narrower than this
+  // the chat pane moves into a Drawer instead of fighting the preview for width. Driven
+  // off `theme.breakpoints.md` (992px) so this exactly matches the `Flex` below's
+  // `md: 'row'` breakpoint — a hardcoded 900px here previously created a 900–992px
+  // dead-band where `isDesktop` was already true (fixed sidebar `Box` rendered) but the
+  // `Flex` was still `column`, breaking the layout.
+  const isDesktop = useMediaQuery(`(min-width: ${theme.breakpoints.md})`, true);
   const [chatCollapsed, setChatCollapsed] = useLocalStorage<boolean>({
     key: 'photobook-chat-collapsed',
     defaultValue: false,

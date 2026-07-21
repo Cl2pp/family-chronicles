@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPhotoBookAutoLayout,
   computeCandidateSections,
+  resolveUsableHeroId,
   type AutoLayoutPhoto,
   type PhotoBookAutoLayoutInput,
 } from './photo-book-autolayout';
@@ -875,6 +876,107 @@ describe('buildPhotoBookAutoLayout — FIX 1: pinned/carried-over hero survives 
     });
     const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), coverAssetId: 'hero' };
     assertHeroProtected(buildPhotoBookAutoLayout(input), photos, 'hero');
+  });
+});
+
+describe('resolveUsableHeroId + buildPhotoBookAutoLayout — FIX 1b: stale hero id does not blank the plan (regression)', () => {
+  // Companion to the FIX 1 suite above, but for the opposite failure mode: here
+  // `coverAssetId`/`existingHeroAssetId` themselves point at a photo that is NOT among
+  // the survivors at all — either absent entirely (excluded upstream, so
+  // `buildAndPersistPhotoAutoPlan` never includes it in the `photos` it hands to the
+  // layouter — represented here by simply omitting it) or present but force-excluded via
+  // `userDecision: 'exclude'`. `buildPhotoBookAutoLayout` itself intentionally trusts
+  // whatever hero id it's given (see its own doc comment, and the `'unrelated-cover'`
+  // convention used elsewhere in this file to deliberately pin an inert id) — it is
+  // `buildAndPersistPhotoAutoPlan`'s job to only pass a hero id that's
+  // present-and-non-excluded, via `resolveUsableHeroId`. These tests exercise that real
+  // composition: `resolveUsableHeroId` filtering the id, THEN handing the (possibly now
+  // `null`) result to `buildPhotoBookAutoLayout` — exactly what `buildAndPersistPhotoAutoPlan`
+  // does. Before this fix existed, the stale id would have been passed straight through
+  // unfiltered, `plan.cover.heroAssetId` would end up pointing at a photo outside the
+  // surviving set, `checkPhotoBookPlanConsistency` would reject it, and
+  // `buildAndPersistPhotoAutoPlan` would fall back to `emptyPlan()` — blanking every
+  // section, not just the cover.
+
+  it('a coverAssetId absent from the photo set is dropped, and a fresh hero is picked from survivors', () => {
+    const photos = [
+      photo({ assetId: 'sib1', position: 0, takenAt: new Date(t0), width: 4000, height: 3000 }),
+      photo({ assetId: 'sib2', position: 1, takenAt: new Date(t0 + HOUR), width: 800, height: 600 }),
+    ];
+    // 'stale-cover' was the book's pinned cover, but it's no longer in the surviving set
+    // (excluded upstream) — `resolveUsableHeroId` must reject it.
+    expect(resolveUsableHeroId('stale-cover', photos)).toBeNull();
+
+    const coverAssetId = resolveUsableHeroId('stale-cover', photos);
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), coverAssetId };
+    const { plan, culled } = buildPhotoBookAutoLayout(input);
+
+    expect(plan.cover.heroAssetId).not.toBe('stale-cover');
+    expect(plan.cover.heroAssetId).toBeDefined();
+    expect(['sib1', 'sib2']).toContain(plan.cover.heroAssetId);
+    expect(plan.sections.length).toBeGreaterThan(0);
+
+    const culledIds = new Set(culled.map((c) => c.assetId));
+    const allAssetIds = photos.map((p) => p.assetId);
+    const availableAssetIds = allAssetIds.filter((id) => !culledIds.has(id));
+    expect(checkPhotoBookPlanConsistency(plan, { availableAssetIds, allAssetIds })).toEqual([]);
+  });
+
+  it('an existingHeroAssetId absent from the photo set is dropped, and a fresh hero is picked from survivors', () => {
+    const photos = [
+      photo({ assetId: 'sib1', position: 0, takenAt: new Date(t0), width: 4000, height: 3000 }),
+      photo({ assetId: 'sib2', position: 1, takenAt: new Date(t0 + HOUR), width: 800, height: 600 }),
+    ];
+    expect(resolveUsableHeroId('stale-hero', photos)).toBeNull();
+
+    const existingHeroAssetId = resolveUsableHeroId('stale-hero', photos) ?? undefined;
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), existingHeroAssetId };
+    const { plan, culled } = buildPhotoBookAutoLayout(input);
+
+    expect(plan.cover.heroAssetId).not.toBe('stale-hero');
+    expect(plan.cover.heroAssetId).toBeDefined();
+    expect(['sib1', 'sib2']).toContain(plan.cover.heroAssetId);
+    expect(plan.sections.length).toBeGreaterThan(0);
+
+    const culledIds = new Set(culled.map((c) => c.assetId));
+    const allAssetIds = photos.map((p) => p.assetId);
+    const availableAssetIds = allAssetIds.filter((id) => !culledIds.has(id));
+    expect(checkPhotoBookPlanConsistency(plan, { availableAssetIds, allAssetIds })).toEqual([]);
+  });
+
+  it('a coverAssetId present but force-excluded (userDecision: "exclude") is dropped, and a fresh hero is picked', () => {
+    // `resolveUsableHeroId`'s `usablePhotos` argument mirrors `buildAndPersistPhotoAutoPlan`'s
+    // `available` — the present-and-`!excluded` set from the DB — which never includes a
+    // force-excluded photo either, since that's a separate exclusion mechanism
+    // (`book_photos.user_decision`) layered on top. So from `resolveUsableHeroId`'s point
+    // of view this looks identical to "absent": the excluded photo simply isn't passed in.
+    const usablePhotos = [
+      photo({ assetId: 'sib1', position: 1, takenAt: new Date(t0 + HOUR), width: 800, height: 600 }),
+      photo({ assetId: 'sib2', position: 2, takenAt: new Date(t0 + 2 * HOUR), width: 800, height: 600 }),
+    ];
+    expect(resolveUsableHeroId('excluded-cover', usablePhotos)).toBeNull();
+
+    const coverAssetId = resolveUsableHeroId('excluded-cover', usablePhotos);
+    const input: PhotoBookAutoLayoutInput = { ...baseInput(usablePhotos), coverAssetId };
+    const { plan } = buildPhotoBookAutoLayout(input);
+
+    expect(plan.cover.heroAssetId).not.toBe('excluded-cover');
+    expect(plan.cover.heroAssetId).toBeDefined();
+    expect(['sib1', 'sib2']).toContain(plan.cover.heroAssetId);
+    expect(plan.sections.length).toBeGreaterThan(0);
+
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    expect(placed).not.toContain('excluded-cover');
+
+    const allAssetIds = usablePhotos.map((p) => p.assetId);
+    expect(checkPhotoBookPlanConsistency(plan, { availableAssetIds: allAssetIds, allAssetIds })).toEqual([]);
+  });
+
+  it('resolveUsableHeroId keeps an id that IS present-and-usable (no false negatives)', () => {
+    const photos = [photo({ assetId: 'a' }), photo({ assetId: 'b' })];
+    expect(resolveUsableHeroId('a', photos)).toBe('a');
+    expect(resolveUsableHeroId(null, photos)).toBeNull();
+    expect(resolveUsableHeroId(undefined, photos)).toBeNull();
   });
 });
 
