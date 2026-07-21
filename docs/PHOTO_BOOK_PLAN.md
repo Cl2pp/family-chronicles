@@ -312,6 +312,44 @@ section boundaries and **titles**, hero picks, template rhythm, optional short
 **captions** (from `shortDescription`, rewritten in the chronicle's language), cover
 title suggestion. Validated + consistency-checked; on any failure the auto plan stands.
 
+### 6a. Design-pass hardening (post-launch)
+
+The first shipped version of the AI pass was **all-or-nothing**, and in production that
+meant it effectively never ran: the first real book we inspected sat on
+`layout_source: 'auto'` despite the user having clicked "Buch erstellen". A single
+duplicated `assetId`, one page with 3 photos under a 4-slot template, or one reference to
+a photo excluded while the model was thinking discarded the whole design and silently fell
+back to the mechanical date-range layout — which the user then judged the AI by. Three
+changes address that:
+
+1. **Parse leniently, repair mechanically** (`lib/photo-book-repair.ts`).
+   `coercePhotoBookPlan` reads the model's raw JSON into something schema-valid by
+   construction (re-grouping wrong-arity pages instead of rejecting them);
+   `repairPhotoBookPlan` then reconciles it with the book's current photos — dropping what
+   can't be shown, de-duplicating, re-fitting the pages that lost a photo, placing any
+   force-included photo the model skipped. The model's judgment (sections, titles, pacing,
+   hero) survives; only mechanical defects are fixed. The same function keeps an
+   AI/hand-edited plan alive when the photo set changes, instead of the old behaviour where
+   excluding one photo caused the next page load to regenerate the book as `'auto'`.
+2. **Deterministic design check** (`lib/photo-book-lint.ts`) — "does this layout *work*
+   for these photos", separate from "is it structurally legal". `TEMPLATE_SHAPE_RULES` is
+   the single source of truth for which photo shapes each template renders well (a
+   justified row gives every photo the same height, so one landscape in a `three-column`
+   collapses the row into a thin strip) and is printed into the prompt *and* checked
+   against the output, so the two can't drift.
+3. **Self-review round** — the draft is rendered and screenshotted
+   (`lib/photo-book-proof.ts`, Chromium in the worker), and the model is shown its own
+   pages plus the lint findings and asked for a corrected plan. The revision is adopted
+   only if it scores better on the same check, so a review round can never make a book
+   worse. Measured on a real 36-photo book: 5 date-range sections and 4 squashed
+   `three-column` rows (score 20) → 7 content-named sections with captions and no shape
+   violations (score 0), in ~3.5 minutes.
+
+Because a pass now takes minutes, the worker publishes its stage to `books.design_stage`
+(`lib/photo-book-design-stage.ts`) and the builder shows a live checklist instead of an
+indefinite spinner; `isDesignInFlight` stops a worker that died mid-pass from leaving that
+spinner up — or the book un-designable — forever.
+
 ## 7. Style suites (`lib/photo-book-styles.ts`)
 
 v1's `ThemeTokens` (a CSS-variables map in `lib/book-layout.ts`) grows into a **style

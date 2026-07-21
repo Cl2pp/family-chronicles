@@ -748,6 +748,15 @@ export const de: Dictionary = {
         downloadFailed: 'Das Druck-PDF konnte nicht erstellt werden. Versuch es bitte noch einmal.',
         bookAreaPlaceholder: 'Dein Fotobuch erscheint hier, sobald du es erstellst.',
         bookAreaGenerating: 'Dein Fotobuch wird erstellt…',
+        /** Eine Zeile je Stufe aus PHOTO_BOOK_DESIGN_STAGES (lib/photo-book-design-stage.ts). */
+        designStages: {
+          preparing: 'Fotos werden gesichtet und sortiert',
+          drafting: 'Kapitel werden gebildet und Seiten gestaltet',
+          proofing: 'Die gestalteten Seiten werden gerendert',
+          reviewing: 'Das Ergebnis wird geprüft und verbessert',
+          finalizing: 'Letzter Schliff und Speichern',
+        },
+        designProgressHint: 'Das dauert ein paar Minuten — du kannst die Seite offen lassen.',
         settings: 'Einstellungen',
         settingsModalTitle: 'Bucheinstellungen',
         config: {

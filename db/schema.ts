@@ -501,6 +501,15 @@ export const books = pgTable(
      *  or fallback) — lets the builder show a working state without hijacking `status`,
      *  which still tracks the print-proof PDF render lifecycle. */
     designRequestedAt: timestamp('design_requested_at'),
+    /** How far the in-flight photo-book design pass has got — one of
+     *  `PHOTO_BOOK_DESIGN_STAGES` (`lib/photo-book-design-stage.ts`), written by the worker
+     *  as it moves between stages and read by the builder's status poll. A design pass
+     *  takes minutes (two vision calls with a Chromium render between them), and a bare
+     *  spinner for that long reads as "stuck", so Step 2 shows a live checklist instead.
+     *  Untyped text like `layoutSource`/`excludedReason`; `parseDesignStage` narrows it,
+     *  and an unknown/stale value degrades to "no stage reported". Cleared alongside
+     *  `designRequestedAt` when the job ends. */
+    designStage: text('design_stage'),
     /** Stamped when a photo-book design job (`design-photo-book`, worker/index.ts)
      *  completes — success OR the silent auto-layout fallback, either counts as "this
      *  book has been generated at least once". This is the photo-book builder's Step 2

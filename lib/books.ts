@@ -70,6 +70,7 @@ import {
   type PhotoLayoutOp,
 } from '@/lib/photo-book-ops';
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
+import { isDesignInFlight } from '@/lib/photo-book-design-stage';
 
 /**
  * Book domain — the ONE place book state changes. The Books UI (server actions)
@@ -286,6 +287,9 @@ export interface BookDetail {
   /** Set while an AI design job is queued/running; null once it completes (success or
    *  fallback). Drives the builder's "Design my book" working state. */
   designRequestedAt: Date | null;
+  /** How far the in-flight photo-book design pass has got (`books.design_stage`) — see
+   *  `lib/photo-book-design-stage.ts`. Null when nothing is running (or for story books). */
+  designStage: string | null;
   /** Set once a photo-book design job has completed at least once (success or
    *  auto-fallback) — the builder Step 2 gate for "has this book ever been generated".
    *  Always null for story books. See db/schema.ts's `books.generatedAt` comment. */
@@ -402,6 +406,7 @@ export async function getBookForUser(
     layoutSource: row.book.layoutSource as 'auto' | 'ai' | 'edited',
     layoutStale: row.book.layoutStale,
     designRequestedAt: row.book.designRequestedAt,
+    designStage: row.book.designStage,
     generatedAt: row.book.generatedAt,
     updatedAt: row.book.updatedAt,
     chapters: visibleChapters.map((c, i) => ({
@@ -1059,7 +1064,12 @@ export async function requestPhotoBookAiDesign(input: {
     .where(eq(books.id, input.bookId))
     .limit(1);
   if (!row) return err('Book not found.');
-  if (row.designRequestedAt) return err('An AI design pass is already running for this book.');
+  // `isDesignInFlight`, not a bare null check: a worker that died mid-pass leaves
+  // `design_requested_at` set forever, and a bare check would then refuse to ever design
+  // this book again. After the cutoff the stale flag is simply overwritten below.
+  if (isDesignInFlight(row.designRequestedAt)) {
+    return err('An AI design pass is already running for this book.');
+  }
   if (row.layoutSource === 'edited' && !input.overwriteEdits) {
     return err(
       "This book's layout has manual edits. Designing it again with AI would replace them — try again to confirm.",
@@ -1072,7 +1082,14 @@ export async function requestPhotoBookAiDesign(input: {
     .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.excluded, false)));
   if (!count) return err('Add at least one photo before designing.');
 
-  await db.update(books).set({ designRequestedAt: new Date() }).where(eq(books.id, input.bookId));
+  // `designStage: 'preparing'` is set here, not by the worker, so the builder's checklist
+  // has a first step to show from the moment the button is clicked — a queued job can sit
+  // for a few seconds before the worker picks it up, and "nothing has started" is exactly
+  // the impression this whole progress display exists to avoid.
+  await db
+    .update(books)
+    .set({ designRequestedAt: new Date(), designStage: 'preparing' })
+    .where(eq(books.id, input.bookId));
   await enqueueDesignPhotoBook({ bookId: input.bookId });
   return { ok: true };
 }

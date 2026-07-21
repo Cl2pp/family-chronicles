@@ -24,6 +24,8 @@ import { useMediaQuery, useLocalStorage } from '@mantine/hooks';
 import {
   IconArrowLeft,
   IconArrowRight,
+  IconCircle,
+  IconCircleCheck,
   IconExternalLink,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
@@ -34,6 +36,11 @@ import {
 } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
 import { PHOTO_BOOK_STYLES, type PhotoBookStyle } from '@/lib/photo-book-plan';
+import {
+  designStageIndex,
+  PHOTO_BOOK_DESIGN_STAGES,
+  type PhotoBookDesignStage,
+} from '@/lib/photo-book-design-stage';
 import type { BookCoverType, BookFormat } from '@/lib/gelato';
 import { PhotoBookChat } from './photo-book-chat';
 import { PhotoBookPhotoTile } from './photo-book-photo-tile';
@@ -163,13 +170,61 @@ function PhotoBookConfigPanel({
 }
 
 /**
+ * The live progress checklist shown while a design pass runs (docs/PHOTO_BOOK_PLAN.md —
+ * the pass takes minutes: a vision call over every photo, a Chromium render of the draft,
+ * then a second vision call reviewing those rendered pages). A bare spinner for that long
+ * reads as "stuck", so every stage the worker publishes (`books.design_stage`, polled by
+ * `photo-book-builder.tsx`) is ticked off here: done steps get a check, the current one
+ * gets a spinner, later ones stay dimmed.
+ *
+ * Robust to a missing stage: `designStageIndex(null)` is -1, which renders the first step
+ * as running — a queued pass is always at least about to prepare.
+ */
+function DesignProgressChecklist({ stage }: { stage: PhotoBookDesignStage | null }) {
+  const { t } = useI18n();
+  const tp = t.books.builder.photoBook;
+  const current = Math.max(0, designStageIndex(stage));
+
+  return (
+    <Stack gap={10} py="lg" px="md">
+      <Text fw={500} ta="center" mb={4}>
+        {tp.bookAreaGenerating}
+      </Text>
+      {PHOTO_BOOK_DESIGN_STAGES.map((s, i) => {
+        const done = i < current;
+        const running = i === current;
+        return (
+          <Group key={s} gap={10} wrap="nowrap">
+            <Box w={18} h={18} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {done ? (
+                <IconCircleCheck size={18} color="var(--mantine-color-green-6)" />
+              ) : running ? (
+                <Loader size={14} />
+              ) : (
+                <IconCircle size={16} color="var(--mantine-color-slate-3)" />
+              )}
+            </Box>
+            <Text fz={14} c={done ? 'dimmed' : running ? undefined : 'dimmed'} fw={running ? 500 : 400}>
+              {tp.designStages[s]}
+            </Text>
+          </Group>
+        );
+      })}
+      <Text fz={12} c="dimmed" ta="center" mt={6}>
+        {tp.designProgressHint}
+      </Text>
+    </Stack>
+  );
+}
+
+/**
  * Step 2 — Create (docs/PHOTO_BOOK_PLAN.md, builder restructure PR6: "configure →
  * generate → book"). Gated on `book.generatedAt`:
  *
  * - **Not generated yet** (`generatedAt == null`): the config panel (style, cover type,
  *   size, title/subtitle) is front and center with the "Create book" CTA; the book area
- *   on the right shows a placeholder, or a spinner while the first design pass is
- *   running (`book.designing`). No chat, no tray — there's no book yet to edit.
+ *   on the right shows a placeholder, or the design-progress checklist while the first
+ *   pass is running (`book.designing`). No chat, no tray — there's no book yet to edit.
  * - **Generated**: the familiar layout returns — collapsible AI chat on the left, live
  *   preview on the right, photo tray along the bottom — plus a settings (gear) button on
  *   the preview card that reopens the same config panel in a `Modal`, alongside the
@@ -178,6 +233,8 @@ function PhotoBookConfigPanel({
 export function PhotoBookCreateStep({
   bookId,
   book,
+  active,
+  designStage,
   photos,
   locked,
   pending,
@@ -194,6 +251,11 @@ export function PhotoBookCreateStep({
 }: {
   bookId: string;
   book: PhotoBookInfo;
+  /** True when this is the step the user is actually looking at. The Stepper keeps every
+   *  step mounted, so without this the preview iframe would load inside a `display: none`
+   *  panel — see `bookArea` below for why that produced a blank preview. */
+  active: boolean;
+  designStage: PhotoBookDesignStage | null;
   photos: PhotoBookPhotoView[];
   locked: boolean;
   pending: boolean;
@@ -225,26 +287,40 @@ export function PhotoBookCreateStep({
   });
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Latches true the first time this step is shown and stays true — see `bookArea` below.
+  // Adjusted during render (React's "adjusting state when a prop changes" pattern) rather
+  // than in an effect, so the iframe mounts in the same commit the step becomes visible
+  // instead of a render later.
+  const [mountedPreview, setMountedPreview] = useState(active);
+  if (active && !mountedPreview) setMountedPreview(true);
 
   const hasGenerated = book.generatedAt != null;
   const chatPane = <PhotoBookChat bookId={bookId} locked={locked} />;
 
-  /** The book area (right pane in both states): a spinner while a design pass is in
-   *  flight, the placeholder before the book has ever been generated, or the live
-   *  preview iframe once it has. */
+  /** The book area (right pane in both states): the progress checklist while a design pass
+   *  is in flight, the placeholder before the book has ever been generated, or the live
+   *  preview iframe once it has.
+   *
+   *  The iframe is mounted ONLY while this step is on screen. The preview HTML paginates
+   *  itself with Paged.js and then zooms the page stack to fit its viewport
+   *  (`fitPages` in `lib/photo-book-layout.ts`); inside the Stepper's hidden panel the
+   *  iframe has no layout box at all, so that fit resolved against a 0×0 viewport and
+   *  scaled the whole book to nothing. Coming back to a finished book therefore showed an
+   *  empty preview — the book was fine, its rendering had been sized away. Mounting on
+   *  first activation (and keeping it mounted afterwards, via `mountedPreview`, so
+   *  switching steps doesn't re-fetch and re-paginate every time) fixes it at the source. */
   const bookArea = book.designing ? (
-    <Stack align="center" gap={8} py="xl">
-      <Loader size="md" />
-      <Text c="dimmed" ta="center">
-        {tp.bookAreaGenerating}
-      </Text>
-    </Stack>
+    <DesignProgressChecklist stage={designStage} />
   ) : !hasGenerated ? (
     <Stack align="center" gap={4} py="xl">
       <IconPhoto size={28} stroke={1.4} color="var(--mantine-color-slate-4)" />
       <Text c="dimmed" ta="center">
         {tp.bookAreaPlaceholder}
       </Text>
+    </Stack>
+  ) : !mountedPreview ? (
+    <Stack align="center" gap={8} py="xl">
+      <Loader size="sm" />
     </Stack>
   ) : (
     <Box

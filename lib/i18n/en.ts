@@ -730,6 +730,15 @@ export const en = {
         downloadFailed: 'Creating the print PDF failed. Please try again.',
         bookAreaPlaceholder: 'Your photo book will appear here once you create it.',
         bookAreaGenerating: 'Creating your photo book…',
+        /** One line per stage in PHOTO_BOOK_DESIGN_STAGES (lib/photo-book-design-stage.ts). */
+        designStages: {
+          preparing: 'Looking through and sorting your photos',
+          drafting: 'Grouping them into chapters and laying out pages',
+          proofing: 'Rendering the designed pages',
+          reviewing: 'Reviewing the result and improving it',
+          finalizing: 'Final touches and saving',
+        },
+        designProgressHint: 'This takes a couple of minutes — you can leave the page open.',
         settings: 'Settings',
         settingsModalTitle: 'Book settings',
         config: {

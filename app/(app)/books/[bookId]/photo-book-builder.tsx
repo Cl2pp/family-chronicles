@@ -21,6 +21,7 @@ import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
 import { isBookPrintFresh } from '@/lib/book-print-status';
 import { canAccessPhotoBookStep } from '@/lib/photo-book-step-gate';
+import type { PhotoBookDesignStage } from '@/lib/photo-book-design-stage';
 import type { PhotoBookStyle } from '@/lib/photo-book-plan';
 import type { BookCoverType, BookFormat, BookQuote } from '@/lib/gelato';
 import {
@@ -73,6 +74,9 @@ export interface PhotoBookInfo {
   previewVersion: number;
   /** True while an AI design pass is queued/running (books.design_requested_at). */
   designing: boolean;
+  /** How far that pass has got (`books.design_stage`) — drives Step 2's progress
+   *  checklist. Null when nothing is running. */
+  designStage: PhotoBookDesignStage | null;
   /** ISO timestamp of the last time a design job completed for this book (success or
    *  auto-fallback), or null if it never has — `books.generated_at`. This is the Step 2
    *  gate: null means show the config-only "not generated yet" view, non-null means show
@@ -135,7 +139,13 @@ export function PhotoBookBuilder({
   // (as opposed to `downloadRequesting`, which only covers the initial "kick off the
   // render" request — the render itself runs in the worker and is polled for below).
   const [awaitingDownload, setAwaitingDownload] = useState(false);
-  const [step, setStep] = useState(0);
+  const [designStage, setDesignStage] = useState<PhotoBookDesignStage | null>(book.designStage);
+  const [serverStage, setServerStage] = useState<PhotoBookDesignStage | null>(book.designStage);
+  // Land on the book itself when there is one. The wizard used to always mount at step 1
+  // (upload), so coming back to a finished book meant clicking forward to find it again —
+  // and, worse, step 2's preview iframe was mounted inside a `display: none` panel the
+  // whole time, which is what made it come up blank (see `PhotoBookCreateStep`).
+  const [step, setStep] = useState(book.generatedAt ? 1 : 0);
   const isEdited = book.layoutSource === 'edited';
 
   const locked = book.status === 'ordered';
@@ -157,20 +167,33 @@ export function PhotoBookBuilder({
   // The AI design pass rewrites the layout plan server-side (worker process) with no
   // other signal the client can see — poll while `book.designing` is true and refresh
   // once it clears, same pattern as the story builder's design poll (book-builder.tsx).
+  // The same poll also carries the pass's current stage, which Step 2 renders as a live
+  // checklist — a design pass runs for minutes, and an indefinite spinner reads as stuck.
   useEffect(() => {
     if (!book.designing) return;
     const timer = setInterval(async () => {
       try {
         const res = await fetch(`/api/books/${book.id}/status`);
         if (!res.ok) return;
-        const data = (await res.json()) as { designing: boolean };
+        const data = (await res.json()) as { designing: boolean; designStage: PhotoBookDesignStage | null };
+        setDesignStage(data.designStage);
         if (!data.designing) router.refresh();
       } catch {
         /* transient network error — next tick retries */
       }
-    }, 4000);
+      // Faster than the other polls here: this one drives a progress display the user is
+      // actively watching, and it's a single indexed row read.
+    }, 2500);
     return () => clearInterval(timer);
   }, [book.designing, book.id, router]);
+
+  // Server-rendered stage wins on every refresh; the poll above only fills the gaps between
+  // them. Written during render (React's "adjusting state when a prop changes" pattern)
+  // rather than in an effect, so the checklist never paints one stage behind.
+  if (book.designStage !== serverStage) {
+    setServerStage(book.designStage);
+    setDesignStage(book.designStage);
+  }
 
   // While a render triggered by the Download button is in flight, poll status the same
   // way the order page already does for its own print-proof render (order-view.tsx) —
@@ -452,6 +475,12 @@ export function PhotoBookBuilder({
           <PhotoBookCreateStep
             bookId={book.id}
             book={book}
+            // The Stepper keeps every step mounted (`keepMounted`), so the create step has
+            // to know whether it is the VISIBLE one — its preview iframe must not load
+            // inside a `display: none` panel (zero-size viewport → the injected
+            // zoom-to-fit scales the page stack to nothing → blank preview).
+            active={step === 1}
+            designStage={designStage}
             photos={photos}
             locked={locked}
             pending={pending}

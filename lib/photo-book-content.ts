@@ -10,6 +10,7 @@ import {
   type PhotoPlanContent,
 } from '@/lib/photo-book-plan';
 import { buildPhotoBookAutoLayout, resolveUsableHeroId, type AutoLayoutPhoto } from '@/lib/photo-book-autolayout';
+import { repairPhotoBookPlan } from '@/lib/photo-book-repair';
 import { parseStoredPhotoAnalysis, type PhotoAnalysis } from '@/lib/photo-analysis';
 
 /**
@@ -132,9 +133,78 @@ export async function loadOrBuildPhotoPlan(bookId: string, loaded: LoadedPhotoBo
       `[photo-book-content] stored plan for ${bookId} failed validation, rebuilding:`,
       validated.error,
     );
+  } else if (row.layoutPlan && row.layoutStale && row.layoutSource !== 'auto') {
+    const repaired = await repairAndPersistPhotoPlan(bookId, loaded);
+    if (repaired) return repaired;
   }
 
   return buildAndPersistPhotoAutoPlan(bookId, loaded);
+}
+
+/**
+ * Brings an AI-designed or hand-edited plan back in line with the book's current photos,
+ * rather than throwing it away and regenerating from scratch.
+ *
+ * This is the fix for the worst behaviour photo books had: excluding a single photo (or
+ * adding one) flips `layout_stale`, and the very next page load — a plain GET, in the web
+ * process — used to run the deterministic auto-layouter over the book and persist the
+ * result as `layout_source: 'auto'`. The user's AI-designed book was silently replaced by
+ * the mechanical date-range layout, for good, by looking at it. `repairPhotoBookPlan`
+ * (`lib/photo-book-repair.ts`) instead drops what can no longer be shown, re-fits the pages
+ * that lost a photo, and keeps the sections, titles, pacing and cover the design pass chose.
+ *
+ * Returns `null` when the repair leaves nothing worth keeping (every photo gone), so the
+ * caller falls back to a full auto rebuild.
+ *
+ * Note what this deliberately does NOT do: place photos that were added since the plan was
+ * built. A plan's producer is allowed to leave a photo out on purpose, and nothing in the
+ * data distinguishes "the designer passed on this one" from "this one is new" — so folding
+ * new photos in automatically would resurrect every photo the design dropped, every time
+ * anything went stale. Newly uploaded photos reach the book through an explicit "Design
+ * again"/regenerate instead.
+ */
+async function repairAndPersistPhotoPlan(
+  bookId: string,
+  loaded: LoadedPhotoBook,
+): Promise<PhotoBookPlan | null> {
+  const stored = validatePhotoBookPlan(loaded.row.layoutPlan);
+  if (!stored.ok) return null;
+
+  const available = loaded.photos.filter(
+    (p): p is PhotoBookPhotoRef & { width: number; height: number } =>
+      !p.excluded && p.width != null && p.height != null,
+  );
+  if (available.length === 0) return null;
+
+  const { plan, changes } = repairPhotoBookPlan(stored.plan, {
+    photos: available.map((p) => ({ assetId: p.assetId, width: p.width, height: p.height, analysis: p.analysis })),
+    mustInclude: available.filter((p) => p.userDecision === 'include').map((p) => p.assetId),
+  });
+
+  const content: PhotoPlanContent = {
+    availableAssetIds: loaded.photos.filter((p) => !p.excluded).map((p) => p.assetId),
+    allAssetIds: loaded.photos.map((p) => p.assetId),
+  };
+  const revalidated = validatePhotoBookPlan(plan);
+  const problems = revalidated.ok ? checkPhotoBookPlanConsistency(revalidated.plan, content) : [revalidated.error];
+  if (!revalidated.ok || problems.length > 0) {
+    console.warn(`[photo-book-content] could not repair the stored plan for ${bookId}, rebuilding:`, problems);
+    return null;
+  }
+  // Nothing left to show — a full rebuild will produce the same emptiness more honestly.
+  if (revalidated.plan.sections.length === 0) return null;
+
+  if (changes.length > 0) {
+    console.log(`[photo-book-content] repaired the ${loaded.row.layoutSource} plan for ${bookId}:`, changes);
+  }
+  // `layoutSource` is deliberately left alone: this is the same design, adjusted — not a
+  // new one. Keeping it as 'ai'/'edited' also keeps the builder's "replace your manual
+  // edits?" consent prompt honest.
+  await db
+    .update(books)
+    .set({ layoutPlan: revalidated.plan, layoutStale: false, updatedAt: new Date() })
+    .where(eq(books.id, bookId));
+  return revalidated.plan;
 }
 
 /**

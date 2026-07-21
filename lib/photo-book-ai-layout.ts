@@ -17,6 +17,18 @@ import {
   type PhotoPlanContent,
 } from '@/lib/photo-book-plan';
 import { referencedPhotoAssetIds } from '@/lib/photo-book-content';
+import { TRIM } from '@/lib/book-content';
+import {
+  formatLintFindings,
+  lintPhotoBookPlan,
+  lintScore,
+  TEMPLATE_SHAPE_RULES,
+  type LintPhoto,
+  type PhotoBookLintFinding,
+} from '@/lib/photo-book-lint';
+import { coercePhotoBookPlan, repairPhotoBookPlan } from '@/lib/photo-book-repair';
+import { flaggedPageIndices, planPageLabels, renderProofPages, selectProofPages } from '@/lib/photo-book-proof';
+import type { PhotoBookDesignStage } from '@/lib/photo-book-design-stage';
 
 /**
  * The photo-book AI design pass (docs/PHOTO_BOOK_PLAN.md §6, producer #2) — the
@@ -107,20 +119,41 @@ function templateVocabularyText(): string {
   const descriptions: Record<(typeof PHOTO_PAGE_TEMPLATES)[number], string> = {
     'full-bleed': 'one photo, fills the page edge-to-edge — hero moments',
     'full-framed': 'one photo, matted with a white frame',
-    'two-horizontal': 'two landscape photos stacked',
-    'two-vertical': 'two portrait photos side by side',
-    'three-column': 'three portrait photos as columns',
-    'three-mixed': 'three photos, one dominant + two small',
-    'collage-4': 'four photos, a justified mosaic row',
-    'collage-5': 'five photos, a justified mosaic row',
+    'two-horizontal': 'two photos stacked, each full page width',
+    'two-vertical': 'two photos side by side in one justified row',
+    'three-column': 'three photos side by side in one justified row',
+    'three-mixed': 'one dominant photo across the top + two smaller ones below it',
+    'collage-4': 'four photos, a justified mosaic',
+    'collage-5': 'five photos, a justified mosaic',
     divider: 'section opener — title/date only, or with one muted photo',
   };
+  // The shape requirement printed here comes from `TEMPLATE_SHAPE_RULES`
+  // (`lib/photo-book-lint.ts`) — the SAME table the finished plan is checked against, so
+  // what the model is told can never drift from what it is judged by.
   return PHOTO_PAGE_TEMPLATES.map((t) => {
     const { min, max } = PHOTO_PAGE_TEMPLATE_SLOTS[t];
     const arity = min === max ? `exactly ${min}` : `${min}-${max}`;
-    return `  "${t}" — ${arity} photo${max === 1 ? '' : 's'} — ${descriptions[t]}`;
+    const rule = TEMPLATE_SHAPE_RULES[t];
+    const shape = rule ? ` — SHAPE: ${rule.why}` : ' — works with any photo shape';
+    return `  "${t}" — ${arity} photo${max === 1 ? '' : 's'} — ${descriptions[t]}${shape}`;
   }).join('\n');
 }
+
+/**
+ * The rule the design pass exists to enforce, stated as plainly as possible. Photo shape
+ * ("landscape"/"portrait") is printed for every photo in the table below, so this is
+ * something the model can actually act on — and the reason it matters is mechanical: a
+ * side-by-side row gives every photo in it the SAME height, so the row's height is the page
+ * width divided by the sum of the photos' aspect ratios. Three landscapes (≈1.5 each) come
+ * out as a 1/4.5-of-the-width strip on a tall page. This paragraph is what stops that.
+ */
+const SHAPE_RULES = `Photo shape rules — these are the difference between a book that looks designed and one that looks broken. Every photo's shape (landscape / portrait / square) is given in the photo list below; check it before you put photos on a page together:
+- "three-column" places all three photos in ONE ROW at a shared height. Use it ONLY when all three photos are portrait. A single landscape photo in that row collapses the whole row into a thin horizontal strip with huge empty margins above and below — this is the single most common way this layout goes wrong.
+- Any trio that contains a landscape photo must use "three-mixed" instead, with the LANDSCAPE photo listed FIRST (it becomes the dominant one).
+- "two-vertical" is the side-by-side row for pairs: right for two portraits, and fine for one portrait + one landscape. Two landscapes side by side become a strip — stack them with "two-horizontal" instead.
+- "two-horizontal" stacks both photos full-width, so both must be landscape (or square). A portrait photo in a full-width stacked cell is letterboxed with dead space either side.
+- "full-bleed" fills the whole page; it suits a photo whose shape roughly matches the page. "full-framed" mats a photo on the page and is safe for any shape.
+- "collage-4"/"collage-5" crop their tiles, so any mix of shapes is fine there.`;
 
 function schemaText(): string {
   return `The layout plan is a single JSON object with this exact shape:
@@ -163,19 +196,26 @@ const HARD_RULES = `Hard rules — a plan that breaks any of these will be disca
  *  book — used to write section titles/captions in the family's language. Falls back to
  *  German, matching the auto-layouter's own `dateLocale` default (`'de-DE'`) and the
  *  app's German-first default locale. */
-async function chronicleLanguageName(chronicleId: string): Promise<string> {
+async function chronicleContext(chronicleId: string): Promise<{ languageName: string; name: string }> {
   const [row] = await db
-    .select({ storyLanguage: chronicles.storyLanguage })
+    .select({ storyLanguage: chronicles.storyLanguage, name: chronicles.name })
     .from(chronicles)
     .where(eq(chronicles.id, chronicleId))
     .limit(1);
-  return row?.storyLanguage === 'en' ? 'English' : 'German';
+  return {
+    languageName: row?.storyLanguage === 'en' ? 'English' : 'German',
+    // Matches `renderPhotoBook`'s own fallback in `lib/book-render.ts` — the name only
+    // appears as running text on the cover/divider pages of the proof render.
+    name: row?.name ?? 'Familienwerk',
+  };
 }
 
 function systemPrompt(languageName: string): string {
   return `You are an experienced photo-book designer working for "Familienwerk", a private family memoir app. You are given one family's photo book: every available photo's metadata (id, when/roughly where it was taken, a candidate time-based cluster, its vision-analysis scores if available, and its pixel size) and, for the more important ones, the actual images. Your job is to propose a JSON "layout plan" (docs/PHOTO_BOOK_PLAN.md §5) that groups the photos into sections, gives each section a real title, picks a cover hero, and lays every section out page by page.
 
 ${schemaText()}
+
+${SHAPE_RULES}
 
 ${HARD_RULES}
 
@@ -322,13 +362,182 @@ export function applyPhotoPlanCarryOver(plan: PhotoBookPlan, loaded: LoadedPhoto
 }
 
 /**
- * Runs the AI design pass for a photo book. Loads the book's current content, sends the
- * model the full photo analysis table plus a capped set of actual images, and returns a
- * validated `PhotoBookPlan` — or `null` on any failure, in which case the caller should
- * fall back to `buildAndPersistPhotoAutoPlan`. Never throws.
+ * Turns a model's raw reply into a plan that is guaranteed valid, consistent with the
+ * book's current photos, and complete (every force-included photo placed) — or `null` if
+ * the reply had nothing plan-shaped in it at all.
+ *
+ * This function is why the design pass stopped being all-or-nothing. Previously each of
+ * these steps was a `return null` (→ silent fall back to the mechanical auto-layout), which
+ * is what production books were actually getting: one duplicated assetId or one miscounted
+ * page and the user's "Buch erstellen" click produced a plain date-range layout that they
+ * then judged the AI by. Now the model's judgment — the sections, the titles, the pacing,
+ * the hero — is kept, and only the mechanical defects are fixed.
  */
-export async function proposePhotoBookPlan(bookId: string): Promise<PhotoBookPlan | null> {
+function acceptPlan(
+  bookId: string,
+  raw: unknown,
+  loaded: LoadedPhotoBook,
+  available: (AutoLayoutPhoto & { s3Key: string; thumbS3Key: string | null })[],
+  label: string,
+): PhotoBookPlan | null {
+  // Only a fallback for a model that omitted/invented a `style` — `applyPhotoPlanCarryOver`
+  // below overrides it with the stored plan's style regardless (the user's own choice wins).
+  const stored = loaded.row.layoutPlan ? validatePhotoBookPlan(loaded.row.layoutPlan) : null;
+
+  const coerced = coercePhotoBookPlan(raw, {
+    photos: available,
+    fallbackTitle: loaded.row.title,
+    fallbackStyle: stored?.ok ? stored.plan.style : 'classic',
+  });
+  if (!coerced) {
+    console.error(`[photo-book-ai-layout] ${label} for ${bookId}: reply had no usable plan structure`);
+    return null;
+  }
+
+  const repaired = repairPhotoBookPlan(coerced.plan, {
+    photos: available,
+    mustInclude: available.filter((p) => p.userDecision === 'include').map((p) => p.assetId),
+  });
+  const fixes = [...coerced.changes, ...repaired.changes];
+  if (fixes.length > 0) {
+    console.log(`[photo-book-ai-layout] ${label} for ${bookId}: repaired ${fixes.length} defect(s):`, fixes);
+  }
+
+  const plan = applyPhotoPlanCarryOver(repaired.plan, loaded);
+
+  // Last line of defence. `coerce` + `repair` are built to make this pass, so a failure
+  // here is a bug in them, not a model problem — log it loudly and let the caller fall
+  // back rather than persisting something the renderer can't trust.
+  //
+  // "Available" means what `checkPhotoBookPlanConsistency` — and
+  // `buildAndPersistPhotoAutoPlan`'s own `content.availableAssetIds` — mean by it: every
+  // non-excluded photo, NOT further narrowed to `available` (which additionally requires
+  // known dimensions). Using the narrower set would make a pinned cover
+  // (`books.cover_asset_id`, applied by `applyPhotoPlanCarryOver` regardless of whether its
+  // dimensions have been analyzed yet) look "unavailable" and needlessly fail.
+  const content: PhotoPlanContent = {
+    availableAssetIds: loaded.photos.filter((p) => !p.excluded).map((p) => p.assetId),
+    allAssetIds: loaded.photos.map((p) => p.assetId),
+  };
+  const validated = validatePhotoBookPlan(plan);
+  if (!validated.ok) {
+    console.error(`[photo-book-ai-layout] ${label} for ${bookId} failed schema validation after repair: ${validated.error}`);
+    return null;
+  }
+  const problems = checkPhotoBookPlanConsistency(validated.plan, content);
+  if (problems.length > 0) {
+    console.error(`[photo-book-ai-layout] ${label} for ${bookId} failed consistency check after repair:`, problems);
+    return null;
+  }
+  // A carried-over pinned cover hero (`applyPhotoPlanCarryOver`) can displace a
+  // force-included photo that repair had placed on page one. Cheap to re-check, and the
+  // "the user insisted" contract is worth being sure about.
+  const referenced = referencedPhotoAssetIds(validated.plan);
+  const missing = available
+    .filter((p) => p.userDecision === 'include')
+    .map((p) => p.assetId)
+    .filter((id) => !referenced.has(id));
+  if (missing.length > 0) {
+    console.error(`[photo-book-ai-layout] ${label} for ${bookId} still omits force-included photo(s):`, missing);
+    return null;
+  }
+
+  return validated.plan;
+}
+
+/** The photo shapes + scores the linter needs, straight off the rows already loaded. */
+function toLintPhotos(photos: AutoLayoutPhoto[]): LintPhoto[] {
+  return photos.map((p) => ({ assetId: p.assetId, width: p.width, height: p.height, analysis: p.analysis }));
+}
+
+const REVIEW_SYSTEM_PROMPT = `You are the same photo-book designer, now reviewing your own finished layout. You are shown: the layout plan you produced, an automated design check listing concrete problems found in it, and SCREENSHOTS OF THE ACTUAL RENDERED PAGES.
+
+Look at the rendered pages. Judge them the way a person flipping through the printed book would:
+- Is any row of photos squashed into a thin strip with big empty margins above and below it? (That is what happens when landscape photos are put in a side-by-side row — the fix is a different template, not a different photo size.)
+- Is any photo letterboxed with dead space beside it?
+- Does a page look lopsided or half-empty?
+- Do several pages in a row look identical, so the book reads as mechanically generated?
+- Is anything important cropped out (a face cut in half by a full-bleed edge)?
+
+Then output a CORRECTED version of the complete layout plan, in exactly the same JSON format, fixing every problem you can. Keep everything that already works — the section boundaries, the titles, the cover hero, the captions — and change only what needs changing. It is fine to move a photo to a different page, swap a page's template, split or merge pages, or drop a weak photo.
+
+Output ONLY the corrected JSON plan. No markdown fences, no commentary before or after.`;
+
+/** Builds the review round's user message: the current plan, the deterministic findings,
+ *  and the rendered pages themselves. */
+function buildReviewMessages(
+  plan: PhotoBookPlan,
+  findings: PhotoBookLintFinding[],
+  proofs: { index: number; label: string; dataUri: string }[],
+  available: (AutoLayoutPhoto & { s3Key: string })[],
+  languageName: string,
+  clusterIndex: Map<string, number>,
+): ChatCompletionMessageParam[] {
+  const parts: ChatCompletionContentPart[] = [
+    {
+      type: 'text',
+      text:
+        `Here is the layout plan you produced:\n\n${JSON.stringify(plan)}\n\n` +
+        (findings.length > 0
+          ? `An automated design check found these problems:\n${formatLintFindings(findings)}\n\n`
+          : 'The automated design check found no problems, but it only catches mechanical faults — judge the pages yourself.\n\n') +
+        `Below are screenshots of ${proofs.length} of the rendered pages. Fix what you see and output the corrected full plan. Titles and captions stay in ${languageName}. You may only use assetIds from this list:`,
+    },
+    {
+      type: 'text',
+      text: `Available photos (${available.length}):\n${available
+        .map((p) => photoTableLine(p, clusterIndex.get(p.assetId) ?? 0))
+        .join('\n')}`,
+    },
+  ];
+  for (const proof of proofs) {
+    parts.push({ type: 'text', text: `Rendered ${proof.label}:` });
+    parts.push({ type: 'image_url', image_url: { url: proof.dataUri } });
+  }
+  return [
+    { role: 'system', content: REVIEW_SYSTEM_PROMPT },
+    { role: 'user', content: parts },
+  ];
+}
+
+export interface ProposePhotoBookPlanOptions {
+  /** Called as the pass moves between stages, so the worker can publish progress to the
+   *  builder (`books.design_stage`). Failures here are swallowed by the caller. */
+  onStage?: (stage: PhotoBookDesignStage) => Promise<void> | void;
+  /** Set false to skip the render+review round entirely (one model call instead of two,
+   *  no Chromium). Only used to keep the pass cheap where a review can't help. */
+  review?: boolean;
+}
+
+/**
+ * Runs the AI design pass for a photo book:
+ *
+ *  1. **draft** — the model sees every photo's metadata plus a capped set of actual images
+ *     and proposes a full layout plan;
+ *  2. **repair** — the reply is parsed leniently and mechanically fixed (`acceptPlan`);
+ *  3. **proof** — the draft is rendered and its pages screenshotted (`lib/photo-book-proof.ts`);
+ *  4. **review** — the model looks at its own rendered pages plus a deterministic design
+ *     check (`lib/photo-book-lint.ts`) and returns a corrected plan;
+ *  5. **keep the better one** — the revision is only adopted if it actually scores better
+ *     on the same design check, so a review round can never make a book worse.
+ *
+ * Returns the plan, or `null` if there's nothing usable at all, in which case the caller
+ * falls back to `buildAndPersistPhotoAutoPlan`. Never throws.
+ */
+export async function proposePhotoBookPlan(
+  bookId: string,
+  options: ProposePhotoBookPlanOptions = {},
+): Promise<PhotoBookPlan | null> {
+  const stage = async (s: PhotoBookDesignStage) => {
+    try {
+      await options.onStage?.(s);
+    } catch (e) {
+      console.warn(`[photo-book-ai-layout] stage report '${s}' failed for ${bookId}:`, e);
+    }
+  };
+
   try {
+    await stage('preparing');
     const loaded = await loadPhotoBook(bookId);
     const available = toAutoLayoutPhotos(loaded.photos.filter((p) => !p.excluded));
     if (available.length === 0) {
@@ -336,9 +545,10 @@ export async function proposePhotoBookPlan(bookId: string): Promise<PhotoBookPla
       return null;
     }
 
-    const languageName = await chronicleLanguageName(loaded.row.chronicleId);
+    const { languageName, name: chronicleName } = await chronicleContext(loaded.row.chronicleId);
     const messages = await buildMessages(loaded, available, languageName);
 
+    await stage('drafting');
     const completion = await openrouter.chat.completions.create({
       model: env.STYLING_MODEL,
       messages,
@@ -351,63 +561,55 @@ export async function proposePhotoBookPlan(bookId: string): Promise<PhotoBookPla
       return null;
     }
 
-    const parsed = extractJson(text);
-    if (!parsed) {
-      console.error(`[photo-book-ai-layout] design pass for ${bookId} returned unparseable JSON:`, text.slice(0, 500));
-      return null;
+    const draft = acceptPlan(bookId, extractJson(text), loaded, available, 'draft');
+    if (!draft) return null;
+    if (options.review === false) return draft;
+
+    const lintPhotos = toLintPhotos(available);
+    const draftFindings = lintPhotoBookPlan(draft, lintPhotos);
+    const draftScore = lintScore(draftFindings);
+
+    // Render the draft and let the model look at it. A failure anywhere in here leaves the
+    // draft standing — the review is an improvement pass, never a gate.
+    await stage('proofing');
+    const trim = TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'];
+    const { labels } = planPageLabels(draft);
+    const wanted = selectProofPages(labels, flaggedPageIndices(draft, draftFindings));
+    const proofs = await renderProofPages(loaded, draft, chronicleName, trim, wanted);
+    if (proofs.length === 0) {
+      console.log(`[photo-book-ai-layout] design pass for ${bookId}: no proof pages rendered, keeping the draft`);
+      return draft;
     }
 
-    const validated = validatePhotoBookPlan(parsed);
-    if (!validated.ok) {
-      console.error(`[photo-book-ai-layout] design pass for ${bookId} failed schema validation: ${validated.error}`);
-      return null;
+    await stage('reviewing');
+    const clusterIndex = new Map<string, number>();
+    computeCandidateSections(available).forEach((section, i) =>
+      section.forEach((p) => clusterIndex.set(p.assetId, i)),
+    );
+    const reviewCompletion = await openrouter.chat.completions.create({
+      model: env.STYLING_MODEL,
+      messages: buildReviewMessages(draft, draftFindings, proofs, available, languageName, clusterIndex),
+      ...OPENROUTER_ROUTING,
+    });
+    const reviewText = reviewCompletion.choices[0]?.message?.content;
+    if (typeof reviewText !== 'string' || !reviewText.trim()) {
+      console.log(`[photo-book-ai-layout] review round for ${bookId} returned nothing, keeping the draft`);
+      return draft;
     }
 
-    const plan = applyPhotoPlanCarryOver(validated.plan, loaded);
+    await stage('finalizing');
+    const revised = acceptPlan(bookId, extractJson(reviewText), loaded, available, 'review');
+    if (!revised) return draft;
 
-    // "Available" here means what `checkPhotoBookPlanConsistency` — and
-    // `buildAndPersistPhotoAutoPlan`'s own `content.availableAssetIds` — mean by it:
-    // every non-excluded photo, NOT further narrowed to `available` (which additionally
-    // requires known dimensions, since only those can be shown to the model or laid
-    // out). Using the narrower set here would make a pinned cover
-    // (`books.cover_asset_id`, applied by `applyPhotoPlanCarryOver` above regardless of
-    // whether its dimensions have been analyzed yet) look "unavailable" and needlessly
-    // fail consistency — matching PR2's definition keeps the two producers agreeing on
-    // what counts as in-bounds.
-    const content: PhotoPlanContent = {
-      availableAssetIds: loaded.photos.filter((p) => !p.excluded).map((p) => p.assetId),
-      allAssetIds: loaded.photos.map((p) => p.assetId),
-    };
-    const problems = checkPhotoBookPlanConsistency(plan, content);
-    if (problems.length > 0) {
-      console.error(`[photo-book-ai-layout] design pass for ${bookId} failed consistency check:`, problems);
-      return null;
+    const revisedScore = lintScore(lintPhotoBookPlan(revised, lintPhotos));
+    if (revisedScore > draftScore) {
+      console.log(
+        `[photo-book-ai-layout] review round for ${bookId} scored worse (${revisedScore} vs ${draftScore}) — keeping the draft`,
+      );
+      return draft;
     }
-
-    // Completeness check for force-included photos (docs/PHOTO_BOOK_PLAN.md re-include
-    // fix): unlike the deterministic auto-layouter, this is a model's free-form judgment
-    // call, and HARD_RULES telling it a photo "MUST BE INCLUDED" is a strong hint, not a
-    // guarantee — `checkPhotoBookPlanConsistency` above only verifies the model didn't
-    // reference anything it shouldn't, not that it placed everything it was told to. A
-    // force-included photo the model still left out breaks the "the user insisted"
-    // contract just as much as an invalid plan would, so this is treated the same way:
-    // discard and fall back to `buildAndPersistPhotoAutoPlan`, which — thanks to the same
-    // `userDecision` threading in `lib/photo-book-autolayout.ts` — is guaranteed to place
-    // every force-included photo somewhere.
-    const forcedIncludeIds = available.filter((p) => p.userDecision === 'include').map((p) => p.assetId);
-    if (forcedIncludeIds.length > 0) {
-      const referenced = referencedPhotoAssetIds(plan);
-      const missing = forcedIncludeIds.filter((id) => !referenced.has(id));
-      if (missing.length > 0) {
-        console.error(
-          `[photo-book-ai-layout] design pass for ${bookId} omitted ${missing.length} force-included photo(s), discarding:`,
-          missing,
-        );
-        return null;
-      }
-    }
-
-    return plan;
+    console.log(`[photo-book-ai-layout] review round for ${bookId} improved the design (${draftScore} → ${revisedScore})`);
+    return revised;
   } catch (err) {
     console.error(`[photo-book-ai-layout] design pass for ${bookId} failed:`, err);
     return null;

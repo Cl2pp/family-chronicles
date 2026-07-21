@@ -20,6 +20,7 @@ import { markRenderFailed, renderBook } from '@/lib/book-render';
 import { proposeLayoutPlan } from '@/lib/book-ai-layout';
 import { backfillDimensionsFromOriginals, buildAndPersistAutoPlan, loadBook } from '@/lib/book-content';
 import { proposePhotoBookPlan } from '@/lib/photo-book-ai-layout';
+import type { PhotoBookDesignStage } from '@/lib/photo-book-design-stage';
 import { buildAndPersistPhotoAutoPlan, loadPhotoBook } from '@/lib/photo-book-content';
 import { styleStory } from '@/lib/ai/openrouter';
 import { styleContextForStory } from '@/lib/stories';
@@ -152,8 +153,19 @@ async function handleDesignBook(data: DesignBookJob) {
  */
 async function handleDesignPhotoBook(data: DesignPhotoBookJob) {
   const { bookId } = data;
+  // Published to `books.design_stage` as the pass progresses so the builder's Step 2 can
+  // show a live checklist instead of an indefinite spinner (`lib/photo-book-design-stage.ts`).
+  // Never allowed to fail the job: a progress update is cosmetic.
+  const onStage = async (stage: PhotoBookDesignStage) => {
+    await db
+      .update(books)
+      .set({ designStage: stage })
+      .where(eq(books.id, bookId))
+      .catch((e) => console.warn(`[worker] could not record design stage '${stage}' for ${bookId}:`, e));
+  };
+
   try {
-    const plan = await proposePhotoBookPlan(bookId);
+    const plan = await proposePhotoBookPlan(bookId, { onStage });
     if (plan) {
       await db
         .update(books)
@@ -162,6 +174,7 @@ async function handleDesignPhotoBook(data: DesignPhotoBookJob) {
           layoutSource: 'ai',
           layoutStale: false,
           designRequestedAt: null,
+          designStage: null,
           generatedAt: new Date(),
           updatedAt: new Date(),
         })
@@ -171,11 +184,12 @@ async function handleDesignPhotoBook(data: DesignPhotoBookJob) {
     }
 
     console.log(`[worker] AI design pass for photo book ${bookId} produced no usable plan — falling back to auto layout`);
+    await onStage('finalizing');
     const loaded = await loadPhotoBook(bookId);
     await buildAndPersistPhotoAutoPlan(bookId, loaded);
     await db
       .update(books)
-      .set({ designRequestedAt: null, generatedAt: new Date() })
+      .set({ designRequestedAt: null, designStage: null, generatedAt: new Date() })
       .where(eq(books.id, bookId));
   } catch (err) {
     console.error(`[worker] design-photo-book failed for ${bookId}:`, err);
@@ -193,7 +207,7 @@ async function handleDesignPhotoBook(data: DesignPhotoBookJob) {
     // that's actually empty/broken.
     await db
       .update(books)
-      .set({ designRequestedAt: null, ...(fellBackOk ? { generatedAt: new Date() } : {}) })
+      .set({ designRequestedAt: null, designStage: null, ...(fellBackOk ? { generatedAt: new Date() } : {}) })
       .where(eq(books.id, bookId));
   }
 }
