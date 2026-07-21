@@ -99,18 +99,18 @@ describe('renderPhotoBookHtml', () => {
     expect(printHtml).not.toContain(`size: ${TRIM.w}mm ${TRIM.h}mm;`);
   });
 
-  it('keeps the content-box margin (trim edge) identical between screen and print', () => {
+  it('keeps the content-box inset (trim edge) identical between screen and print', () => {
     // The physical page grows by the bleed for print, but a content-box (non-bleed) page's
-    // margin from the TRIM edge — i.e. margin minus bleed — must be unchanged, so
+    // inset from the TRIM edge — i.e. padding minus bleed — must be unchanged, so
     // `full-framed`/grid photos occupy the identical physical area in both variants.
     const screenHtml = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
     const printHtml = renderPhotoBookHtml(baseInput({ variant: 'print' }));
 
-    const screenMargin = `margin: ${PHOTO_BOOK_CONTENT_MARGIN_MM.top}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.outer}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.bottom}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.inner}mm;`;
-    const printMargin = `margin: ${PHOTO_BOOK_CONTENT_MARGIN_MM.top + PHOTO_BOOK_BLEED_MM}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.outer + PHOTO_BOOK_BLEED_MM}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.bottom + PHOTO_BOOK_BLEED_MM}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.inner + PHOTO_BOOK_BLEED_MM}mm;`;
+    const screenPadding = `padding: ${PHOTO_BOOK_CONTENT_MARGIN_MM.top}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.outer}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.bottom + 1}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.inner}mm;`;
+    const printPadding = `padding: ${PHOTO_BOOK_CONTENT_MARGIN_MM.top + PHOTO_BOOK_BLEED_MM}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.outer + PHOTO_BOOK_BLEED_MM}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.bottom + PHOTO_BOOK_BLEED_MM + 1}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.inner + PHOTO_BOOK_BLEED_MM}mm;`;
 
-    expect(screenHtml).toContain(screenMargin);
-    expect(printHtml).toContain(printMargin);
+    expect(screenHtml).toContain(screenPadding);
+    expect(printHtml).toContain(printPadding);
   });
 
   it('shows the watermark only on preview, never on screen or print', () => {
@@ -167,53 +167,69 @@ describe('renderPhotoBookHtml', () => {
     expect(html).toContain('ph-missing');
   });
 
-  // Regression coverage for the pagination-crash bug: the self-hosted Paged.js polyfill
-  // (screen only — preview/print render through Chromium's own native paged-media engine,
-  // `lib/book-render.ts`) cannot reliably paginate a document that uses CSS's named-page
-  // mechanism (`page: <ident>` + a matching `@page <ident> { margin: 0 }` rule per bleed
-  // page) — reproduced headlessly: pagination stalled after page one and Paged.js's own
-  // repeated-layout guard cloned the same page over and over instead of erroring cleanly
-  // (`Layout repeated at:` in the console), which is what made a generated book look
-  // "just a cover" (bug 3) and made the preview go blank on remount (bug 2). `screen` must
-  // never emit ANY named `@page` rule or `page:` declaration; `preview`/`print` still must
-  // (that's the real bleed mechanism, and Chromium's native engine handles it fine).
-  describe('named @page bleed mechanism (screen vs. preview/print)', () => {
-    it('screen never emits a `page:` declaration or a named `@page` rule', () => {
-      const html = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
-      expect(html).not.toMatch(/style="page:/);
-      expect(html).not.toMatch(/@page pb-bleed-\d+/);
-    });
-
-    it('preview and print still emit `page:` declarations and matching named `@page { margin: 0; }` rules', () => {
-      for (const variant of ['preview', 'print'] as const) {
+  // Regression coverage: the photo book used to render bleed pages for `preview`/`print`
+  // with CSS's named-page mechanism (`page: <ident>` on the element + a matching
+  // `@page <ident> { margin: 0 }` rule) while `screen` used a single unnamed
+  // `@page { margin: 0 }` with element-box sizing instead. Two bugs came from that split:
+  // (1) the self-hosted Paged.js polyfill (`screen` only) can't reliably paginate a
+  // document with many scattered named `@page` rules — reproduced headlessly: pagination
+  // stalled after page one and Paged.js's own repeated-layout guard cloned the same page
+  // over and over (`Layout repeated at:` in the console) — so `screen` never used named
+  // pages to begin with; (2) Chromium's `page.pdf()` (`preview`/`print`) does not fully
+  // honor a named-page margin override on the TRAILING edges — measured right/bottom bleed
+  // fell ~20-27mm short of the physical sheet edge while left/top reached it, so bleed
+  // pages didn't actually bleed on two sides. The fix unifies every variant onto the
+  // element-box approach `screen` already used: a single unnamed `@page { margin: 0 }` for
+  // the whole document, with bleed pages sized to the full sheet via their own `width`/
+  // `height` and no CSS margin. No variant emits `page: <ident>` or a named `@page` rule
+  // anymore.
+  describe('unnamed @page bleed mechanism (all variants)', () => {
+    it('no variant ever emits a `page:` declaration or a named `@page` rule', () => {
+      for (const variant of ['screen', 'preview', 'print'] as const) {
         const html = renderPhotoBookHtml(baseInput({ variant }));
-        expect(html).toMatch(/style="page: pb-bleed-0"/);
-        expect(html).toMatch(/@page pb-bleed-0 \{ margin: 0; \}/);
-        // Cover front, cover back, and the one section's divider — 3 named bleed pages
-        // for this fixture's plan (the section's full-bleed photo page is a 4th).
-        expect(html).toMatch(/@page pb-bleed-3 \{ margin: 0; \}/);
+        expect(html).not.toMatch(/style="page:/);
+        expect(html).not.toMatch(/@page [a-zA-Z][\w-]*\s*\{/); // named @page rule
       }
     });
 
-    it("screen's base @page rule has margin 0 for every page; preview/print keep the content-box margin as the base and override to 0 per named bleed page", () => {
+    it('every variant has exactly one @page rule, margin 0', () => {
+      for (const variant of ['screen', 'preview', 'print'] as const) {
+        const html = renderPhotoBookHtml(baseInput({ variant }));
+        const pageRules = html.match(/@page\s*\{[^}]*\}/g) ?? [];
+        expect(pageRules).toHaveLength(1);
+        expect(pageRules[0]).toMatch(/margin: 0;/);
+      }
+    });
+
+    it("a content-box (non-bleed) photo page's own padding/size carries the inset for every variant", () => {
+      // The fix relies on `.photo-page:not(.pb-fullbleed):not(.pb-divider-page)` fully
+      // implementing the content-box inset via its own element CSS (a full-sheet
+      // width/height plus PADDING, not margin — see that rule's own comment for why
+      // padding: Chromium's print/PDF engine truncates an element's own top MARGIN
+      // immediately after a forced page break, which is every content-box page, since
+      // every `.page` forces a break after itself) rather than the page's own `@page`
+      // margin — this pins that down so a future edit can't quietly break it.
       const screenHtml = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
       const printHtml = renderPhotoBookHtml(baseInput({ variant: 'print' }));
 
-      // `[^}]*` (not `[\s\S]*?`) deliberately can't cross a `}` — this must only match
-      // within the SAME unnamed `@page { ... }` block, never spill into an unrelated
-      // named `@page pb-bleed-N { margin: 0; }` rule later in the stylesheet.
-      expect(screenHtml).toMatch(/@page \{[^}]*margin: 0;[^}]*\}/);
-      expect(printHtml).not.toMatch(/@page \{[^}]*margin: 0;[^}]*\}/);
+      expect(screenHtml).toContain(
+        `padding: ${PHOTO_BOOK_CONTENT_MARGIN_MM.top}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.outer}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.bottom + 1}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.inner}mm;`,
+      );
+      expect(printHtml).toContain(
+        `padding: ${PHOTO_BOOK_CONTENT_MARGIN_MM.top + PHOTO_BOOK_BLEED_MM}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.outer + PHOTO_BOOK_BLEED_MM}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.bottom + PHOTO_BOOK_BLEED_MM + 1}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.inner + PHOTO_BOOK_BLEED_MM}mm;`,
+      );
     });
 
-    it("a content-box (non-bleed) photo page's own margin/size is unaffected by the screen-only @page change", () => {
-      // The fix relies on `.photo-page:not(.pb-fullbleed):not(.pb-divider-page)` already
-      // fully implementing the content-box inset via its own CSS — this just pins that
-      // down so a future edit can't quietly break it.
-      const screenHtml = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
-      expect(screenHtml).toContain(
-        `margin: ${PHOTO_BOOK_CONTENT_MARGIN_MM.top}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.outer}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.bottom}mm ${PHOTO_BOOK_CONTENT_MARGIN_MM.inner}mm;`,
-      );
+    it('bleed pages (cover front/back, full-bleed, divider) size to the full physical sheet with no CSS margin, for every variant', () => {
+      for (const variant of ['screen', 'preview', 'print'] as const) {
+        const html = renderPhotoBookHtml(baseInput({ variant }));
+        const bleed = variant === 'print' ? PHOTO_BOOK_BLEED_MM : 0;
+        const pageW = TRIM.w + bleed * 2;
+        const pageH = TRIM.h + bleed * 2;
+        expect(html).toContain(`.pb-cover-front, .pb-cover-back {\n    width: ${pageW}mm; height: ${pageH}mm;`);
+        expect(html).toContain(`.pb-fullbleed { width: ${pageW}mm; height: ${pageH}mm;`);
+        expect(html).toContain(`.pb-divider-page { width: ${pageW}mm; height: ${pageH}mm;`);
+      }
     });
   });
 
