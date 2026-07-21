@@ -84,7 +84,9 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
 ## Commands
 - `npm run dev` — web dev server
 - `npm run worker:dev` — worker with watch
-- `npm run db:push` / `db:generate` / `db:migrate` / `db:studio` — Drizzle
+- `npm run db:push` / `db:generate` / `db:migrate` / `db:studio` — Drizzle. In dev, after
+  editing `db/schema.ts` run `db:generate` to create the migration and commit it. **Do NOT run
+  `db:migrate` against production yourself** — see below.
 - `docker compose up -d` — local Postgres + MinIO (S3) for development
 - `npm run lint`, `npm run build`
 
@@ -93,6 +95,19 @@ The app is **live in production** at https://familienwerk.co (Hetzner VPS + Cool
 R2). Before touching anything deploy/server/storage-related, read **`INFRASTRUCTURE.md`** — it
 documents the server, Coolify, R2 (incl. the EU-endpoint gotcha), the security model (admin ports
 are private; reach Coolify via SSH tunnel), env vars, the deploy loop, and the gotchas we hit.
+
+**Deploys and migrations are automatic — you don't run them by hand:**
+- **Deploy = push to `main`.** Coolify's GitHub App auto-deploys both apps (web + worker) from
+  the `Dockerfile` on every push to `main`; there is no manual deploy step. Merging a PR to
+  `main` is what ships it.
+- **Migrations apply themselves on deploy.** The web container runs `npm run db:migrate` on
+  startup (`docker-entrypoint.sh`), so committed migrations in `db/migrations/` are applied
+  automatically when the new web container boots. Drizzle tracks applied migrations, so it's
+  idempotent. Your job is only to **generate + commit** the migration; deploying `main` runs it.
+- The production DB is **private** (reachable only via an SSH tunnel — see `INFRASTRUCTURE.md`),
+  so this repo/checkout normally has no `DATABASE_URL` and cannot (and should not) migrate prod
+  out-of-band. A hand-run migration is a break-glass action, not the normal path.
+- Full deploy loop + gotchas: `INFRASTRUCTURE.md` §9; from-scratch runbook: `DEPLOY.md`.
 `DEPLOY.md` is the from-scratch runbook.
 
 ## Plan

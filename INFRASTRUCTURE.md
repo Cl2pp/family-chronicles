@@ -205,6 +205,13 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 Builds take ~2–4 min each on this box (swap covers the Next build's memory spike), so a push is
 ~4–8 min end to end.
 
+> **In short: deploys and DB migrations are automatic — do not run either by hand.** Merging to
+> `main` deploys; the booting web container applies any committed `db/migrations/` via
+> `npm run db:migrate` (idempotent — Drizzle skips already-applied ones). You never run
+> `db:migrate` against prod manually for a normal change; the DB is private (SSH-tunnel only), so
+> a checkout usually can't reach it anyway. Manual migration is break-glass only (e.g. recovering
+> a failed deploy) — see §11.
+
 > **⚠️ `concurrent_builds=1` is load-bearing (see §11).** Coolify's default is **2**, and with two
 > simultaneous Next.js builds on this 2-core / 4 GB box the RAM and disk-write spikes double and
 > the builds tend to fail *together* — that was the main deploy-failure cause. Serialising them is
