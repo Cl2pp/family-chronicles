@@ -148,6 +148,20 @@
       "when": 1784630751345,
       "tag": "0020_rapid_hitman",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1784642665435,
+      "tag": "0021_yielding_bucky",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1784647246678,
+      "tag": "0022_solid_tarantula",
+      "breakpoints": true
     }
   ]
 }

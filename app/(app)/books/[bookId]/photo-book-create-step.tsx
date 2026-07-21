@@ -24,6 +24,8 @@ import { useMediaQuery, useLocalStorage } from '@mantine/hooks';
 import {
   IconArrowLeft,
   IconArrowRight,
+  IconCircle,
+  IconCircleCheck,
   IconExternalLink,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
@@ -34,6 +36,12 @@ import {
 } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
 import { PHOTO_BOOK_STYLES, type PhotoBookStyle } from '@/lib/photo-book-plan';
+import {
+  designStageIndex,
+  PHOTO_BOOK_DESIGN_STAGES,
+  type PhotoBookDesignStage,
+} from '@/lib/photo-book-design-stage';
+import { PHOTO_BOOK_GROUPINGS, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
 import type { BookCoverType, BookFormat } from '@/lib/gelato';
 import { PhotoBookChat } from './photo-book-chat';
 import { PhotoBookPhotoTile } from './photo-book-photo-tile';
@@ -47,6 +55,11 @@ import type { PhotoBookInfo, PhotoBookPhotoView } from './photo-book-builder';
  *  top-left corner of page one instead of the whole page; `fitPages()` in
  *  `lib/photo-book-layout.ts` does the matching client-side zoom-to-fit inside whatever
  *  height this aspect ratio produces. */
+/** Below this share of photos carrying what a grouping needs (GPS for "by place", a vision
+ *  score for "by topic"), the panel warns before the option is picked — the clustering would
+ *  collapse into one meaningless chapter. */
+const MIN_GROUPING_COVERAGE = 0.5;
+
 const TRIM_ASPECT: Record<BookFormat, number> = {
   'hardcover-21x28': 210 / 280,
   'hardcover-20x20': 200 / 200,
@@ -71,15 +84,19 @@ type SettingsPatch = {
  */
 function PhotoBookConfigPanel({
   book,
+  photos,
   locked,
   pending,
   onSetStyle,
+  onSetGrouping,
   onUpdateSettings,
 }: {
   book: PhotoBookInfo;
+  photos: PhotoBookPhotoView[];
   locked: boolean;
   pending: boolean;
   onSetStyle: (style: PhotoBookStyle) => void;
+  onSetGrouping: (grouping: PhotoBookGrouping) => void;
   onUpdateSettings: (patch: SettingsPatch) => void;
 }) {
   const { t } = useI18n();
@@ -92,6 +109,30 @@ function PhotoBookConfigPanel({
   const [subtitle, setSubtitle] = useState(book.subtitle ?? '');
 
   const disabled = locked || pending;
+
+  // "By place" needs EXIF GPS and "by topic" needs a vision score; a photo set that mostly
+  // lacks either would silently collapse into one meaningless chapter (photos stripped of
+  // location by a messaging app, scans, screenshots — the first real book we looked at had
+  // GPS on exactly none of its 36 photos). Say so before the user generates a book, not
+  // after.
+  const usable = photos.filter((p) => !p.excluded);
+  const withLocation = usable.filter((p) => p.hasLocation).length;
+  const withAnalysis = usable.filter((p) => p.hasAnalysis).length;
+  /** The caveat for one option, or null. Computed PER OPTION rather than for the saved
+   *  grouping, because clicking an option is what commits it — and on an
+   *  already-generated book that immediately spends a full design pass. A warning that
+   *  only appeared afterwards would be telling the user about a mistake they had already
+   *  paid for. */
+  function warningFor(option: PhotoBookGrouping): string | null {
+    if (usable.length === 0) return null;
+    if (option === 'location' && withLocation < usable.length * MIN_GROUPING_COVERAGE) {
+      return tc.groupingWarnings.location(withLocation, usable.length);
+    }
+    if (option === 'topic' && withAnalysis < usable.length * MIN_GROUPING_COVERAGE) {
+      return tc.groupingWarnings.topic(withAnalysis, usable.length);
+    }
+    return null;
+  }
 
   return (
     <Stack gap="md">
@@ -111,6 +152,46 @@ function PhotoBookConfigPanel({
           subtitle !== (book.subtitle ?? '') && onUpdateSettings({ subtitle: subtitle || null })
         }
       />
+      {/* How the book is organised. This is the most consequential choice on the panel —
+          the same photos become a timeline, a book of occasions, or a book of places — so
+          it sits above the visual settings, with each option's effect spelled out rather
+          than left to the label. It only takes effect on the next generation, which is why
+          `onSetGrouping` re-runs the design pass once the book already exists. */}
+      <Box>
+        <Text fz={13} fw={500} mb={2}>
+          {tc.grouping}
+        </Text>
+        <Text fz={12} c="dimmed" mb={8}>
+          {tc.groupingIntro}
+        </Text>
+        <Stack gap={6}>
+          {PHOTO_BOOK_GROUPINGS.map((option) => {
+            const warning = warningFor(option);
+            return (
+              <Box key={option}>
+                <Button
+                  fullWidth
+                  size="compact-sm"
+                  variant={option === book.photoGrouping ? 'filled' : 'default'}
+                  disabled={disabled}
+                  justify="flex-start"
+                  onClick={() => option !== book.photoGrouping && onSetGrouping(option)}
+                >
+                  {tc.groupingOptions[option]}
+                </Button>
+                {warning && (
+                  <Text fz={11} c="orange.7" mt={3}>
+                    {warning}
+                  </Text>
+                )}
+              </Box>
+            );
+          })}
+        </Stack>
+        <Text fz={11} c="dimmed" mt={6}>
+          {tc.groupingHints[book.photoGrouping]}
+        </Text>
+      </Box>
       <Box>
         <Text fz={13} fw={500} mb={6}>
           {tp.style}
@@ -163,13 +244,61 @@ function PhotoBookConfigPanel({
 }
 
 /**
+ * The live progress checklist shown while a design pass runs (docs/PHOTO_BOOK_PLAN.md —
+ * the pass takes minutes: a vision call over every photo, a Chromium render of the draft,
+ * then a second vision call reviewing those rendered pages). A bare spinner for that long
+ * reads as "stuck", so every stage the worker publishes (`books.design_stage`, polled by
+ * `photo-book-builder.tsx`) is ticked off here: done steps get a check, the current one
+ * gets a spinner, later ones stay dimmed.
+ *
+ * Robust to a missing stage: `designStageIndex(null)` is -1, which renders the first step
+ * as running — a queued pass is always at least about to prepare.
+ */
+function DesignProgressChecklist({ stage }: { stage: PhotoBookDesignStage | null }) {
+  const { t } = useI18n();
+  const tp = t.books.builder.photoBook;
+  const current = Math.max(0, designStageIndex(stage));
+
+  return (
+    <Stack gap={10} py="lg" px="md">
+      <Text fw={500} ta="center" mb={4}>
+        {tp.bookAreaGenerating}
+      </Text>
+      {PHOTO_BOOK_DESIGN_STAGES.map((s, i) => {
+        const done = i < current;
+        const running = i === current;
+        return (
+          <Group key={s} gap={10} wrap="nowrap">
+            <Box w={18} h={18} style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {done ? (
+                <IconCircleCheck size={18} color="var(--mantine-color-green-6)" />
+              ) : running ? (
+                <Loader size={14} />
+              ) : (
+                <IconCircle size={16} color="var(--mantine-color-slate-3)" />
+              )}
+            </Box>
+            <Text fz={14} c={done ? 'dimmed' : running ? undefined : 'dimmed'} fw={running ? 500 : 400}>
+              {tp.designStages[s]}
+            </Text>
+          </Group>
+        );
+      })}
+      <Text fz={12} c="dimmed" ta="center" mt={6}>
+        {tp.designProgressHint}
+      </Text>
+    </Stack>
+  );
+}
+
+/**
  * Step 2 — Create (docs/PHOTO_BOOK_PLAN.md, builder restructure PR6: "configure →
  * generate → book"). Gated on `book.generatedAt`:
  *
  * - **Not generated yet** (`generatedAt == null`): the config panel (style, cover type,
  *   size, title/subtitle) is front and center with the "Create book" CTA; the book area
- *   on the right shows a placeholder, or a spinner while the first design pass is
- *   running (`book.designing`). No chat, no tray — there's no book yet to edit.
+ *   on the right shows a placeholder, or the design-progress checklist while the first
+ *   pass is running (`book.designing`). No chat, no tray — there's no book yet to edit.
  * - **Generated**: the familiar layout returns — collapsible AI chat on the left, live
  *   preview on the right, photo tray along the bottom — plus a settings (gear) button on
  *   the preview card that reopens the same config panel in a `Modal`, alongside the
@@ -178,6 +307,8 @@ function PhotoBookConfigPanel({
 export function PhotoBookCreateStep({
   bookId,
   book,
+  active,
+  designStage,
   photos,
   locked,
   pending,
@@ -188,12 +319,18 @@ export function PhotoBookCreateStep({
   onCreateBook,
   onDesignBook,
   onSetStyle,
+  onSetGrouping,
   onUpdateSettings,
   onBack,
   onNext,
 }: {
   bookId: string;
   book: PhotoBookInfo;
+  /** True when this is the step the user is actually looking at. The Stepper keeps every
+   *  step mounted, so without this the preview iframe would load inside a `display: none`
+   *  panel — see `bookArea` below for why that produced a blank preview. */
+  active: boolean;
+  designStage: PhotoBookDesignStage | null;
   photos: PhotoBookPhotoView[];
   locked: boolean;
   pending: boolean;
@@ -204,6 +341,7 @@ export function PhotoBookCreateStep({
   onCreateBook: () => void;
   onDesignBook: () => void;
   onSetStyle: (style: PhotoBookStyle) => void;
+  onSetGrouping: (grouping: PhotoBookGrouping) => void;
   onUpdateSettings: (patch: SettingsPatch) => void;
   onBack: () => void;
   onNext: () => void;
@@ -225,26 +363,40 @@ export function PhotoBookCreateStep({
   });
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Latches true the first time this step is shown and stays true — see `bookArea` below.
+  // Adjusted during render (React's "adjusting state when a prop changes" pattern) rather
+  // than in an effect, so the iframe mounts in the same commit the step becomes visible
+  // instead of a render later.
+  const [mountedPreview, setMountedPreview] = useState(active);
+  if (active && !mountedPreview) setMountedPreview(true);
 
   const hasGenerated = book.generatedAt != null;
   const chatPane = <PhotoBookChat bookId={bookId} locked={locked} />;
 
-  /** The book area (right pane in both states): a spinner while a design pass is in
-   *  flight, the placeholder before the book has ever been generated, or the live
-   *  preview iframe once it has. */
+  /** The book area (right pane in both states): the progress checklist while a design pass
+   *  is in flight, the placeholder before the book has ever been generated, or the live
+   *  preview iframe once it has.
+   *
+   *  The iframe is mounted ONLY while this step is on screen. The preview HTML paginates
+   *  itself with Paged.js and then zooms the page stack to fit its viewport
+   *  (`fitPages` in `lib/photo-book-layout.ts`); inside the Stepper's hidden panel the
+   *  iframe has no layout box at all, so that fit resolved against a 0×0 viewport and
+   *  scaled the whole book to nothing. Coming back to a finished book therefore showed an
+   *  empty preview — the book was fine, its rendering had been sized away. Mounting on
+   *  first activation (and keeping it mounted afterwards, via `mountedPreview`, so
+   *  switching steps doesn't re-fetch and re-paginate every time) fixes it at the source. */
   const bookArea = book.designing ? (
-    <Stack align="center" gap={8} py="xl">
-      <Loader size="md" />
-      <Text c="dimmed" ta="center">
-        {tp.bookAreaGenerating}
-      </Text>
-    </Stack>
+    <DesignProgressChecklist stage={designStage} />
   ) : !hasGenerated ? (
     <Stack align="center" gap={4} py="xl">
       <IconPhoto size={28} stroke={1.4} color="var(--mantine-color-slate-4)" />
       <Text c="dimmed" ta="center">
         {tp.bookAreaPlaceholder}
       </Text>
+    </Stack>
+  ) : !mountedPreview ? (
+    <Stack align="center" gap={8} py="xl">
+      <Loader size="sm" />
     </Stack>
   ) : (
     <Box
@@ -285,9 +437,11 @@ export function PhotoBookCreateStep({
               </Text>
               <PhotoBookConfigPanel
                 book={book}
+                photos={photos}
                 locked={locked}
                 pending={pending}
                 onSetStyle={onSetStyle}
+                onSetGrouping={onSetGrouping}
                 onUpdateSettings={onUpdateSettings}
               />
               <Button
@@ -459,9 +613,11 @@ export function PhotoBookCreateStep({
       >
         <PhotoBookConfigPanel
           book={book}
+          photos={photos}
           locked={locked}
           pending={pending}
           onSetStyle={onSetStyle}
+          onSetGrouping={onSetGrouping}
           onUpdateSettings={onUpdateSettings}
         />
         <Group mt="lg" wrap="wrap">

@@ -1,4 +1,5 @@
-import puppeteer, { type Browser } from 'puppeteer';
+import { type Browser } from 'puppeteer';
+import { withChromium } from '@/lib/chromium';
 import sharp from 'sharp';
 import { PDFDocument } from 'pdf-lib';
 import { eq } from 'drizzle-orm';
@@ -32,7 +33,6 @@ import {
 } from '@/lib/photo-book-content';
 import { embeddedFontFaceCss } from '@/lib/photo-book-fonts';
 import type { PhotoBookPlan } from '@/lib/photo-book-plan';
-import { env } from '@/lib/env';
 
 /**
  * The worker side of book rendering: load content, build/refresh the layout plan,
@@ -198,18 +198,10 @@ export async function renderBook(bookId: string): Promise<void> {
   await backfillDimensionsFromOriginals(loaded.allPhotosById);
   const plan = await loadOrBuildPlan(bookId, loaded);
 
-  const browser = await puppeteer.launch({
-    executablePath: env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
-  });
-  let preview: Buffer;
-  let print: Buffer;
-  try {
-    preview = await renderVariant(browser, loaded, plan, 'preview');
-    print = await renderVariant(browser, loaded, plan, 'print');
-  } finally {
-    await browser.close();
-  }
+  const { preview, print } = await withChromium(`render story book ${bookId}`, async (browser) => ({
+    preview: await renderVariant(browser, loaded, plan, 'preview'),
+    print: await renderVariant(browser, loaded, plan, 'print'),
+  }));
 
   const printPadded = await padPdf(print);
   const previewPadded = await padPdf(preview);
@@ -366,18 +358,10 @@ async function renderPhotoBook(bookId: string): Promise<void> {
   const chronicleName = chron?.name ?? 'Familienwerk';
   const trim = TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'];
 
-  const browser = await puppeteer.launch({
-    executablePath: env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
-  });
-  let preview: Buffer;
-  let print: Buffer;
-  try {
-    preview = await renderPhotoBookVariant(browser, loaded, plan, chronicleName, trim, 'preview');
-    print = await renderPhotoBookVariant(browser, loaded, plan, chronicleName, trim, 'print');
-  } finally {
-    await browser.close();
-  }
+  const { preview, print } = await withChromium(`render photo book ${bookId}`, async (browser) => ({
+    preview: await renderPhotoBookVariant(browser, loaded, plan, chronicleName, trim, 'preview'),
+    print: await renderPhotoBookVariant(browser, loaded, plan, chronicleName, trim, 'print'),
+  }));
 
   const printPadded = await padPdf(print);
   const previewPadded = await padPdf(preview);

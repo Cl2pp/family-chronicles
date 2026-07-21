@@ -70,6 +70,8 @@ import {
   type PhotoLayoutOp,
 } from '@/lib/photo-book-ops';
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
+import { isDesignInFlight } from '@/lib/photo-book-design-stage';
+import { parsePhotoGrouping, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
 
 /**
  * Book domain — the ONE place book state changes. The Books UI (server actions)
@@ -286,6 +288,12 @@ export interface BookDetail {
   /** Set while an AI design job is queued/running; null once it completes (success or
    *  fallback). Drives the builder's "Design my book" working state. */
   designRequestedAt: Date | null;
+  /** How the user asked this photo book to be organised (`books.photo_grouping`) — see
+   *  `lib/photo-book-grouping.ts`. Always chronological for story books. */
+  photoGrouping: PhotoBookGrouping;
+  /** How far the in-flight photo-book design pass has got (`books.design_stage`) — see
+   *  `lib/photo-book-design-stage.ts`. Null when nothing is running (or for story books). */
+  designStage: string | null;
   /** Set once a photo-book design job has completed at least once (success or
    *  auto-fallback) — the builder Step 2 gate for "has this book ever been generated".
    *  Always null for story books. See db/schema.ts's `books.generatedAt` comment. */
@@ -402,6 +410,8 @@ export async function getBookForUser(
     layoutSource: row.book.layoutSource as 'auto' | 'ai' | 'edited',
     layoutStale: row.book.layoutStale,
     designRequestedAt: row.book.designRequestedAt,
+    designStage: row.book.designStage,
+    photoGrouping: parsePhotoGrouping(row.book.photoGrouping),
     generatedAt: row.book.generatedAt,
     updatedAt: row.book.updatedAt,
     chapters: visibleChapters.map((c, i) => ({
@@ -752,6 +762,15 @@ export interface BookPhotoItem {
   /** True when analysis permanently failed for this photo — the builder shows this
    *  distinctly from "still analyzing". */
   metaFailed: boolean;
+  /** True when this photo carries EXIF GPS coordinates. Only the "organise by place"
+   *  grouping needs it (`lib/photo-book-grouping.ts`), and it needs it badly enough that
+   *  the builder warns before letting a user pick that mode for a set of photos that
+   *  mostly has no location at all — phone screenshots, scans, and anything stripped by a
+   *  messaging app arrive without it. */
+  hasLocation: boolean;
+  /** True once this photo has a vision score, which is what the "organise by topic"
+   *  grouping clusters on. */
+  hasAnalysis: boolean;
 }
 
 /** Every photo of a photo book, in upload order, for the builder's grid. */
@@ -781,6 +800,8 @@ export async function listBookPhotos(
       excluded: bookPhotos.excluded,
       excludedReason: bookPhotos.excludedReason,
       takenAt: bookPhotos.takenAt,
+      gpsLat: bookPhotos.gpsLat,
+      analysis: bookPhotos.analysis,
       analysisStatus: bookPhotos.analysisStatus,
     })
     .from(bookPhotos)
@@ -804,6 +825,8 @@ export async function listBookPhotos(
         takenAt: r.takenAt,
         metaSettled: r.analysisStatus === 'done' || r.analysisStatus === 'failed',
         metaFailed: r.analysisStatus === 'failed',
+        hasLocation: r.gpsLat != null,
+        hasAnalysis: r.analysis != null,
       })),
     },
   };
@@ -942,12 +965,21 @@ export async function updatePhotoBookSettings(input: {
   subtitle?: string | null;
   format?: BookFormat;
   coverType?: BookCoverType;
-}): Promise<Result> {
+  photoGrouping?: PhotoBookGrouping;
+}): Promise<Result<UpdatePhotoBookSettingsOutcome>> {
   const gate = await editablePhotoBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
 
   const [row] = await db
-    .select({ title: books.title, subtitle: books.subtitle, layoutPlan: books.layoutPlan })
+    .select({
+      title: books.title,
+      subtitle: books.subtitle,
+      layoutPlan: books.layoutPlan,
+      photoGrouping: books.photoGrouping,
+      layoutSource: books.layoutSource,
+      generatedAt: books.generatedAt,
+      designRequestedAt: books.designRequestedAt,
+    })
     .from(books)
     .where(eq(books.id, input.bookId))
     .limit(1);
@@ -969,6 +1001,12 @@ export async function updatePhotoBookSettings(input: {
   if (input.subtitle !== undefined) set.subtitle = nextSubtitle;
   if (input.format !== undefined) set.format = input.format;
   if (input.coverType !== undefined) set.coverType = input.coverType;
+  // Deliberately does NOT flip `layoutStale`: that would make the next page load rebuild
+  // the book behind the user's back (and for an AI-designed book only REPAIR it, which
+  // never re-sections). Re-sectioning needs a real design pass, queued below.
+  const groupingChanged =
+    input.photoGrouping !== undefined && input.photoGrouping !== parsePhotoGrouping(row.photoGrouping);
+  if (input.photoGrouping !== undefined) set.photoGrouping = input.photoGrouping;
 
   const coverTextChanged =
     (input.title !== undefined && nextTitle !== row.title) ||
@@ -997,7 +1035,37 @@ export async function updatePhotoBookSettings(input: {
   }
 
   await db.update(books).set(set).where(eq(books.id, input.bookId));
-  return { ok: true };
+
+  // Changing how the book is ORGANISED changes what a section is, which no in-place patch
+  // can express — the book has to be designed again. That rule lives here, with the
+  // mutation, rather than in the builder: `lib/books.ts` is the one place book state
+  // changes (AGENTS.md), so every caller — the config panel, the chat agent, anything
+  // later — gets the same behaviour instead of the UI having to remember to re-trigger it.
+  // A book that has never been generated needs nothing: the first "Buch erstellen" will
+  // read the new setting. A hand-edited layout is left alone, because auto-designing over
+  // manual edits is exactly what the consent prompt exists to prevent.
+  if (groupingChanged && row.generatedAt) {
+    if (row.layoutSource === 'edited') {
+      return { ok: true, value: { redesign: 'skipped-edited' } };
+    }
+    if (isDesignInFlight(row.designRequestedAt)) {
+      return { ok: true, value: { redesign: 'already-running' } };
+    }
+    await db
+      .update(books)
+      .set({ designRequestedAt: new Date(), designStage: 'preparing' })
+      .where(eq(books.id, input.bookId));
+    await enqueueDesignPhotoBook({ bookId: input.bookId });
+    return { ok: true, value: { redesign: 'queued' } };
+  }
+
+  return { ok: true, value: { redesign: 'not-needed' } };
+}
+
+/** What `updatePhotoBookSettings` did about re-designing the book, so the UI can say so
+ *  without re-deriving the rule (see the end of that function). */
+export interface UpdatePhotoBookSettingsOutcome {
+  redesign: 'not-needed' | 'queued' | 'skipped-edited' | 'already-running';
 }
 
 /**
@@ -1059,7 +1127,12 @@ export async function requestPhotoBookAiDesign(input: {
     .where(eq(books.id, input.bookId))
     .limit(1);
   if (!row) return err('Book not found.');
-  if (row.designRequestedAt) return err('An AI design pass is already running for this book.');
+  // `isDesignInFlight`, not a bare null check: a worker that died mid-pass leaves
+  // `design_requested_at` set forever, and a bare check would then refuse to ever design
+  // this book again. After the cutoff the stale flag is simply overwritten below.
+  if (isDesignInFlight(row.designRequestedAt)) {
+    return err('An AI design pass is already running for this book.');
+  }
   if (row.layoutSource === 'edited' && !input.overwriteEdits) {
     return err(
       "This book's layout has manual edits. Designing it again with AI would replace them — try again to confirm.",
@@ -1072,7 +1145,14 @@ export async function requestPhotoBookAiDesign(input: {
     .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.excluded, false)));
   if (!count) return err('Add at least one photo before designing.');
 
-  await db.update(books).set({ designRequestedAt: new Date() }).where(eq(books.id, input.bookId));
+  // `designStage: 'preparing'` is set here, not by the worker, so the builder's checklist
+  // has a first step to show from the moment the button is clicked — a queued job can sit
+  // for a few seconds before the worker picks it up, and "nothing has started" is exactly
+  // the impression this whole progress display exists to avoid.
+  await db
+    .update(books)
+    .set({ designRequestedAt: new Date(), designStage: 'preparing' })
+    .where(eq(books.id, input.bookId));
   await enqueueDesignPhotoBook({ bookId: input.bookId });
   return { ok: true };
 }

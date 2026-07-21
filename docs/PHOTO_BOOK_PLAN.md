@@ -312,6 +312,76 @@ section boundaries and **titles**, hero picks, template rhythm, optional short
 **captions** (from `shortDescription`, rewritten in the chronicle's language), cover
 title suggestion. Validated + consistency-checked; on any failure the auto plan stands.
 
+### 6b. "How should this book be organised?" (`books.photo_grouping`)
+
+Sectioning used to be one fixed idea — split the timeline on time/GPS gaps. But the same
+200 photos are a travel diary, a book of occasions, or a book of places depending on a
+decision only the owner can make, so it's now theirs: a three-way choice in the builder's
+config panel, made **before** generating (`lib/photo-book-grouping.ts`, default
+`chronological` — what every existing book already is).
+
+It feeds both producers, not just the prompt. `computeCandidateSections(photos, grouping)`
+does the clustering:
+
+- **chronological** — unchanged: time gaps > 8h, GPS jumps > 50km, adjacent-only merging.
+- **location** — greedy clustering against running centroids (25km radius), so a week in
+  one place is one section and a place revisited months later rejoins its own section
+  rather than starting a new one. Photos with no EXIF GPS get a trailing section.
+- **topic** — each photo joins the cluster of its *rarest* scene tag, so an ubiquitous tag
+  ("group photo", "family") can't swallow the distinctive ones. Unscored photos trail.
+
+Topic and location are non-sequential — any two clusters may be the closest pair — so they
+use affinity-based consolidation (merge undersized groups into their closest sibling, then
+merge closest pairs down to the same size-proportional cap) and are then ordered by their
+earliest photo, so even a by-topic book moves broadly forwards in time. The AI pass gets
+both the matching clusters and an explicit instruction (`groupingInstruction`), restated in
+the review round so a revision can't quietly reorganise the book back into a timeline.
+
+Measured on a real 36-photo book: chronological gives 5 date clusters; topic gives
+`pet/home`, `couple/selfie`, `beach/sunset/ocean`, `mountains/skiing`, `friends/concert`,
+which the design pass named *Das Paar*, *Skifahren in den Bergen*, *Am Strand*, *Mit
+Freunden*, *Zuhause & Alltag*. That same book has GPS on **zero** photos — which is why the
+config panel checks coverage and warns before you pick a grouping the photos can't support,
+rather than silently producing one meaningless chapter.
+
+### 6a. Design-pass hardening (post-launch)
+
+The first shipped version of the AI pass was **all-or-nothing**, and in production that
+meant it effectively never ran: the first real book we inspected sat on
+`layout_source: 'auto'` despite the user having clicked "Buch erstellen". A single
+duplicated `assetId`, one page with 3 photos under a 4-slot template, or one reference to
+a photo excluded while the model was thinking discarded the whole design and silently fell
+back to the mechanical date-range layout — which the user then judged the AI by. Three
+changes address that:
+
+1. **Parse leniently, repair mechanically** (`lib/photo-book-repair.ts`).
+   `coercePhotoBookPlan` reads the model's raw JSON into something schema-valid by
+   construction (re-grouping wrong-arity pages instead of rejecting them);
+   `repairPhotoBookPlan` then reconciles it with the book's current photos — dropping what
+   can't be shown, de-duplicating, re-fitting the pages that lost a photo, placing any
+   force-included photo the model skipped. The model's judgment (sections, titles, pacing,
+   hero) survives; only mechanical defects are fixed. The same function keeps an
+   AI/hand-edited plan alive when the photo set changes, instead of the old behaviour where
+   excluding one photo caused the next page load to regenerate the book as `'auto'`.
+2. **Deterministic design check** (`lib/photo-book-lint.ts`) — "does this layout *work*
+   for these photos", separate from "is it structurally legal". `TEMPLATE_SHAPE_RULES` is
+   the single source of truth for which photo shapes each template renders well (a
+   justified row gives every photo the same height, so one landscape in a `three-column`
+   collapses the row into a thin strip) and is printed into the prompt *and* checked
+   against the output, so the two can't drift.
+3. **Self-review round** — the draft is rendered and screenshotted
+   (`lib/photo-book-proof.ts`, Chromium in the worker), and the model is shown its own
+   pages plus the lint findings and asked for a corrected plan. The revision is adopted
+   only if it scores better on the same check, so a review round can never make a book
+   worse. Measured on a real 36-photo book: 5 date-range sections and 4 squashed
+   `three-column` rows (score 20) → 7 content-named sections with captions and no shape
+   violations (score 0), in ~3.5 minutes.
+
+Because a pass now takes minutes, the worker publishes its stage to `books.design_stage`
+(`lib/photo-book-design-stage.ts`) and the builder shows a live checklist instead of an
+indefinite spinner; `isDesignInFlight` stops a worker that died mid-pass from leaving that
+spinner up — or the book un-designable — forever.
+
 ## 7. Style suites (`lib/photo-book-styles.ts`)
 
 v1's `ThemeTokens` (a CSS-variables map in `lib/book-layout.ts`) grows into a **style

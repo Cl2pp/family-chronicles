@@ -14,6 +14,7 @@ import {
 } from '@/lib/books';
 import { loadStoryAccessContext } from '@/lib/story-access';
 import { isBookPrintFresh } from '@/lib/book-print-status';
+import { isDesignInFlight, parseDesignStage } from '@/lib/photo-book-design-stage';
 import { quoteBookPrice, formatSummaryLabel } from '@/lib/gelato';
 import { env } from '@/lib/env';
 import { presignGet } from '@/lib/s3';
@@ -48,6 +49,8 @@ export default async function BookBuilderPage({
         excluded: p.excluded,
         metaSettled: p.metaSettled,
         metaFailed: p.metaFailed,
+        hasLocation: p.hasLocation,
+        hasAnalysis: p.hasAnalysis,
       })),
     );
 
@@ -93,7 +96,9 @@ export default async function BookBuilderPage({
             format: book.format,
             coverType: book.coverType,
             previewVersion: book.updatedAt.getTime(),
-            designing: book.designRequestedAt != null,
+            designing: isDesignInFlight(book.designRequestedAt),
+            designStage: parseDesignStage(book.designStage),
+            photoGrouping: book.photoGrouping,
             generatedAt: book.generatedAt ? book.generatedAt.toISOString() : null,
             layoutSource: book.layoutSource,
             layoutStale: book.layoutStale,

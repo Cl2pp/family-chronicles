@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
 import { getBookForUser } from '@/lib/books';
+import { isDesignInFlight, parseDesignStage } from '@/lib/photo-book-design-stage';
 
 /** Lightweight status poll for the builder while a render or an AI design pass is running. */
 export async function GET(
@@ -18,6 +19,9 @@ export async function GET(
     status: book.status,
     pageCount: book.pageCount,
     updatedAt: book.updatedAt,
-    designing: book.designRequestedAt != null,
+    designing: isDesignInFlight(book.designRequestedAt),
+    // Photo books only — how far the running design pass has got, so the builder can tick
+    // its progress checklist off live instead of showing an indefinite spinner.
+    designStage: parseDesignStage(book.designStage),
   });
 }

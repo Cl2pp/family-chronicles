@@ -303,6 +303,12 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
         if (!pages) return;
         var availW = document.documentElement.clientWidth - 16;
         var availH = document.documentElement.clientHeight - BODY_PAD_PX;
+        // A zero/negative viewport means this document is laid out inside a hidden or
+        // not-yet-sized box (an iframe in a display:none panel, a closed drawer). Zooming
+        // by 0 would scale the whole book to nothing and — since nothing re-runs this
+        // unless the viewport changes again — leave a permanently blank preview. Better to
+        // keep the last good zoom and wait for a real size.
+        if (availW <= 0 || availH <= 0) return;
         pages.style.zoom = Math.min(1, availW / PAGE_W_PX, availH / PAGE_H_PX);
       }
       window.PagedConfig = {
@@ -313,6 +319,12 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
         },
       };
       window.addEventListener('resize', fitPages);
+      // A resize event alone isn't enough: an iframe that gains a layout box (its
+      // container stops being display:none) doesn't reliably fire one in every browser.
+      // Observing the root element covers that case and costs nothing.
+      if (typeof ResizeObserver === 'function') {
+        new ResizeObserver(fitPages).observe(document.documentElement);
+      }
     })();
   </script>
   <script src="${PAGEDJS_POLYFILL_URL}"></script>`

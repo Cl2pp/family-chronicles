@@ -60,6 +60,38 @@ export const PHOTO_PAGE_TEMPLATE_SLOTS: Record<PhotoPageTemplate, { min: number;
   divider: { min: 0, max: 1 },
 };
 
+/**
+ * Aspect-ratio buckets that drive every template decision in the photo-book pipeline.
+ *
+ * ONE definition, here, because four independent places have to agree exactly or they
+ * silently contradict each other: the auto-layouter's page pacing
+ * (`lib/photo-book-autolayout.ts`), the design check's shape rules
+ * (`lib/photo-book-lint.ts`'s `TEMPLATE_SHAPE_RULES`), the repair pass that re-fits pages
+ * (`lib/photo-book-repair.ts`), and the photo table the model is shown
+ * (`lib/photo-book-ai-layout.ts`). Each of those used to carry its own copy of the same two
+ * thresholds with a comment pointing at the others; a single edit to one of them would have
+ * made the model's instructions, the layout it produces, and the check that scores it
+ * disagree.
+ */
+export type PhotoOrientation = 'portrait' | 'landscape' | 'square';
+
+export function photoOrientation(photo: { width: number; height: number }): PhotoOrientation {
+  const ratio = photo.width / photo.height;
+  if (ratio < 0.9) return 'portrait';
+  if (ratio > 1.1) return 'landscape';
+  return 'square';
+}
+
+/** Templates whose renderer deliberately drops captions — a dense mosaic has no room, and a
+ *  divider already shows its section title (`renderPage` in `lib/photo-book-layout.ts` is
+ *  the authority). Shared by the design check (which flags captions here) and the repair
+ *  pass (which strips them). */
+export const CAPTION_LESS_TEMPLATES: readonly PhotoPageTemplate[] = ['collage-4', 'collage-5', 'divider'];
+
+export function templateRendersCaptions(template: PhotoPageTemplate): boolean {
+  return !CAPTION_LESS_TEMPLATES.includes(template);
+}
+
 /** One page template variant, its `assetIds` arity fixed by `PHOTO_PAGE_TEMPLATE_SLOTS` —
  *  a structural, non-content-dependent constraint, so (mirroring `photoRowBlockSchema`'s
  *  `.length(2)`) it belongs in the zod schema itself, not the consistency checker. Content
@@ -235,6 +267,18 @@ export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: Phot
   }
 
   return problems;
+}
+
+/**
+ * Whether a plan actually puts photos on pages — the difference between "a structurally
+ * valid plan" and "a book". `checkPhotoBookPlanConsistency` deliberately accepts an empty
+ * plan (a brand-new book with no photos yet is legal, and with no content there is nothing
+ * for a cover hero to cover), so producers that must not persist an empty result — the AI
+ * design pass, whose fallback to the auto-layouter is the whole point — need this separate
+ * question answered.
+ */
+export function photoBookPlanHasContent(plan: PhotoBookPlan): boolean {
+  return plan.sections.some((section) => section.pages.some((page) => page.assetIds.length > 0));
 }
 
 export function isPhotoBookPlanConsistent(plan: PhotoBookPlan, content: PhotoPlanContent): boolean {
