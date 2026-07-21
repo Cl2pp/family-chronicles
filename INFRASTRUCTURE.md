@@ -180,6 +180,7 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 | `STYLING_MODEL` | which LLM to style with | e.g. `anthropic/claude-opus-4-8` (swap for cost) |
 | `VISION_MODEL` | photo-book per-photo vision scoring (`photo-vision` job) | flash-lite-tier, e.g. `google/gemini-2.5-flash-lite` — deliberately cheaper than `STYLING_MODEL`, since this runs once per uploaded photo, not once per book |
 | `GROQ_API_KEY` | voice transcription | Groq (optional — voice only) |
+| `GELATO_PRODUCT_UID_SOFT_21X28` / `GELATO_PRODUCT_UID_SOFT_20X20` | Gelato product UID for a **softcover** photo book, per size (optional, no default) | Unset (the default today — no softcover Gelato product is configured yet) makes the quote for that size degrade to "price on request" instead of crashing (`lib/gelato.ts`'s `productUidForFormat`/`quoteBookPrice`). The **hardcover** counterparts (`GELATO_PRODUCT_UID_21X28`/`_20X20`) already have built-in defaults and don't need setting |
 | `SMTP_URL` | verification emails (optional) | Resend: `smtp://resend:<API_KEY>@smtp.resend.com:587`. **Must be port 587 (STARTTLS)** — Hetzner Cloud blocks outbound 25/465 by default, and a blocked port doesn't error, it **hangs silently** (symptom: signup/resend just spins, no log line). Unset = emails are logged instead of sent |
 | `SMTP_FROM` | sender address | defaults to `Familienwerk <no-reply@familienwerk.co>` |
 | `S3_ENDPOINT` | R2 endpoint | **EU** form: `https://<acct>.eu.r2.cloudflarestorage.com` |

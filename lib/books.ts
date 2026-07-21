@@ -30,7 +30,7 @@ import {
   enqueueThumbnail,
 } from '@/lib/queue';
 import { enqueuePendingPhotoVisionBatches } from '@/lib/photo-vision';
-import { quoteBookPrice, type BookFormat, type BookQuote } from '@/lib/gelato';
+import { quoteBookPrice, type BookCoverType, type BookFormat, type BookQuote } from '@/lib/gelato';
 import {
   buildAndPersistAutoPlan,
   loadBook,
@@ -267,6 +267,9 @@ export interface BookDetail {
   coverAssetId: string | null;
   kind: BookKind;
   format: BookFormat;
+  /** Hardcover vs softcover binding (`books.cover_type`) — see its own comment in
+   *  db/schema.ts. Always 'hardcover' for story books (no config UI for it yet). */
+  coverType: BookCoverType;
   status: BookStatus;
   errorMessage: string | null;
   pageCount: number | null;
@@ -283,6 +286,10 @@ export interface BookDetail {
   /** Set while an AI design job is queued/running; null once it completes (success or
    *  fallback). Drives the builder's "Design my book" working state. */
   designRequestedAt: Date | null;
+  /** Set once a photo-book design job has completed at least once (success or
+   *  auto-fallback) — the builder Step 2 gate for "has this book ever been generated".
+   *  Always null for story books. See db/schema.ts's `books.generatedAt` comment. */
+  generatedAt: Date | null;
   updatedAt: Date;
   /** Only the chapters the VIEWING user can read (docs/STORY_ACCESS_PLAN.md). */
   chapters: BookChapter[];
@@ -386,6 +393,7 @@ export async function getBookForUser(
     coverAssetId,
     kind: row.book.kind as BookKind,
     format: row.book.format as BookFormat,
+    coverType: row.book.coverType as BookCoverType,
     status: row.book.status as BookStatus,
     errorMessage: row.book.errorMessage,
     pageCount: row.book.pageCount,
@@ -394,6 +402,7 @@ export async function getBookForUser(
     layoutSource: row.book.layoutSource as 'auto' | 'ai' | 'edited',
     layoutStale: row.book.layoutStale,
     designRequestedAt: row.book.designRequestedAt,
+    generatedAt: row.book.generatedAt,
     updatedAt: row.book.updatedAt,
     chapters: visibleChapters.map((c, i) => ({
       storyId: c.storyId,
@@ -815,6 +824,12 @@ export async function setPhotoExcluded(input: {
     .set({
       excluded: input.excluded,
       excludedReason: input.excluded ? 'user' : null,
+      // Root-cause fix for "excluding then re-including a photo doesn't stick": this is
+      // the USER's own explicit decision, recorded independently of `excluded` itself, so
+      // the next auto-layout rebuild (`buildAndPersistPhotoAutoPlan`) knows a re-included
+      // duplicate/blurry photo must survive culling rather than being silently excluded
+      // again (see `lib/photo-book-autolayout.ts`'s module header).
+      userDecision: input.excluded ? 'exclude' : 'include',
       updatedAt: new Date(),
     })
     .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.assetId, input.assetId)))
@@ -896,6 +911,92 @@ export async function setPhotoBookStyle(input: {
     .update(books)
     .set({ layoutPlan: validated.plan, layoutStale: false, updatedAt: new Date() })
     .where(eq(books.id, input.bookId));
+  return { ok: true };
+}
+
+/**
+ * The builder Step 2 config panel's title/subtitle/size/cover-type settings — a scoped
+ * counterpart of the story book's `updateBook` for photo books, kept separate rather than
+ * folded into it: `updateBook` is gated by `editableBook` (loads the full per-viewer
+ * chapter list, hidden-chapter checks, a `coverAssetId`-belongs-to-an-included-story
+ * validation) — none of which applies to photo books, which have no chapters at all — and
+ * unconditionally flips `layoutStale`/`status` back to draft on every call
+ * (`invalidatePreview()`), which for a photo book would force the NEXT plan build back
+ * through the deterministic auto-layouter, silently discarding an AI-designed
+ * (`layoutSource: 'ai'`) or hand-edited (`'edited'`) plan's sections/pacing just from a
+ * title tweak.
+ *
+ * Instead: `format`/`coverType` are pure preferences (quote input only, don't touch the
+ * plan) so they're just persisted. `title`/`subtitle` ARE part of the rendered cover, so
+ * when a plan already exists this also patches its `cover.title`/`cover.subtitle` in
+ * place — same "patch the stored plan directly" approach `setPhotoBookStyle` above uses
+ * for `style` — so the change is visible immediately without a full rebuild, and without
+ * downgrading `layoutSource`. A later full (re)build (`buildAndPersistPhotoAutoPlan` /
+ * the AI pass's `applyPhotoPlanCarryOver`) reads `books.title`/`books.subtitle` fresh
+ * regardless, so the two stay in agreement either way.
+ */
+export async function updatePhotoBookSettings(input: {
+  bookId: string;
+  userId: string;
+  title?: string;
+  subtitle?: string | null;
+  format?: BookFormat;
+  coverType?: BookCoverType;
+}): Promise<Result> {
+  const gate = await editablePhotoBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+
+  const [row] = await db
+    .select({ title: books.title, subtitle: books.subtitle, layoutPlan: books.layoutPlan })
+    .from(books)
+    .where(eq(books.id, input.bookId))
+    .limit(1);
+  if (!row) return err('Book not found.');
+
+  const nextTitle = input.title !== undefined ? input.title.trim() || row.title : row.title;
+  const nextSubtitle = input.subtitle !== undefined ? input.subtitle?.trim() || null : row.subtitle;
+
+  const set: Partial<typeof books.$inferInsert> = {
+    updatedAt: new Date(),
+    // A title/subtitle/format/cover-type change can make an existing print PDF stale
+    // (the cover text or the Gelato quote it feeds no longer matches) — downgrade
+    // `preview_ready` back to `draft` like every other photo-book mutation does, WITHOUT
+    // touching `layoutStale` (see the doc comment above for why the plan itself is
+    // patched in place instead of invalidated).
+    ...invalidatePhotoBookPrint(gate.status),
+  };
+  if (input.title !== undefined) set.title = nextTitle;
+  if (input.subtitle !== undefined) set.subtitle = nextSubtitle;
+  if (input.format !== undefined) set.format = input.format;
+  if (input.coverType !== undefined) set.coverType = input.coverType;
+
+  const coverTextChanged =
+    (input.title !== undefined && nextTitle !== row.title) ||
+    (input.subtitle !== undefined && nextSubtitle !== row.subtitle);
+  if (coverTextChanged && row.layoutPlan) {
+    const validated = validatePhotoBookPlan(row.layoutPlan);
+    if (validated.ok) {
+      // Reuse the chat agent's own `set_cover_title` op (`lib/photo-book-ops.ts`) rather
+      // than re-deriving "how to patch a plan's cover text" here — same pure, tested
+      // transform either way. It never reads `ctx` for this op, so an empty one is fine.
+      const result = applyPhotoLayoutOp(
+        validated.plan,
+        { op: 'set_cover_title', title: nextTitle, subtitle: nextSubtitle },
+        { availableAssetIds: new Set() },
+      );
+      if ('plan' in result) {
+        const revalidated = validatePhotoBookPlan(result.plan);
+        // Cover text alone can never make a previously-consistent plan inconsistent (it
+        // doesn't touch heroAssetId/sections/assetIds — the invariant
+        // `checkPhotoBookPlanConsistency` and the cover-hero guard protect), so
+        // `revalidated.ok` should always hold; the check is defense in depth, same spirit
+        // as `setPhotoBookStyle`'s own validation.
+        if (revalidated.ok) set.layoutPlan = revalidated.plan;
+      }
+    }
+  }
+
+  await db.update(books).set(set).where(eq(books.id, input.bookId));
   return { ok: true };
 }
 
@@ -1215,7 +1316,16 @@ export async function updatePhotoBookLayout(input: {
     for (const [assetId, excluded] of exclusionChanges) {
       await tx
         .update(bookPhotos)
-        .set({ excluded, excludedReason: excluded ? 'user' : null, updatedAt: new Date() })
+        .set({
+          excluded,
+          excludedReason: excluded ? 'user' : null,
+          // Same user-decision marker as `setPhotoExcluded` above — a chat
+          // exclude_photo/include_photo op is just as much the user's own explicit
+          // choice as the builder's toggle, and must survive a later regenerate/AI
+          // design pass the same way.
+          userDecision: excluded ? 'exclude' : 'include',
+          updatedAt: new Date(),
+        })
         .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.assetId, assetId)));
     }
     const set: Partial<typeof books.$inferInsert> = {
@@ -1898,7 +2008,7 @@ export async function quoteBook(input: {
     );
   }
   const pageCount = book.pageCount ?? (await estimatePageCount(book));
-  const quote = await quoteBookPrice({ format: book.format, pageCount });
+  const quote = await quoteBookPrice({ format: book.format, coverType: book.coverType, pageCount });
   return { ok: true, value: { quote } };
 }
 

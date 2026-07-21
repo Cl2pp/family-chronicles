@@ -16,6 +16,7 @@ import {
   type PhotoBookPlan,
   type PhotoPlanContent,
 } from '@/lib/photo-book-plan';
+import { referencedPhotoAssetIds } from '@/lib/photo-book-content';
 
 /**
  * The photo-book AI design pass (docs/PHOTO_BOOK_PLAN.md §6, producer #2) — the
@@ -63,10 +64,16 @@ function orientation(width: number, height: number): 'landscape' | 'portrait' | 
  *  hero/opener selection, so the photos the model gets to actually SEE are the ones most
  *  likely to matter for its hero/opener choices. */
 function visionRank(photo: AutoLayoutPhoto): number {
+  // A force-included photo (docs/PHOTO_BOOK_PLAN.md re-include fix) always wins the pick —
+  // the user explicitly asked for it, so if it can ride along as an actual image within
+  // the MAX_VISION_IMAGES cap, it should, giving the model the best shot at actually
+  // placing it (see the completeness check in `proposePhotoBookPlan` below, which falls
+  // back to the auto layout if the model leaves a force-included photo out anyway).
+  const forced = photo.userDecision === 'include' ? 1_000_000 : 0;
   const cover = photo.analysis?.coverCandidate ? 1 : 0;
   const aesthetic = photo.analysis?.aestheticScore ?? NEUTRAL_RANK_SCORE;
   const resolutionTiebreak = (photo.width * photo.height) / 1e8; // sub-1 nudge, never flips a real ranking
-  return cover * 1000 + aesthetic * 10 + resolutionTiebreak;
+  return forced + cover * 1000 + aesthetic * 10 + resolutionTiebreak;
 }
 
 /** Picks which photos get sent as actual vision input, capped and spread across the
@@ -123,8 +130,8 @@ function schemaText(): string {
   "style": ${PHOTO_BOOK_STYLES.map((s) => `"${s}"`).join(' | ')},
   "cover": {
     "heroAssetId": "<assetId>",
-    "title": "<a short, warm book title — you may improve on the current title>",
-    "subtitle": "<optional>",
+    "title": "<the book's title — fixed by the user's own settings, just echo the current title from the prompt below; this field is required by the schema but your value here is not used>",
+    "subtitle": "<optional, same as title — echo the current subtitle if there is one>",
     "backAssetIds": ["<assetId>", ...]   // optional, 0-3 small photos for the back cover
   },
   "sections": [
@@ -149,6 +156,7 @@ const HARD_RULES = `Hard rules — a plan that breaks any of these will be disca
 - Every section must have at least one page.
 - A page's "assetIds" length must exactly match its template's photo count (see the template list).
 - If "captions" is present on a page, it must have exactly as many entries as "assetIds".
+- Any photo marked "[MUST BE INCLUDED — the user manually re-added this photo]" in the photo list below MUST appear somewhere in your plan (as the cover hero, a cover back photo, or on a section page) — never leave one of these out, no matter how weak/blurry/redundant it looks. This is a hard requirement, not a suggestion: a plan missing one of these photos is discarded just like an invalid one.
 - Output ONLY the JSON object. No markdown code fences, no explanation before or after, nothing but the JSON.`;
 
 /** Fetches the chronicle's story-language setting (`chronicles.story_language`) for a
@@ -174,7 +182,7 @@ ${HARD_RULES}
 Design goals — this is where your judgment (and the ability to actually see the photos) matters, and is the entire reason this pass exists instead of a mechanical date-range layout:
 - NAME sections from what's actually in them ("Am Strand", "Omas Geburtstag") rather than a generic date range — put the date range in "dateLabel" instead if you want to keep it visible.
 - Keep sections in roughly chronological order (matching the photos' capture times) — this is a family memoir on a timeline, not a shuffled gallery.
-- Pick the cover hero: prefer a photo whose analysis marks it "coverCandidate", and among those the highest "aestheticScore" — a warm, clear, well-composed photo of people, not a blurry or eyes-closed one. You may also propose a better "cover.title" than the book's current title if you can do better from what the photos show.
+- Pick the cover hero: prefer a photo whose analysis marks it "coverCandidate", and among those the highest "aestheticScore" — a warm, clear, well-composed photo of people, not a blurry or eyes-closed one. The cover's title/subtitle text is fixed by the user's own settings and not yours to change — spend your judgment on the hero pick instead.
 - FILL THE PAGE, SYMMETRICALLY. Never leave a photo hugging one side of the page with white space beside it; prefer templates that span the full width (two-*, three-*, collage-*) for photos that go together, and reserve "full-bleed"/"full-framed" for photos that deserve to stand alone.
 - Vary the rhythm across sections — don't give every section the identical page pattern. A section opener is usually its own strong single-photo page; some sections can build to another strong single-photo page mid-way; others stay all multi-photo pages. A book that "breathes" differently section to section reads as designed, not generated.
 - It is fine, and often right, to leave out a weak, redundant, blurry, or eyes-closed-with-no-good-alternative photo entirely — favor photos with a high "aestheticScore" and no eyes-closed flag when you have a choice; you do not have to place every available photo.
@@ -192,7 +200,9 @@ function photoTableLine(photo: AutoLayoutPhoto, clusterIndex: number): string {
   const analysisText = a
     ? `aesthetic ${a.aestheticScore.toFixed(1)}, ${a.sharpness}, eyesClosed=${a.eyesClosed}, people=${a.peopleCount}, cover=${a.coverCandidate}, tags=[${a.sceneTags.join(', ')}], "${a.shortDescription}"`
     : 'not yet scored';
-  return `  - assetId: ${photo.assetId}, taken: ${taken}, gps: ${gps}, cluster: ${clusterIndex}, size: ${size}, ${analysisText}`;
+  // See the HARD_RULES entry this exact phrase is matched against in the system prompt.
+  const forcedTag = photo.userDecision === 'include' ? ' [MUST BE INCLUDED — the user manually re-added this photo]' : '';
+  return `  - assetId: ${photo.assetId}, taken: ${taken}, gps: ${gps}, cluster: ${clusterIndex}, size: ${size}, ${analysisText}${forcedTag}`;
 }
 
 /** Converts a `PhotoBookPhotoRef` (as loaded by `loadPhotoBook`) into the shape
@@ -215,6 +225,7 @@ function toAutoLayoutPhotos(
       phash: p.phash,
       blurScore: p.blurScore,
       analysis: p.analysis,
+      userDecision: p.userDecision,
       s3Key: p.s3Key,
       thumbS3Key: p.thumbS3Key,
     }));
@@ -274,14 +285,16 @@ function extractJson(raw: string): unknown | null {
 
 /**
  * Post-processing carry-over (mirrors `applyPlanCarryOver` in `lib/book-ai-layout.ts`):
- * overrides the model's `style` with whatever plan was already stored, and its
+ * overrides the model's `style` with whatever plan was already stored, its
  * `cover.heroAssetId` with the book's pinned cover (`books.cover_asset_id`) when one is
- * set — the model doesn't get a vote on either. Unlike the story path, the model's own
- * `cover.title`/`cover.subtitle` proposal is KEPT, not overridden — docs/PHOTO_BOOK_PLAN.md
- * §6 explicitly asks the design pass for a "cover title suggestion", a capability the
- * deterministic auto-layouter doesn't have (it always defaults the title to the book's
- * own title — see `buildAndPersistPhotoAutoPlan`'s doc comment for why that function
- * doesn't carry a title forward either). Exported for testing.
+ * set, and — since PR6's builder Step 2 config panel made front-cover title/subtitle
+ * explicit, user-edited book settings (`books.title`/`books.subtitle`) rather than
+ * something only the AI proposes — its `cover.title`/`cover.subtitle` too. The model
+ * still gets asked for a title/subtitle in its JSON output (the schema requires one), but
+ * the result here is always the book's own values: the design pass must never silently
+ * override what the user typed into the config panel, only the section titles/pacing/hero
+ * pick it actually has judgment to add. Mirrors `resolveUsableHeroId`'s "book settings win
+ * over the plan" precedent for the hero id. Exported for testing.
  */
 export function applyPhotoPlanCarryOver(plan: PhotoBookPlan, loaded: LoadedPhotoBook): PhotoBookPlan {
   const existing = loaded.row.layoutPlan ? validatePhotoBookPlan(loaded.row.layoutPlan) : null;
@@ -294,14 +307,18 @@ export function applyPhotoPlanCarryOver(plan: PhotoBookPlan, loaded: LoadedPhoto
       : null;
   const heroAssetId = pinnedHero ?? plan.cover.heroAssetId;
 
-  return {
-    ...plan,
-    style,
+  const cover: PhotoBookPlan['cover'] = {
+    ...plan.cover,
     // `heroAssetId` can only end up falsy here if `plan.cover.heroAssetId` already was
-    // (pinnedHero is null and there's nothing to fall back to) — so `plan.cover` as-is
-    // is already correct in that case; only the truthy case needs an explicit override.
-    cover: heroAssetId ? { ...plan.cover, heroAssetId } : plan.cover,
+    // (pinnedHero is null and there's nothing to fall back to) — so leaving the spread
+    // above as-is already covers that case; only the truthy case needs an override.
+    ...(heroAssetId ? { heroAssetId } : {}),
+    title: loaded.row.title,
   };
+  if (loaded.row.subtitle) cover.subtitle = loaded.row.subtitle;
+  else delete cover.subtitle;
+
+  return { ...plan, style, cover };
 }
 
 /**
@@ -365,6 +382,29 @@ export async function proposePhotoBookPlan(bookId: string): Promise<PhotoBookPla
     if (problems.length > 0) {
       console.error(`[photo-book-ai-layout] design pass for ${bookId} failed consistency check:`, problems);
       return null;
+    }
+
+    // Completeness check for force-included photos (docs/PHOTO_BOOK_PLAN.md re-include
+    // fix): unlike the deterministic auto-layouter, this is a model's free-form judgment
+    // call, and HARD_RULES telling it a photo "MUST BE INCLUDED" is a strong hint, not a
+    // guarantee — `checkPhotoBookPlanConsistency` above only verifies the model didn't
+    // reference anything it shouldn't, not that it placed everything it was told to. A
+    // force-included photo the model still left out breaks the "the user insisted"
+    // contract just as much as an invalid plan would, so this is treated the same way:
+    // discard and fall back to `buildAndPersistPhotoAutoPlan`, which — thanks to the same
+    // `userDecision` threading in `lib/photo-book-autolayout.ts` — is guaranteed to place
+    // every force-included photo somewhere.
+    const forcedIncludeIds = available.filter((p) => p.userDecision === 'include').map((p) => p.assetId);
+    if (forcedIncludeIds.length > 0) {
+      const referenced = referencedPhotoAssetIds(plan);
+      const missing = forcedIncludeIds.filter((id) => !referenced.has(id));
+      if (missing.length > 0) {
+        console.error(
+          `[photo-book-ai-layout] design pass for ${bookId} omitted ${missing.length} force-included photo(s), discarding:`,
+          missing,
+        );
+        return null;
+      }
     }
 
     return plan;

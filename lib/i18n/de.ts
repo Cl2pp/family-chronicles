@@ -685,6 +685,24 @@ export const de: Dictionary = {
       overwriteEditsConfirm: 'Änderungen ersetzen',
       overwriteEditsCancel: 'Abbrechen',
       photoBook: {
+        steps: {
+          upload: 'Foto-Upload',
+          create: 'Fotobuch erstellen',
+          order: 'Bestellen',
+        },
+        stepUploadDescription: 'Fotos hinzufügen und prüfen',
+        stepCreateDescription: 'Layout mit KI gestalten',
+        stepOrderDescription: 'Herunterladen oder bestellen',
+        next: 'Weiter',
+        back: 'Zurück',
+        waitingForAnalysis: 'Warte, bis alle Fotos analysiert sind, um fortzufahren.',
+        dropzoneTitle: 'Fotos hierher ziehen',
+        dropzoneHint: 'oder klicken, um Dateien von deinem Gerät auszuwählen',
+        collapseChat: 'Chat einklappen',
+        expandChat: 'Chat ausklappen',
+        showChatMobile: 'KI-Chat anzeigen',
+        orderStepIntro:
+          'Hier kannst du dein Fotobuch bald direkt bestellen — lade es bis dahin unten als PDF in voller Auflösung herunter und frag optional einen Preis per E-Mail an.',
         addPhotos: 'Fotos hinzufügen',
         uploadProgress: (done: number, total: number) => `${done} / ${total} hochgeladen`,
         someFailed: (n: number) =>
@@ -724,9 +742,32 @@ export const de: Dictionary = {
         regenerate: 'Neu erstellen',
         regenerating: 'Wird erstellt…',
         regenerateHint: 'Baut das Layout aus deinen aktuellen Fotos neu auf — Abschnitte, Seiten und Cover.',
-        waitingForPhotos: 'Füge Fotos hinzu und lass sie analysieren, um eine Vorschau zu sehen.',
+        waitingForGeneration: 'Erstelle dein Buch, bevor du fortfährst.',
         downloadPdf: 'PDF herunterladen',
         downloadFailed: 'Das Druck-PDF konnte nicht erstellt werden. Versuch es bitte noch einmal.',
+        bookAreaPlaceholder: 'Dein Fotobuch erscheint hier, sobald du es erstellst.',
+        bookAreaGenerating: 'Dein Fotobuch wird erstellt…',
+        settings: 'Einstellungen',
+        settingsModalTitle: 'Bucheinstellungen',
+        config: {
+          title: 'Fotobuch einrichten',
+          intro:
+            'Wähle Stil, Einband und Größe und gib deinem Buch einen Titel — dann erstellst du es, und die KI gestaltet ein komplettes Layout aus deinen Fotos.',
+          bookTitle: 'Titel',
+          subtitle: 'Untertitel',
+          coverType: 'Einband',
+          coverTypeOptions: {
+            hardcover: 'Hardcover',
+            softcover: 'Softcover',
+          },
+          size: 'Größe',
+          sizeOptions: {
+            'hardcover-21x28': '21 × 28 (Hochformat)',
+            'hardcover-20x20': '20 × 20 (Quadratisch)',
+          },
+          createBook: 'Buch erstellen',
+          creating: 'Dein Fotobuch wird erstellt…',
+        },
         chat: {
           title: 'Mit KI bearbeiten',
           hint: 'Tipp oder sprich eine Sprachnachricht ein und sag der KI, was sich ändern soll — sie bearbeitet dieses Buch direkt und die Vorschau aktualisiert sich von selbst. Z. B. „Mach das dritte Foto größer“, „Die verschwommenen raus“, „Nenn das erste Kapitel ‚Sommer in Italien‘“.',

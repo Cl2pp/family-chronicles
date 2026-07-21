@@ -9,7 +9,7 @@ import {
   type PhotoBookPlan,
   type PhotoPlanContent,
 } from '@/lib/photo-book-plan';
-import { buildPhotoBookAutoLayout, type AutoLayoutPhoto } from '@/lib/photo-book-autolayout';
+import { buildPhotoBookAutoLayout, resolveUsableHeroId, type AutoLayoutPhoto } from '@/lib/photo-book-autolayout';
 import { parseStoredPhotoAnalysis, type PhotoAnalysis } from '@/lib/photo-analysis';
 
 /**
@@ -33,6 +33,10 @@ export interface PhotoBookPhotoRef {
   position: number;
   excluded: boolean;
   excludedReason: string | null;
+  /** The user's own explicit include/exclude choice (`book_photos.user_decision`) —
+   *  `null` means no explicit choice, auto-culling decides (docs/PHOTO_BOOK_PLAN.md
+   *  re-include fix, see `lib/photo-book-autolayout.ts`'s module header). */
+  userDecision: 'include' | 'exclude' | null;
   takenAt: Date | null;
   gpsLat: number | null;
   gpsLng: number | null;
@@ -71,6 +75,7 @@ export async function loadPhotoBook(bookId: string): Promise<LoadedPhotoBook> {
       position: bookPhotos.position,
       excluded: bookPhotos.excluded,
       excludedReason: bookPhotos.excludedReason,
+      userDecision: bookPhotos.userDecision,
       takenAt: bookPhotos.takenAt,
       gpsLat: bookPhotos.gpsLat,
       gpsLng: bookPhotos.gpsLng,
@@ -85,8 +90,20 @@ export async function loadPhotoBook(bookId: string): Promise<LoadedPhotoBook> {
 
   return {
     row,
-    photos: rows.map((r) => ({ ...r, analysis: parseStoredPhotoAnalysis(r.analysis) })),
+    photos: rows.map((r) => ({
+      ...r,
+      userDecision: normalizeUserDecision(r.userDecision),
+      analysis: parseStoredPhotoAnalysis(r.analysis),
+    })),
   };
+}
+
+/** `book_photos.user_decision` is an untyped `text` column (like `excluded_reason`) — this
+ *  narrows a stored value down to the two the app ever writes, so a stray/legacy value
+ *  degrades to "no explicit choice" instead of typing as something the rest of the code
+ *  never expects. */
+function normalizeUserDecision(value: string | null): 'include' | 'exclude' | null {
+  return value === 'include' || value === 'exclude' ? value : null;
 }
 
 /** A plan with no cover hero and no sections — used as a last-resort fallback if the
@@ -138,12 +155,15 @@ export async function loadOrBuildPhotoPlan(bookId: string, loaded: LoadedPhotoBo
  *     empty-but-valid plan instead of a 500.
  *
  * Cover title/subtitle are NOT carried over from a prior plan (unlike style and cover
- * hero, which are — see the story path's carry-over rule): a photo book's cover title has
- * no independent editing surface yet in PR2 (that's a future targeted-op, PR4), so it
- * should always track the book's current title/settings rather than freezing whatever it
- * was on a previous build — the same behavior a story book's cover already has (its
- * title/subtitle are book-level fields read fresh on every render, never stored in the
- * plan at all).
+ * hero, which are — see the story path's carry-over rule): since PR6 (the builder Step 2
+ * config panel) both are explicit, book-level settings (`books.title`/`books.subtitle`)
+ * the user edits directly, so this always tracks their CURRENT value rather than freezing
+ * whatever the cover happened to say on a previous build — the same behavior a story
+ * book's cover already has (its title/subtitle are book-level fields read fresh on every
+ * render, never stored in the plan at all). `lib/books.ts`'s `updatePhotoBookSettings`
+ * additionally patches an already-stored plan's cover in place on a title/subtitle edit,
+ * so a change is visible immediately without waiting for the next full rebuild this
+ * function does.
  */
 export async function buildAndPersistPhotoAutoPlan(
   bookId: string,
@@ -165,16 +185,28 @@ export async function buildAndPersistPhotoAutoPlan(
       phash: p.phash,
       blurScore: p.blurScore,
       analysis: p.analysis,
+      userDecision: p.userDecision,
     }));
 
   const existing = row.layoutPlan ? validatePhotoBookPlan(row.layoutPlan) : null;
   const existingPlan = existing?.ok ? existing.plan : null;
 
+  // A pinned (`row.coverAssetId`) or carried-over (`existingPlan.cover.heroAssetId`) hero
+  // must be dropped here if it's no longer present-and-non-excluded, via
+  // `resolveUsableHeroId` — see that function's doc comment for why (PR3 FIX 1b: a stale
+  // hero id passed through unfiltered makes `buildPhotoBookAutoLayout` echo it straight to
+  // `plan.cover.heroAssetId`, which then fails consistency and blanks the WHOLE plan, not
+  // just the cover). Mirrors the guard `applyPhotoPlanCarryOver`
+  // (`lib/photo-book-ai-layout.ts`) already applies to the AI path.
+  const coverAssetId = resolveUsableHeroId(row.coverAssetId, available);
+  const existingHeroAssetId = resolveUsableHeroId(existingPlan?.cover.heroAssetId, available) ?? undefined;
+
   const { plan: built, culled } = buildPhotoBookAutoLayout({
     title: row.title,
-    coverAssetId: row.coverAssetId,
+    subtitle: row.subtitle,
+    coverAssetId,
     existingStyle: existingPlan?.style,
-    existingHeroAssetId: existingPlan?.cover.heroAssetId,
+    existingHeroAssetId,
     photos: autoLayoutPhotos,
   });
 

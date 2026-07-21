@@ -142,6 +142,13 @@ async function handleDesignBook(data: DesignBookJob) {
  * built auto-layout plan on failure (`proposePhotoBookPlan` never throws, it returns
  * null), and `design_requested_at` always cleared at the end so the builder's poll
  * stops. "Design my book" never leaves the book worse off than before it was clicked.
+ *
+ * Every exit path also stamps `generated_at` — the builder Step 2 gate for "has this book
+ * ever been generated" (docs/PHOTO_BOOK_PLAN.md builder restructure, PR6). Success and the
+ * auto-layout fallback BOTH count: either way the book now has a complete, viewable plan,
+ * which is all the gate cares about — it's not a signal that the AI pass specifically
+ * succeeded (that's what `layoutSource` is for). Once set it is never cleared again by a
+ * later regeneration, only re-stamped with a fresh timestamp.
  */
 async function handleDesignPhotoBook(data: DesignPhotoBookJob) {
   const { bookId } = data;
@@ -155,6 +162,7 @@ async function handleDesignPhotoBook(data: DesignPhotoBookJob) {
           layoutSource: 'ai',
           layoutStale: false,
           designRequestedAt: null,
+          generatedAt: new Date(),
           updatedAt: new Date(),
         })
         .where(eq(books.id, bookId));
@@ -165,16 +173,28 @@ async function handleDesignPhotoBook(data: DesignPhotoBookJob) {
     console.log(`[worker] AI design pass for photo book ${bookId} produced no usable plan — falling back to auto layout`);
     const loaded = await loadPhotoBook(bookId);
     await buildAndPersistPhotoAutoPlan(bookId, loaded);
-    await db.update(books).set({ designRequestedAt: null }).where(eq(books.id, bookId));
+    await db
+      .update(books)
+      .set({ designRequestedAt: null, generatedAt: new Date() })
+      .where(eq(books.id, bookId));
   } catch (err) {
     console.error(`[worker] design-photo-book failed for ${bookId}:`, err);
+    let fellBackOk = false;
     try {
       const loaded = await loadPhotoBook(bookId);
       await buildAndPersistPhotoAutoPlan(bookId, loaded);
+      fellBackOk = true;
     } catch (fallbackErr) {
       console.error(`[worker] auto-layout fallback also failed for photo book ${bookId}:`, fallbackErr);
     }
-    await db.update(books).set({ designRequestedAt: null }).where(eq(books.id, bookId));
+    // Only stamp `generatedAt` if the fallback actually produced a plan — if BOTH the AI
+    // pass and the fallback failed, the book still has nothing to show, so the builder
+    // should keep showing the config-only "not generated yet" view rather than a "book"
+    // that's actually empty/broken.
+    await db
+      .update(books)
+      .set({ designRequestedAt: null, ...(fellBackOk ? { generatedAt: new Date() } : {}) })
+      .where(eq(books.id, bookId));
   }
 }
 

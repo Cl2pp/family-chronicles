@@ -61,6 +61,13 @@ const schema = z.object({
     .default(
       'photobooks-hardcover_pf_200x200-mm-8x8-inch_pt_170-gsm-65lb-coated-silk_cl_4-4_ccl_4-4_bt_glued-left_ct_matt-lamination_prt_1-0_cpt_130-gsm-65-lb-cover-coated-silk_ver',
     ),
+  // Softcover counterparts of the two UIDs above (photo books' cover-type config, PR6)
+  // — deliberately optional with NO default: Gelato softcover photo-book products haven't
+  // been picked/configured yet, so an unset value means "we don't sell this yet", and
+  // `lib/gelato.ts`'s quote degrades to "price on request" for that combination rather
+  // than quoting against a placeholder product.
+  GELATO_PRODUCT_UID_SOFT_21X28: z.string().min(1).optional(),
+  GELATO_PRODUCT_UID_SOFT_20X20: z.string().min(1).optional(),
   /** Flat margin (EUR) added on top of Gelato's product + shipping cost. */
   BOOK_MARGIN_EUR: z.coerce.number().default(15),
   /** Shown on the order screen — users email this address to request a printed book. */

@@ -13,19 +13,50 @@ import { env } from '@/lib/env';
 
 const QUOTE_URL = 'https://order.gelatoapis.com/v4/orders:quote';
 
+/** NOTE: despite the "hardcover-" prefix, these values name the SIZE/trim only (21×28 vs
+ *  20×20 cm) — see `bookFormat`'s comment in db/schema.ts. The hardcover-vs-softcover
+ *  binding choice is the separate `BookCoverType` below; `productUidForFormat` combines
+ *  both to pick the actual Gelato product. */
 export type BookFormat = 'hardcover-21x28' | 'hardcover-20x20';
 
-export function productUidForFormat(format: BookFormat): string {
-  return format === 'hardcover-20x20'
-    ? env.GELATO_PRODUCT_UID_20X20
-    : env.GELATO_PRODUCT_UID_21X28;
+/** Hardcover vs softcover binding (`books.cover_type`, PR6's photo-book config panel). */
+export type BookCoverType = 'hardcover' | 'softcover';
+
+/**
+ * Resolves the Gelato product UID for a (size, binding) combination. Hardcover UIDs are
+ * always configured (env defaults, existing behavior). Softcover UIDs
+ * (`GELATO_PRODUCT_UID_SOFT_21X28`/`_20X20`) are optional and have no default — Gelato
+ * softcover photo-book products haven't been picked yet — so this returns `null` when the
+ * relevant one isn't set, and `quoteBookPrice` below degrades to "price on request"
+ * instead of quoting (or crashing on) a product that doesn't exist.
+ */
+export function productUidForFormat(format: BookFormat, coverType: BookCoverType): string | null {
+  if (coverType === 'softcover') {
+    return format === 'hardcover-20x20'
+      ? (env.GELATO_PRODUCT_UID_SOFT_20X20 ?? null)
+      : (env.GELATO_PRODUCT_UID_SOFT_21X28 ?? null);
+  }
+  return format === 'hardcover-20x20' ? env.GELATO_PRODUCT_UID_20X20 : env.GELATO_PRODUCT_UID_21X28;
 }
 
-/** Human labels for the formats (locale-independent; sizes read the same in en/de). */
+/** Human labels for the formats (locale-independent; sizes read the same in en/de).
+ *  Hardcover-only — kept for any caller that only ever deals in hardcover (today, that's
+ *  every story book, which has no cover-type UI). Photo books, which DO expose a
+ *  cover-type choice, use `formatSummaryLabel` below instead so the label reflects the
+ *  binding the user actually picked. */
 export const FORMAT_LABELS: Record<BookFormat, string> = {
   'hardcover-21x28': 'Hardcover 21 × 28 cm',
   'hardcover-20x20': 'Hardcover 20 × 20 cm',
 };
+
+/** Human label for a (size, binding) combination — the order screen's summary row for
+ *  any book kind. Equivalent to `FORMAT_LABELS` when `coverType` is 'hardcover' (every
+ *  story book); reflects 'Softcover' for a photo book configured that way. */
+export function formatSummaryLabel(format: BookFormat, coverType: BookCoverType): string {
+  const size = format === 'hardcover-20x20' ? '20 × 20 cm' : '21 × 28 cm';
+  const binding = coverType === 'softcover' ? 'Softcover' : 'Hardcover';
+  return `${binding} ${size}`;
+}
 
 /** Gelato photo books accept 30–200 inner pages. */
 export const MIN_PAGES = 30;
@@ -36,7 +67,10 @@ export interface BookQuote {
   /** Whether a live Gelato price backs this quote; false = "price on request". */
   priced: boolean;
   currency: string;
-  productUid: string;
+  /** Null when no Gelato product is configured for the requested (size, coverType)
+   *  combination (currently: any softcover size, until GELATO_PRODUCT_UID_SOFT_* is set)
+   *  — `priced` is always false in that case too. */
+  productUid: string | null;
   pageCount: number;
   /** Gelato product cost (excl. VAT), when priced. */
   productCost: number | null;
@@ -78,9 +112,10 @@ interface GelatoQuoteResponse {
  */
 export async function quoteBookPrice(input: {
   format: BookFormat;
+  coverType: BookCoverType;
   pageCount: number;
 }): Promise<BookQuote> {
-  const productUid = productUidForFormat(input.format);
+  const productUid = productUidForFormat(input.format, input.coverType);
   const pageCount = Math.min(MAX_PAGES, Math.max(MIN_PAGES, input.pageCount));
   const base: BookQuote = {
     priced: false,
@@ -93,7 +128,9 @@ export async function quoteBookPrice(input: {
     total: null,
     quotedAt: new Date().toISOString(),
   };
-  if (!env.GELATO_API_KEY) return base;
+  // No Gelato key, or no product configured for this (size, coverType) combination
+  // (currently: softcover with its env UID unset) — "price on request" either way.
+  if (!env.GELATO_API_KEY || !productUid) return base;
 
   try {
     const res = await fetch(QUOTE_URL, {

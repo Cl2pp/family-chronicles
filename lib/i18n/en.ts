@@ -669,6 +669,24 @@ export const en = {
       overwriteEditsConfirm: 'Replace edits',
       overwriteEditsCancel: 'Cancel',
       photoBook: {
+        steps: {
+          upload: 'Upload photos',
+          create: 'Create book',
+          order: 'Order',
+        },
+        stepUploadDescription: 'Add and review your photos',
+        stepCreateDescription: 'Design the layout with AI',
+        stepOrderDescription: 'Download or order',
+        next: 'Next',
+        back: 'Back',
+        waitingForAnalysis: 'Wait until every photo has been analyzed before continuing.',
+        dropzoneTitle: 'Drag photos here',
+        dropzoneHint: 'or click to choose files from your device',
+        collapseChat: 'Collapse chat',
+        expandChat: 'Expand chat',
+        showChatMobile: 'Show AI chat',
+        orderStepIntro:
+          'This is where you\'ll be able to order a printed copy soon — for now, download the full-resolution PDF below and (optionally) request a quote by email.',
         addPhotos: 'Add photos',
         uploadProgress: (done: number, total: number) => `${done} / ${total} uploaded`,
         someFailed: (n: number) =>
@@ -706,9 +724,32 @@ export const en = {
         regenerate: 'Regenerate',
         regenerating: 'Generating…',
         regenerateHint: 'Rebuilds the layout from your current photos — sections, pages, and cover.',
-        waitingForPhotos: 'Add and analyze some photos to see a preview.',
+        waitingForGeneration: 'Create your book before continuing.',
         downloadPdf: 'Download PDF',
         downloadFailed: 'Creating the print PDF failed. Please try again.',
+        bookAreaPlaceholder: 'Your photo book will appear here once you create it.',
+        bookAreaGenerating: 'Creating your photo book…',
+        settings: 'Settings',
+        settingsModalTitle: 'Book settings',
+        config: {
+          title: 'Set up your book',
+          intro:
+            'Pick a style, cover and size, and give your book a title — then create it and let AI design a complete layout from your photos.',
+          bookTitle: 'Title',
+          subtitle: 'Subtitle',
+          coverType: 'Cover',
+          coverTypeOptions: {
+            hardcover: 'Hardcover',
+            softcover: 'Softcover',
+          },
+          size: 'Size',
+          sizeOptions: {
+            'hardcover-21x28': '21 × 28 (portrait)',
+            'hardcover-20x20': '20 × 20 (square)',
+          },
+          createBook: 'Create book',
+          creating: 'Creating your book…',
+        },
         chat: {
           title: 'Edit with AI',
           hint: 'Type or send a voice message telling the AI what to change — it edits this book directly and the preview updates on its own. E.g. “Make the third photo bigger”, “Take out the blurry ones”, “Call the first chapter ‘Summer in Italy’”.',

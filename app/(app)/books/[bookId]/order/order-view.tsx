@@ -29,7 +29,7 @@ import { isBookPrintFresh } from '@/lib/book-print-status';
 import { renderPreviewAction } from '../../actions';
 import posthog from 'posthog-js';
 
-interface OrderBook {
+export interface OrderBook {
   id: string;
   title: string;
   kind: BookKind;
@@ -62,10 +62,19 @@ export function OrderView({
   book,
   quote,
   contactEmail,
+  embedded = false,
 }: {
   book: OrderBook;
   quote: BookQuote | null;
   contactEmail: string;
+  /** True when rendered inside the photo-book builder's own step 3 (photo-book-order-
+   *  step.tsx), rather than the standalone `/books/[bookId]/order` route. Hides the "back
+   *  to book"/page title (the stepper above already shows where we are) and this view's
+   *  own simple download-PDF anchor (the step already renders a smarter one via the
+   *  builder's `downloadPdf()`, which triggers a render first when the PDF is stale,
+   *  rather than only appearing once one already exists). The standalone route never
+   *  passes this, so its behavior/appearance there is completely unchanged. */
+  embedded?: boolean;
 }) {
   const { t } = useI18n();
   const to = t.books.order;
@@ -126,13 +135,17 @@ export function OrderView({
 
   return (
     <Stack gap="md">
-      <Anchor component={Link} href={`/books/${book.id}`} fz={13} c="dimmed">
-        <Group gap={4}>
-          <IconArrowLeft size={14} />
-          {to.backToBook}
-        </Group>
-      </Anchor>
-      <Title order={1}>{to.title}</Title>
+      {!embedded && (
+        <>
+          <Anchor component={Link} href={`/books/${book.id}`} fz={13} c="dimmed">
+            <Group gap={4}>
+              <IconArrowLeft size={14} />
+              {to.backToBook}
+            </Group>
+          </Anchor>
+          <Title order={1}>{to.title}</Title>
+        </>
+      )}
 
       {book.accessBlocked ? (
         <Alert color="yellow" icon={<IconInfoCircle size={16} />}>
@@ -169,8 +182,10 @@ export function OrderView({
 
         {/* Photo-book only (docs/PHOTO_BOOK_PLAN.md PR5, the v1 deliverable) — story
             books keep their existing order-screen behavior unchanged (no download link
-            here yet; their PDF proof link lives on the builder page). */}
-        {book.kind === 'photo' && !preparing && book.hasPrint && (
+            here yet; their PDF proof link lives on the builder page). Hidden when
+            `embedded` — the builder's own step 3 already renders a smarter download
+            button above this component (see `embedded`'s doc comment). */}
+        {!embedded && book.kind === 'photo' && !preparing && book.hasPrint && (
           <Button
             component="a"
             href={`/api/books/${book.id}/print`}
