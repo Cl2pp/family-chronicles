@@ -253,8 +253,12 @@ function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, 
  *  (`page: <ident>` on the element, a matching `@page <ident> { margin: 0 }` rule).
  *
  *  ONLY for `preview`/`print`: those render through Chromium's own native paged-media
- *  engine (`page.pdf()` in `lib/book-render.ts`), which implements CSS named pages
- *  correctly. The `screen` variant is paginated client-side by the self-hosted Paged.js
+ *  engine (`page.pdf()` in `lib/book-render.ts`), which paginates named pages fine.
+ *  (KNOWN LIMITATION, tracked separately: Chromium's `page.pdf()` does not fully honor a
+ *  named `@page { margin: 0 }` override on the trailing edges — measured right/bottom bleed
+ *  falls short of the sheet edge while left/top reach it — so print-side full bleed is
+ *  currently imperfect. This predates the screen fix below and affects only the printed
+ *  PDF, not the on-screen preview.) The `screen` variant is paginated client-side by the self-hosted Paged.js
  *  *polyfill* instead, and that polyfill cannot reliably reflow a document that uses many
  *  scattered named `@page` rules — confirmed by reproducing it headlessly: pagination
  *  stalls after the first page and Paged.js's own repeated-layout guard clones the same
@@ -509,7 +513,12 @@ ${styleVarsCss(style)}
     opacity: 0.5;
   }
   .pb-divider-date { font-size: 11pt; opacity: 0.75; margin: 0; }
-  .pb-divider-page { position: relative; }
+  /* A bleed page like .pb-fullbleed: it must be the full sheet size, otherwise it
+     collapses to height:0 (its only child .ph-divider-bg is position:absolute/inset:0,
+     which can't give the parent a height) and renders as a blank page. Reachable in
+     production when a chat/manual edit empties a page's last photo — GENERIC_TEMPLATE_
+     FOR_COUNT (lib/photo-book-ops.ts) maps a 0-photo page to the "divider" template. */
+  .pb-divider-page { width: ${pageW}mm; height: ${pageH}mm; position: relative; }
   .ph-divider-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.5; }
 
   /* ---- Content-box pages (framed / grids): normal margin, fill it symmetrically ---- */

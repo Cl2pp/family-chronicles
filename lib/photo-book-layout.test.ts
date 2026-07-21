@@ -75,6 +75,16 @@ describe('renderPhotoBookHtml', () => {
     }
   });
 
+  it('gives the divider-page template an explicit full-sheet size so it never collapses to a blank page', () => {
+    // Regression: `.pb-divider-page` used to be only `position: relative` with no
+    // width/height; its sole child (`.ph-divider-bg`) is absolutely positioned, so the
+    // page collapsed to height:0 and rendered blank. Reachable when a chat/manual edit
+    // empties a page's last photo (mapped to the `divider` template).
+    const screenHtml = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
+    expect(screenHtml).toMatch(/\.pb-divider-page\s*\{[^}]*width:\s*\d/);
+    expect(screenHtml).toMatch(/\.pb-divider-page\s*\{[^}]*height:\s*\d/);
+  });
+
   it('adds PHOTO_BOOK_BLEED_MM to every physical page edge only for print', () => {
     const screenHtml = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
     const previewHtml = renderPhotoBookHtml(baseInput({ variant: 'preview' }));
