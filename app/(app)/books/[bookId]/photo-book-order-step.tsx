@@ -19,6 +19,7 @@ export function PhotoBookOrderStep({
   quote,
   contactEmail,
   totalCount,
+  generatedAt,
   downloadPdf,
   downloadRequesting,
   awaitingDownload,
@@ -28,6 +29,12 @@ export function PhotoBookOrderStep({
   quote: BookQuote | null;
   contactEmail: string;
   totalCount: number;
+  /** `books.generated_at` — null means this book has never been through the explicit
+   *  "Create book" design pass (`PhotoBookCreateStep`'s Step 2 gate). Ordering/downloading
+   *  before that would silently hand out the plain auto-layout PDF, bypassing the whole
+   *  configure→generate flow, so the primary action below requires it too — mirrors the
+   *  step-navigation gate in `photo-book-builder.tsx`'s `goToStep`. */
+  generatedAt: string | null;
   downloadPdf: () => void;
   downloadRequesting: boolean;
   awaitingDownload: boolean;
@@ -36,6 +43,7 @@ export function PhotoBookOrderStep({
   const { t } = useI18n();
   const tb = t.books.builder;
   const tp = tb.photoBook;
+  const notGenerated = generatedAt == null;
 
   return (
     <Stack gap="md">
@@ -50,11 +58,16 @@ export function PhotoBookOrderStep({
           variant="light"
           leftSection={<IconDownload size={16} />}
           loading={downloadRequesting || awaitingDownload}
-          disabled={totalCount === 0}
+          disabled={totalCount === 0 || notGenerated}
           onClick={downloadPdf}
         >
           {tp.downloadPdf}
         </Button>
+        {notGenerated && (
+          <Text fz={12} c="dimmed" mt={6}>
+            {tp.waitingForGeneration}
+          </Text>
+        )}
       </Card>
 
       <OrderView book={order} quote={quote} contactEmail={contactEmail} embedded />

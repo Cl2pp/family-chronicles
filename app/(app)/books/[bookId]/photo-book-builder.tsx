@@ -20,6 +20,7 @@ import { IconArrowLeft, IconTrash } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
 import { isBookPrintFresh } from '@/lib/book-print-status';
+import { canAccessPhotoBookStep } from '@/lib/photo-book-step-gate';
 import type { PhotoBookStyle } from '@/lib/photo-book-plan';
 import type { BookCoverType, BookFormat, BookQuote } from '@/lib/gelato';
 import {
@@ -362,11 +363,20 @@ export function PhotoBookBuilder({
 
   /** The header steps are fully controlled — clicking a step beyond what's unlocked is a
    *  deliberate no-op (with a toast explaining why) rather than relying on Mantine's own
-   *  `allowNextStepsSelect`, so the gating rule lives in one place (`analysisComplete`)
-   *  instead of being split between this component and the Stepper's internal logic. */
+   *  `allowNextStepsSelect`, so the gating rule lives in one place (`analysisComplete`
+   *  and, for step 3, `book.generatedAt`) instead of being split between this component
+   *  and the Stepper's internal logic. The order step additionally requires the book to
+   *  have been generated at least once — otherwise its "Download PDF" would silently
+   *  build the plain auto-layout, bypassing the whole configure→generate flow (the same
+   *  reason `PhotoBookOrderStep`'s own download button is also gated on `generatedAt`
+   *  below, in case that step is ever reached some other way). */
   function goToStep(index: number) {
-    if (index >= 1 && !analysisComplete) {
-      notifications.show({ message: tp.waitingForAnalysis, color: 'yellow' });
+    if (!canAccessPhotoBookStep(index, analysisComplete, book.generatedAt)) {
+      // Mirrors `canAccessPhotoBookStep`'s own check order: analysis-incomplete is the
+      // more fundamental blocker, so it wins the message even for step 2 (order) when
+      // both conditions are unmet.
+      const message = !analysisComplete ? tp.waitingForAnalysis : tp.waitingForGeneration;
+      notifications.show({ message, color: 'yellow' });
       return;
     }
     setStep(index);
@@ -451,6 +461,7 @@ export function PhotoBookBuilder({
             quote={quote}
             contactEmail={contactEmail}
             totalCount={totalCount}
+            generatedAt={book.generatedAt}
             downloadPdf={downloadPdf}
             downloadRequesting={downloadRequesting}
             awaitingDownload={awaitingDownload}

@@ -724,7 +724,6 @@ export const en = {
         regenerate: 'Regenerate',
         regenerating: 'Generating…',
         regenerateHint: 'Rebuilds the layout from your current photos — sections, pages, and cover.',
-        waitingForPhotos: 'Add and analyze some photos to see a preview.',
         waitingForGeneration: 'Create your book before continuing.',
         downloadPdf: 'Download PDF',
         downloadFailed: 'Creating the print PDF failed. Please try again.',

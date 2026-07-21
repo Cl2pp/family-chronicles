@@ -742,7 +742,6 @@ export const de: Dictionary = {
         regenerate: 'Neu erstellen',
         regenerating: 'Wird erstellt…',
         regenerateHint: 'Baut das Layout aus deinen aktuellen Fotos neu auf — Abschnitte, Seiten und Cover.',
-        waitingForPhotos: 'Füge Fotos hinzu und lass sie analysieren, um eine Vorschau zu sehen.',
         waitingForGeneration: 'Erstelle dein Buch, bevor du fortfährst.',
         downloadPdf: 'PDF herunterladen',
         downloadFailed: 'Das Druck-PDF konnte nicht erstellt werden. Versuch es bitte noch einmal.',
