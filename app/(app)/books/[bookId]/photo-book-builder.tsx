@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -21,7 +21,7 @@ import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
 import { isBookPrintFresh } from '@/lib/book-print-status';
 import type { PhotoBookStyle } from '@/lib/photo-book-plan';
-import type { BookQuote } from '@/lib/gelato';
+import type { BookCoverType, BookFormat, BookQuote } from '@/lib/gelato';
 import {
   deleteBookAction,
   regeneratePhotoBookLayoutAction,
@@ -29,6 +29,7 @@ import {
   requestPhotoBookAiDesignAction,
   setPhotoBookStyleAction,
   setPhotoExcludedAction,
+  updatePhotoBookSettingsAction,
 } from '../actions';
 import type { OrderBook } from './order/order-view';
 import { PhotoBookUploadStep } from './photo-book-upload-step';
@@ -50,20 +51,36 @@ export interface PhotoBookPhotoView {
 export interface PhotoBookInfo {
   id: string;
   title: string;
+  /** Front cover subtitle (`books.subtitle`) — the config panel's "Untertitel" field.
+   *  Unlike story books, this always feeds the photo book's actual printed cover. */
+  subtitle: string | null;
   status: 'draft' | 'rendering' | 'preview_ready' | 'render_failed' | 'ordered';
   errorMessage: string | null;
   /** Current style suite (`lib/photo-book-plan.ts`) — resolves/builds the plan
    *  server-side if there wasn't one yet, so this always has a value. */
   style: PhotoBookStyle;
+  /** Trim SIZE only (`books.format`) — despite the "hardcover-" in its values, this is
+   *  not a binding choice; see `bookFormat`'s comment in db/schema.ts. The config
+   *  panel labels these as sizes ("21×28 (Hochformat)" / "20×20 (Quadratisch)"), never
+   *  as "hardcover"/"softcover" — that's `coverType` below. */
+  format: BookFormat;
+  /** Hardcover vs softcover binding (`books.cover_type`) — the config panel's actual
+   *  binding toggle, orthogonal to `format`. */
+  coverType: BookCoverType;
   /** Cache-buster for the preview iframe — bumps whenever the book row changes
    *  (same pattern as the story builder's `previewVersion`). */
   previewVersion: number;
   /** True while an AI design pass is queued/running (books.design_requested_at). */
   designing: boolean;
+  /** ISO timestamp of the last time a design job completed for this book (success or
+   *  auto-fallback), or null if it never has — `books.generated_at`. This is the Step 2
+   *  gate: null means show the config-only "not generated yet" view, non-null means show
+   *  the live book (still editable/regeneratable). Distinct from `designing`, which only
+   *  tracks whether a pass is CURRENTLY in flight. */
+  generatedAt: string | null;
   /** Who last wrote the layout plan — 'edited' once a chat op has touched it (PR4).
    *  Drives the "replace your manual edits?" consent modal below, same as the story
-   *  book's `layoutSource`. Also gates the step 2 auto-design trigger: it only ever
-   *  fires when this is still 'auto' (never AI-designed or manually edited yet). */
+   *  book's `layoutSource`. */
   layoutSource: 'auto' | 'ai' | 'edited';
   /** True when the book's content changed since its stored layout plan was built — a
    *  `preview_ready` PDF built before that change is stale and must be re-rendered
@@ -181,51 +198,6 @@ export function PhotoBookBuilder({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- triggerDownload/tp are stable for this component's lifetime
   }, [awaitingDownload, book.id, router]);
 
-  // Auto-start the AI design pass the first time the user reaches step 2 with every
-  // photo analyzed and no design pass has run yet on this plan (`layoutSource === 'auto'`
-  // — deliberately excludes both 'ai' — a design pass already ran — and 'edited' — the
-  // user's own manual edits, which must never be silently overwritten; see
-  // `requestPhotoBookAiDesignAction`'s consent guard, unchanged and still reachable via
-  // the manual "Design my book" button in step 2 for that case). `autoDesignTriggered`
-  // fires this at most ONCE per mount of this component: without it, the gap between
-  // calling the action and `book.designing` actually turning true on the next server
-  // round trip could let the effect's dependencies re-evaluate and queue a second design
-  // pass before the first one's `design_requested_at` has landed — a duplicate-trigger
-  // race the ref closes off by flipping synchronously before the async call even starts.
-  //
-  // That ref alone only protects a single mount, though: a FAILED design pass falls back
-  // to `layoutSource: 'auto'` server-side (`requestPhotoBookAiDesignAction`'s worker-side
-  // fallback) — indistinguishable, from this effect's point of view, from "never
-  // designed" — so a fresh mount (page reload, or navigating away from and back to step
-  // 2) would see `layoutSource === 'auto'` again and re-fire the paid AI call, repeating
-  // on every visit for a persistently-failing book. A `sessionStorage` flag keyed by book
-  // id survives across remounts within the browser tab/session (unlike the ref), so it's
-  // set BEFORE firing to close that gap: "auto-start once per book per session" rather
-  // than "once per mount". Manual "Design"/"Regenerate" buttons remain available for an
-  // intentional retry regardless of this flag. Guarded in a try/catch (and only ever
-  // touched here, inside an effect, so it never runs during SSR) since `sessionStorage`
-  // can throw in some privacy modes — that failure degrades to the ref-only, once-per-mount
-  // behavior rather than blocking the design pass entirely.
-  const autoDesignTriggered = useRef(false);
-  useEffect(() => {
-    if (step !== 1) return;
-    if (autoDesignTriggered.current) return;
-    if (!analysisComplete) return;
-    if (book.designing) return;
-    if (book.layoutSource !== 'auto') return;
-    if (locked) return;
-    const storageKey = `photobook-autodesign-${book.id}`;
-    try {
-      if (sessionStorage.getItem(storageKey)) return;
-      sessionStorage.setItem(storageKey, '1');
-    } catch {
-      /* sessionStorage unavailable — fall back to the ref-only within-mount guard */
-    }
-    autoDesignTriggered.current = true;
-    designBook();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- designBook is stable for this component's lifetime; re-running on every dep change would defeat the once-only ref guard
-  }, [step, analysisComplete, book.designing, book.layoutSource, locked, book.id]);
-
   /** Saves the current print PDF to disk via a throwaway anchor — same pattern as any
    *  same-origin `download`-attribute link, just triggered from code once a render we
    *  were waiting on has finished. */
@@ -308,6 +280,34 @@ export function PhotoBookBuilder({
       }
       router.refresh();
     });
+  }
+
+  /** The config panel's title/subtitle/size/cover-type fields — one server round trip
+   *  per saved field (each input saves independently on blur/change, same pattern as the
+   *  story builder's settings card, `book-builder.tsx`). */
+  function updateSettings(patch: {
+    title?: string;
+    subtitle?: string | null;
+    format?: BookFormat;
+    coverType?: BookCoverType;
+  }) {
+    startTransition(async () => {
+      const result = await updatePhotoBookSettingsAction({ bookId: book.id, ...patch });
+      if (result.error) {
+        notifications.show({ message: result.error, color: 'red' });
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  /** The config panel's primary "Create book" / "Buch erstellen" CTA — the first design
+   *  pass this book ever gets. Reuses the same AI design action the post-generation
+   *  "Design again" affordance calls (`designBook` below); the only difference is WHEN
+   *  the UI shows this button (gated on `book.generatedAt == null`, see
+   *  `PhotoBookCreateStep`), not what it does. */
+  function createBook() {
+    designBook();
   }
 
   function regenerate() {
@@ -437,8 +437,10 @@ export function PhotoBookBuilder({
             regenerating={regenerating}
             onRegenerate={regenerate}
             designPending={designPending}
+            onCreateBook={createBook}
             onDesignBook={designBook}
             onSetStyle={setStyle}
+            onUpdateSettings={updateSettings}
             onBack={() => setStep(0)}
             onNext={() => goToStep(2)}
           />

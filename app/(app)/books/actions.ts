@@ -23,6 +23,7 @@ import {
   setPhotoExcluded,
   updateBook,
   updateBookLayout,
+  updatePhotoBookSettings,
   type AddBookPhotoInput,
   type BookPhotoItem,
   type LayoutOp,
@@ -31,7 +32,7 @@ import type { PhotoBookStyle } from '@/lib/photo-book-plan';
 import { runBookAgent, runPhotoBookAgent, type ChatTurn } from '@/lib/ai/agent';
 import type { Receipt, ToolContext } from '@/lib/ai/tools';
 import { getI18n } from '@/lib/i18n/server';
-import type { BookFormat } from '@/lib/gelato';
+import type { BookCoverType, BookFormat } from '@/lib/gelato';
 import { captureServerEvent } from '@/lib/posthog-server';
 import { buildKey, getObjectBuffer, presignPut } from '@/lib/s3';
 import { validateUpload } from '@/lib/uploads';
@@ -200,6 +201,20 @@ export async function requestPhotoBookAiDesignAction(input: {
   if (result.ok) {
     captureServerEvent(user.id, 'photo_book_ai_design_requested', { book_id: input.bookId });
   }
+  return result.ok ? {} : { error: result.error };
+}
+
+/** The photo-book builder Step 2 config panel — title/subtitle/size/cover-type. */
+export async function updatePhotoBookSettingsAction(input: {
+  bookId: string;
+  title?: string;
+  subtitle?: string | null;
+  format?: BookFormat;
+  coverType?: BookCoverType;
+}): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await updatePhotoBookSettings({ ...input, userId: user.id });
+  if (result.ok) revalidatePath(`/books/${input.bookId}`);
   return result.ok ? {} : { error: result.error };
 }
 

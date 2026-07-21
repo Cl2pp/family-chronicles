@@ -371,6 +371,28 @@ describe('buildPhotoBookAutoLayout — cover selection', () => {
     expect(plan.cover.title).toBe('Familie Müller');
     expect(plan.style).toBe('gallery');
   });
+
+  it("threads the book's current subtitle onto the cover", () => {
+    const photos = [photo({ assetId: 'a', position: 0, takenAt: new Date(t0) })];
+    const { plan } = buildPhotoBookAutoLayout({
+      title: 'Familie Müller',
+      subtitle: 'Sommer 2025',
+      coverAssetId: null,
+      photos,
+    });
+    expect(plan.cover.subtitle).toBe('Sommer 2025');
+  });
+
+  it('omits the cover subtitle entirely when the book has none set', () => {
+    const photos = [photo({ assetId: 'a', position: 0, takenAt: new Date(t0) })];
+    const { plan } = buildPhotoBookAutoLayout({
+      title: 'Familie Müller',
+      subtitle: null,
+      coverAssetId: null,
+      photos,
+    });
+    expect(plan.cover.subtitle).toBeUndefined();
+  });
 });
 
 describe('buildPhotoBookAutoLayout — cover selection exclusivity (regression)', () => {

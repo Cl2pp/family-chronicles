@@ -141,6 +141,13 @@
       "when": 1784627480664,
       "tag": "0019_bizarre_nightmare",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784630751345,
+      "tag": "0020_rapid_hitman",
+      "breakpoints": true
     }
   ]
 }

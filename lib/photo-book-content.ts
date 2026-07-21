@@ -155,12 +155,15 @@ export async function loadOrBuildPhotoPlan(bookId: string, loaded: LoadedPhotoBo
  *     empty-but-valid plan instead of a 500.
  *
  * Cover title/subtitle are NOT carried over from a prior plan (unlike style and cover
- * hero, which are — see the story path's carry-over rule): a photo book's cover title has
- * no independent editing surface yet in PR2 (that's a future targeted-op, PR4), so it
- * should always track the book's current title/settings rather than freezing whatever it
- * was on a previous build — the same behavior a story book's cover already has (its
- * title/subtitle are book-level fields read fresh on every render, never stored in the
- * plan at all).
+ * hero, which are — see the story path's carry-over rule): since PR6 (the builder Step 2
+ * config panel) both are explicit, book-level settings (`books.title`/`books.subtitle`)
+ * the user edits directly, so this always tracks their CURRENT value rather than freezing
+ * whatever the cover happened to say on a previous build — the same behavior a story
+ * book's cover already has (its title/subtitle are book-level fields read fresh on every
+ * render, never stored in the plan at all). `lib/books.ts`'s `updatePhotoBookSettings`
+ * additionally patches an already-stored plan's cover in place on a title/subtitle edit,
+ * so a change is visible immediately without waiting for the next full rebuild this
+ * function does.
  */
 export async function buildAndPersistPhotoAutoPlan(
   bookId: string,
@@ -200,6 +203,7 @@ export async function buildAndPersistPhotoAutoPlan(
 
   const { plan: built, culled } = buildPhotoBookAutoLayout({
     title: row.title,
+    subtitle: row.subtitle,
     coverAssetId,
     existingStyle: existingPlan?.style,
     existingHeroAssetId,

@@ -3,7 +3,7 @@ import { Box } from '@mantine/core';
 import { requireUser } from '@/lib/session';
 import { estimatePageCount, getBookForUser, listBookPhotos } from '@/lib/books';
 import { isBookPrintFresh } from '@/lib/book-print-status';
-import { quoteBookPrice, FORMAT_LABELS } from '@/lib/gelato';
+import { quoteBookPrice, formatSummaryLabel } from '@/lib/gelato';
 import { env } from '@/lib/env';
 import { OrderView } from './order-view';
 
@@ -37,7 +37,9 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
   const fresh = isBookPrintFresh(book.kind, book.status, book.layoutStale);
   const pageCount = fresh && book.pageCount != null ? book.pageCount : await estimatePageCount(book);
   const quote =
-    !accessBlocked && fresh ? await quoteBookPrice({ format: book.format, pageCount }) : null;
+    !accessBlocked && fresh
+      ? await quoteBookPrice({ format: book.format, coverType: book.coverType, pageCount })
+      : null;
 
   // Photo books have no `chapters` to count (`book_stories` stays empty for them) — the
   // summary row shows photo count instead of story count.
@@ -55,7 +57,7 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
           title: book.title,
           kind: book.kind,
           format: book.format,
-          formatLabel: FORMAT_LABELS[book.format],
+          formatLabel: formatSummaryLabel(book.format, book.coverType),
           pageCount,
           storyCount: book.chapters.length,
           photoCount,

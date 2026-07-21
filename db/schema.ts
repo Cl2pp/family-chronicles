@@ -446,8 +446,21 @@ export const bookStatus = pgEnum('book_status', [
   'ordered', // order placed; the book is locked read-only
 ]);
 
-/** Trim sizes offered in the UI; each maps to a Gelato product UID (lib/gelato.ts). */
+/** Trim sizes offered in the UI; each maps to a Gelato product UID (lib/gelato.ts).
+ *  NOTE: despite the "hardcover-" prefix, these values name the SIZE/trim only (21×28 vs
+ *  20×20) — a historical naming artifact from when every book was a hardcover. The actual
+ *  hardcover-vs-softcover binding choice lives in `bookCoverType`/`books.coverType` below;
+ *  `lib/gelato.ts`'s Gelato product-UID resolution combines the two. Don't read "hardcover"
+ *  in a `bookFormat` value as a binding claim. */
 export const bookFormat = pgEnum('book_format', ['hardcover-21x28', 'hardcover-20x20']);
+
+/** Hardcover vs softcover binding — orthogonal to `bookFormat` (trim size, see its own
+ *  comment on the naming overlap). Defaults to 'hardcover' so every existing book (and
+ *  every story book, which has no UI for this yet) is unaffected. Currently a stored
+ *  preference + a Gelato quote input for photo books (docs/PHOTO_BOOK_PLAN.md builder
+ *  Step 2 config panel) — real ordering is parked, so this doesn't change print PDF
+ *  content yet. */
+export const bookCoverType = pgEnum('book_cover_type', ['hardcover', 'softcover']);
 
 /** `story`: the existing chapters-from-stories book. `photo`: a photo-only book built
  *  from bulk-uploaded photos (docs/PHOTO_BOOK_PLAN.md) — `book_stories` stays empty. */
@@ -470,6 +483,8 @@ export const books = pgTable(
     /** Cover photo — one of the included stories' photo assets. */
     coverAssetId: uuid('cover_asset_id').references(() => assets.id, { onDelete: 'set null' }),
     format: bookFormat('format').notNull().default('hardcover-21x28'),
+    /** Hardcover vs softcover binding — see `bookCoverType`'s own comment. */
+    coverType: bookCoverType('cover_type').notNull().default('hardcover'),
     status: bookStatus('status').notNull().default('draft'),
     errorMessage: text('error_message'),
     /** Set by the renderer: final padded page count of the print PDF. */
@@ -486,6 +501,15 @@ export const books = pgTable(
      *  or fallback) — lets the builder show a working state without hijacking `status`,
      *  which still tracks the print-proof PDF render lifecycle. */
     designRequestedAt: timestamp('design_requested_at'),
+    /** Stamped when a photo-book design job (`design-photo-book`, worker/index.ts)
+     *  completes — success OR the silent auto-layout fallback, either counts as "this
+     *  book has been generated at least once". This is the photo-book builder's Step 2
+     *  gate: null means show the config-only "not generated yet" view; non-null means
+     *  show the live book (still editable/regeneratable). Distinct from
+     *  `designRequestedAt`, which only tracks whether a pass is CURRENTLY in flight —
+     *  `generatedAt` is never cleared by a later regeneration, it just gets bumped again.
+     *  Always null for story books (no such gate exists for them). */
+    generatedAt: timestamp('generated_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },

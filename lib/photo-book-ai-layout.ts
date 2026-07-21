@@ -130,8 +130,8 @@ function schemaText(): string {
   "style": ${PHOTO_BOOK_STYLES.map((s) => `"${s}"`).join(' | ')},
   "cover": {
     "heroAssetId": "<assetId>",
-    "title": "<a short, warm book title — you may improve on the current title>",
-    "subtitle": "<optional>",
+    "title": "<the book's title — fixed by the user's own settings, just echo the current title from the prompt below; this field is required by the schema but your value here is not used>",
+    "subtitle": "<optional, same as title — echo the current subtitle if there is one>",
     "backAssetIds": ["<assetId>", ...]   // optional, 0-3 small photos for the back cover
   },
   "sections": [
@@ -182,7 +182,7 @@ ${HARD_RULES}
 Design goals — this is where your judgment (and the ability to actually see the photos) matters, and is the entire reason this pass exists instead of a mechanical date-range layout:
 - NAME sections from what's actually in them ("Am Strand", "Omas Geburtstag") rather than a generic date range — put the date range in "dateLabel" instead if you want to keep it visible.
 - Keep sections in roughly chronological order (matching the photos' capture times) — this is a family memoir on a timeline, not a shuffled gallery.
-- Pick the cover hero: prefer a photo whose analysis marks it "coverCandidate", and among those the highest "aestheticScore" — a warm, clear, well-composed photo of people, not a blurry or eyes-closed one. You may also propose a better "cover.title" than the book's current title if you can do better from what the photos show.
+- Pick the cover hero: prefer a photo whose analysis marks it "coverCandidate", and among those the highest "aestheticScore" — a warm, clear, well-composed photo of people, not a blurry or eyes-closed one. The cover's title/subtitle text is fixed by the user's own settings and not yours to change — spend your judgment on the hero pick instead.
 - FILL THE PAGE, SYMMETRICALLY. Never leave a photo hugging one side of the page with white space beside it; prefer templates that span the full width (two-*, three-*, collage-*) for photos that go together, and reserve "full-bleed"/"full-framed" for photos that deserve to stand alone.
 - Vary the rhythm across sections — don't give every section the identical page pattern. A section opener is usually its own strong single-photo page; some sections can build to another strong single-photo page mid-way; others stay all multi-photo pages. A book that "breathes" differently section to section reads as designed, not generated.
 - It is fine, and often right, to leave out a weak, redundant, blurry, or eyes-closed-with-no-good-alternative photo entirely — favor photos with a high "aestheticScore" and no eyes-closed flag when you have a choice; you do not have to place every available photo.
@@ -285,14 +285,16 @@ function extractJson(raw: string): unknown | null {
 
 /**
  * Post-processing carry-over (mirrors `applyPlanCarryOver` in `lib/book-ai-layout.ts`):
- * overrides the model's `style` with whatever plan was already stored, and its
+ * overrides the model's `style` with whatever plan was already stored, its
  * `cover.heroAssetId` with the book's pinned cover (`books.cover_asset_id`) when one is
- * set — the model doesn't get a vote on either. Unlike the story path, the model's own
- * `cover.title`/`cover.subtitle` proposal is KEPT, not overridden — docs/PHOTO_BOOK_PLAN.md
- * §6 explicitly asks the design pass for a "cover title suggestion", a capability the
- * deterministic auto-layouter doesn't have (it always defaults the title to the book's
- * own title — see `buildAndPersistPhotoAutoPlan`'s doc comment for why that function
- * doesn't carry a title forward either). Exported for testing.
+ * set, and — since PR6's builder Step 2 config panel made front-cover title/subtitle
+ * explicit, user-edited book settings (`books.title`/`books.subtitle`) rather than
+ * something only the AI proposes — its `cover.title`/`cover.subtitle` too. The model
+ * still gets asked for a title/subtitle in its JSON output (the schema requires one), but
+ * the result here is always the book's own values: the design pass must never silently
+ * override what the user typed into the config panel, only the section titles/pacing/hero
+ * pick it actually has judgment to add. Mirrors `resolveUsableHeroId`'s "book settings win
+ * over the plan" precedent for the hero id. Exported for testing.
  */
 export function applyPhotoPlanCarryOver(plan: PhotoBookPlan, loaded: LoadedPhotoBook): PhotoBookPlan {
   const existing = loaded.row.layoutPlan ? validatePhotoBookPlan(loaded.row.layoutPlan) : null;
@@ -305,14 +307,18 @@ export function applyPhotoPlanCarryOver(plan: PhotoBookPlan, loaded: LoadedPhoto
       : null;
   const heroAssetId = pinnedHero ?? plan.cover.heroAssetId;
 
-  return {
-    ...plan,
-    style,
+  const cover: PhotoBookPlan['cover'] = {
+    ...plan.cover,
     // `heroAssetId` can only end up falsy here if `plan.cover.heroAssetId` already was
-    // (pinnedHero is null and there's nothing to fall back to) — so `plan.cover` as-is
-    // is already correct in that case; only the truthy case needs an explicit override.
-    cover: heroAssetId ? { ...plan.cover, heroAssetId } : plan.cover,
+    // (pinnedHero is null and there's nothing to fall back to) — so leaving the spread
+    // above as-is already covers that case; only the truthy case needs an override.
+    ...(heroAssetId ? { heroAssetId } : {}),
+    title: loaded.row.title,
   };
+  if (loaded.row.subtitle) cover.subtitle = loaded.row.subtitle;
+  else delete cover.subtitle;
+
+  return { ...plan, style, cover };
 }
 
 /**

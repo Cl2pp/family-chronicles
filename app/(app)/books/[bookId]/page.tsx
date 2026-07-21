@@ -14,7 +14,7 @@ import {
 } from '@/lib/books';
 import { loadStoryAccessContext } from '@/lib/story-access';
 import { isBookPrintFresh } from '@/lib/book-print-status';
-import { quoteBookPrice, FORMAT_LABELS } from '@/lib/gelato';
+import { quoteBookPrice, formatSummaryLabel } from '@/lib/gelato';
 import { env } from '@/lib/env';
 import { presignGet } from '@/lib/s3';
 import { BookBuilder, type CoverOption } from './book-builder';
@@ -58,14 +58,16 @@ export default async function BookBuilderPage({
     // `layoutStale` matters for photo books specifically).
     const fresh = isBookPrintFresh('photo', book.status, book.layoutStale);
     const pageCount = fresh && book.pageCount != null ? book.pageCount : await estimatePageCount(book);
-    const quote = fresh ? await quoteBookPrice({ format: book.format, pageCount }) : null;
+    const quote = fresh
+      ? await quoteBookPrice({ format: book.format, coverType: book.coverType, pageCount })
+      : null;
     const photoCount = photos.filter((p) => !p.excluded).length;
     const order: OrderBook = {
       id: book.id,
       title: book.title,
       kind: book.kind,
       format: book.format,
-      formatLabel: FORMAT_LABELS[book.format],
+      formatLabel: formatSummaryLabel(book.format, book.coverType),
       pageCount,
       storyCount: 0,
       photoCount,
@@ -84,11 +86,15 @@ export default async function BookBuilderPage({
           book={{
             id: book.id,
             title: book.title,
+            subtitle: book.subtitle,
             status: book.status,
             errorMessage: book.errorMessage,
             style: styleResult.ok ? styleResult.value.style : 'classic',
+            format: book.format,
+            coverType: book.coverType,
             previewVersion: book.updatedAt.getTime(),
             designing: book.designRequestedAt != null,
+            generatedAt: book.generatedAt ? book.generatedAt.toISOString() : null,
             layoutSource: book.layoutSource,
             layoutStale: book.layoutStale,
             hasPrint: Boolean(book.printS3Key),

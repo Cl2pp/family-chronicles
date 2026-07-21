@@ -82,6 +82,11 @@ function isForceIncluded(p: AutoLayoutPhoto): boolean {
 export interface PhotoBookAutoLayoutInput {
   /** The book's title — the cover's default title when nothing has overridden it. */
   title: string;
+  /** The book's current subtitle (`books.subtitle`, PR6's config panel "Untertitel"
+   *  field) — threaded onto the cover fresh on every build, same "book settings win"
+   *  reasoning as `title` (see `buildAndPersistPhotoAutoPlan`'s doc comment for why the
+   *  cover title/subtitle are never carried over from a stale prior plan instead). */
+  subtitle?: string | null;
   /** The book's explicit cover pin (`books.cover_asset_id`), if any — always wins as the
    *  hero, same precedence as `AutoLayoutInput.coverAssetId` in `lib/book-autolayout.ts`. */
   coverAssetId: string | null;
@@ -680,7 +685,7 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
     cover: {
       ...(heroAssetId ? { heroAssetId } : {}),
       title: input.existingCoverTitle ?? input.title,
-      ...(input.existingCoverSubtitle ? { subtitle: input.existingCoverSubtitle } : {}),
+      ...((input.existingCoverSubtitle ?? input.subtitle) ? { subtitle: (input.existingCoverSubtitle ?? input.subtitle) as string } : {}),
     },
     sections,
   };
