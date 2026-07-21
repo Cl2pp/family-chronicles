@@ -728,6 +728,7 @@ export const de: Dictionary = {
         noPhotosHint: 'Füge oben Fotos hinzu, um dieses Buch zu füllen.',
         exclude: 'Aus dem Buch ausschließen',
         include: 'Wieder ins Buch aufnehmen',
+        toggleExcludedFailed: 'Foto konnte nicht aktualisiert werden. Versuch es bitte noch einmal.',
         preview: 'Vorschau',
         previewHint: 'Automatisch aus deinen Fotos erstellt — wähle einen Stil und generiere jederzeit neu.',
         style: 'Stil',

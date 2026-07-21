@@ -340,12 +340,24 @@ export function PhotoBookBuilder({
 
   function toggleExcluded(assetId: string, excluded: boolean) {
     startTransition(async () => {
-      const result = await setPhotoExcludedAction({ bookId: book.id, assetId, excluded });
-      if (result.error) {
-        notifications.show({ message: result.error, color: 'red' });
-        return;
+      // Wrapped in try/catch (unlike every other action call above, which only checks
+      // `result.error`): a thrown exception here — not a handled `{ error }` result, an
+      // actual rejection (a transient DB error, a session hiccup) — used to vanish into
+      // React's transition machinery with no UI feedback at all: the eye toggle just
+      // looked like it did nothing, no error shown either (the reported "re-include does
+      // nothing" bug). Every other failure mode of this action already returns `{ error
+      // }` and is handled below exactly as before; this only catches the case that
+      // wasn't handled at all.
+      try {
+        const result = await setPhotoExcludedAction({ bookId: book.id, assetId, excluded });
+        if (result.error) {
+          notifications.show({ message: result.error, color: 'red' });
+          return;
+        }
+        router.refresh();
+      } catch {
+        notifications.show({ message: tp.toggleExcludedFailed, color: 'red' });
       }
-      router.refresh();
     });
   }
 

@@ -39,6 +39,19 @@ import { PhotoBookChat } from './photo-book-chat';
 import { PhotoBookPhotoTile } from './photo-book-photo-tile';
 import type { PhotoBookInfo, PhotoBookPhotoView } from './photo-book-builder';
 
+/** Trim aspect ratio (width / height) per format — a client-safe duplicate of the
+ *  width/height pairs in `TRIM` (`lib/book-content.ts`), which can't be imported here: it
+ *  pulls in `sharp`/`drizzle`/server-only code. Only the ratio is needed client-side, to
+ *  size the preview iframe (see its `aspectRatio` style, below) so exactly one full page
+ *  fits — the iframe used to be a fixed `height: 560`, showing a cropped, native-size
+ *  top-left corner of page one instead of the whole page; `fitPages()` in
+ *  `lib/photo-book-layout.ts` does the matching client-side zoom-to-fit inside whatever
+ *  height this aspect ratio produces. */
+const TRIM_ASPECT: Record<BookFormat, number> = {
+  'hardcover-21x28': 210 / 280,
+  'hardcover-20x20': 200 / 200,
+};
+
 type SettingsPatch = {
   title?: string;
   subtitle?: string | null;
@@ -240,7 +253,16 @@ export function PhotoBookCreateStep({
       src={`/api/books/${book.id}/preview-html?v=${book.previewVersion}`}
       style={{
         width: '100%',
-        height: 560,
+        // Sized to the book's own trim aspect ratio (not a fixed height) so the iframe's
+        // shape roughly matches one page — the injected `fitPages()` script
+        // (`lib/photo-book-layout.ts`) then zooms the page stack to fit exactly within
+        // whatever height that produces, so a whole page is visible instead of a
+        // native-size crop of its top-left corner. `maxHeight` keeps a portrait trim from
+        // growing the iframe absurdly tall on a wide desktop pane — `fitPages` still fits
+        // one full page inside whatever height results (it takes the min of width- and
+        // height-fit), so capping this never re-introduces cropping.
+        aspectRatio: TRIM_ASPECT[book.format],
+        maxHeight: '75vh',
         border: '1px solid var(--mantine-color-slate-2)',
         borderRadius: 8,
         background: '#fff',

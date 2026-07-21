@@ -141,6 +141,14 @@ function framedFigure(image: PhotoLayoutImage | undefined, caption?: string | nu
   return withCaption(`<div class="ph-frame">${img(image, 'ph-frame-img')}</div>`, caption);
 }
 
+/** Renders the `page: <ident>` inline style declaration a bleed section needs to pick up
+ *  its matching named `@page` rule — or nothing at all when `name` is falsy, which is
+ *  always the case for `screen` (see `nextBleedPageName`'s comment): an empty `style="page:
+ *  "` attribute is invalid CSS, so this must be all-or-nothing, not just an empty value. */
+function pageStyleAttr(name: string): string {
+  return name ? ` style="page: ${name}"` : '';
+}
+
 function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, pageNamed: string): string {
   const get = (id: string) => images.get(id);
   switch (page.template) {
@@ -150,7 +158,7 @@ function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, 
       // uses for its title over `coverHero` (`.pb-cover-text`'s gradient, below).
       const caption = page.captions?.[0];
       return `
-      <section class="page photo-page pb-fullbleed" style="page: ${pageNamed}">
+      <section class="page photo-page pb-fullbleed"${pageStyleAttr(pageNamed)}>
         ${img(get(page.assetIds[0]), 'ph-fullbleed-img')}
         ${caption ? `<div class="ph-fullbleed-caption"><p>${esc(caption)}</p></div>` : ''}
       </section>`;
@@ -228,7 +236,7 @@ function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, 
       const id = page.assetIds[0];
       const image = id ? get(id) : undefined;
       return `
-      <section class="page photo-page pb-divider-page" style="page: ${pageNamed}">
+      <section class="page photo-page pb-divider-page"${pageStyleAttr(pageNamed)}>
         ${image ? img(image, 'ph-divider-bg') : ''}
       </section>`;
     }
@@ -242,7 +250,26 @@ function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, 
  *  edge) while framed/grid pages keep the normal content margin — `@page :first` (used
  *  by the story renderer) only reaches page ONE, but a photo book has many bleed pages
  *  scattered throughout, so this uses CSS's named-page mechanism instead
- *  (`page: <ident>` on the element, a matching `@page <ident> { margin: 0 }` rule). */
+ *  (`page: <ident>` on the element, a matching `@page <ident> { margin: 0 }` rule).
+ *
+ *  ONLY for `preview`/`print`: those render through Chromium's own native paged-media
+ *  engine (`page.pdf()` in `lib/book-render.ts`), which paginates named pages fine.
+ *  (KNOWN LIMITATION, tracked separately: Chromium's `page.pdf()` does not fully honor a
+ *  named `@page { margin: 0 }` override on the trailing edges — measured right/bottom bleed
+ *  falls short of the sheet edge while left/top reach it — so print-side full bleed is
+ *  currently imperfect. This predates the screen fix below and affects only the printed
+ *  PDF, not the on-screen preview.) The `screen` variant is paginated client-side by the self-hosted Paged.js
+ *  *polyfill* instead, and that polyfill cannot reliably reflow a document that uses many
+ *  scattered named `@page` rules — confirmed by reproducing it headlessly: pagination
+ *  stalls after the first page and Paged.js's own repeated-layout guard clones the same
+ *  page over and over (`Layout repeated at:` in the console) instead of erroring cleanly.
+ *  So for `screen`, `renderPhotoBookHtml` below skips named pages entirely: the base
+ *  `@page` rule's margin is 0 for every page, and each bleed section relies on its own
+ *  explicit `width`/`height` (already set to the full sheet size, no CSS margin) to reach
+ *  the edge, while content-box pages keep filling the same inset via their own `margin`/
+ *  `width`/`height` (`.photo-page:not(.pb-fullbleed):not(.pb-divider-page)`, below) —
+ *  the exact same visual result, just without any `@page <ident>` selector for the
+ *  polyfill to choke on. */
 function pageNameFor(kind: string, index: number): string {
   return `pb-${kind}-${index}`;
 }
@@ -270,9 +297,16 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
   const contentW = pageW - m.inner - m.outer;
   const contentH = pageH - m.top - m.bottom - 1;
 
+  // `screen` never emits named `@page` rules (see `pageNameFor`'s comment above) — its
+  // bleed pages reach the edge via the base `@page` rule's margin being 0 for every page
+  // instead, so `nextBleedPageName` is a no-op there: it returns '' (renderPage/the cover
+  // and divider markup below treat a falsy name as "no `page:` declaration needed") and
+  // never grows `namedBleedPages`, so `namedPageRules` ends up empty too.
+  const isScreen = input.variant === 'screen';
   const namedBleedPages: string[] = [];
   let bleedPageCounter = 0;
   function nextBleedPageName(): string {
+    if (isScreen) return '';
     const name = pageNameFor('bleed', bleedPageCounter++);
     namedBleedPages.push(name);
     return name;
@@ -286,17 +320,33 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
       ? `<div class="watermark">${esc(input.watermarkText ?? 'PREVIEW')}</div>`
       : '';
 
+  // Body padding above/below the page stack in the screen chrome, below — kept small and
+  // fixed (not scaled by the zoom `fitPages` applies to `.pagedjs_pages`, since padding is
+  // on `body` itself) so it barely eats into the "one full page" fit budget; `fitPages`
+  // subtracts it explicitly rather than approximating, so the fitted page's shadow is
+  // never clipped by the iframe's own edge.
+  const screenBodyPadMm = 4;
+
   const pagedScript =
     input.variant === 'screen'
       ? `
   <script>
     (function () {
       var PAGE_W_PX = ${pageW} * 96 / 25.4;
+      var PAGE_H_PX = ${pageH} * 96 / 25.4;
+      var BODY_PAD_PX = ${screenBodyPadMm} * 2 * 96 / 25.4;
+      // Fit ONE full page inside the iframe's own viewport — both axes, not just width —
+      // so the builder shows a whole page rather than a native-size crop of its top-left
+      // corner. The host page (photo-book-create-step.tsx) sizes the iframe box to this
+      // same trim aspect ratio, so in practice width- and height-fit agree almost exactly;
+      // taking the min of both keeps this correct even when they don't (e.g. a very short
+      // viewport), same "contain" logic as an image's object-fit: contain.
       function fitPages() {
         var pages = document.querySelector('.pagedjs_pages');
         if (!pages) return;
-        var avail = document.documentElement.clientWidth - 16;
-        pages.style.zoom = Math.min(1, avail / PAGE_W_PX);
+        var availW = document.documentElement.clientWidth - 16;
+        var availH = document.documentElement.clientHeight - BODY_PAD_PX;
+        pages.style.zoom = Math.min(1, availW / PAGE_W_PX, availH / PAGE_H_PX);
       }
       window.PagedConfig = {
         auto: true,
@@ -315,7 +365,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
     input.variant === 'screen'
       ? `
   html, body { background: #d7d9dd; }
-  body { padding: 10mm 0 24mm; }
+  body { padding: ${screenBodyPadMm}mm 0; }
   .pagedjs_pages { display: flex; flex-direction: column; align-items: center; gap: 8mm; }
   .pagedjs_page { background: #fff; box-shadow: 0 3mm 10mm rgba(15, 15, 20, 0.28); }`
       : '';
@@ -324,7 +374,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
   const coverFrontName = nextBleedPageName();
   const coverHero = input.plan.cover.heroAssetId ? input.images.get(input.plan.cover.heroAssetId) : undefined;
   const coverFront = `
-    <section class="page pb-cover-front" style="page: ${coverFrontName}">
+    <section class="page pb-cover-front"${pageStyleAttr(coverFrontName)}>
       ${coverHero ? img(coverHero, 'ph-cover-bg-img') : ''}
       <div class="pb-cover-text">
         <h1>${esc(input.plan.cover.title)}</h1>
@@ -339,7 +389,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
   const coverBackName = nextBleedPageName();
   const backImages = (input.plan.cover.backAssetIds ?? []).map((id) => input.images.get(id)).filter(Boolean);
   const coverBack = `
-    <section class="page pb-cover-back" style="page: ${coverBackName}">
+    <section class="page pb-cover-back"${pageStyleAttr(coverBackName)}>
       ${
         backImages.length > 0
           ? `<div class="pb-cover-back-photos">${backImages
@@ -354,7 +404,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
     .map((section) => {
       const dividerName = nextBleedPageName();
       const divider = `
-      <section class="page pb-divider" style="page: ${dividerName}">
+      <section class="page pb-divider"${pageStyleAttr(dividerName)}>
         <p class="pb-divider-kicker">${esc(input.chronicleName)}</p>
         <h2>${esc(section.title)}</h2>
         ${section.dateLabel ? `<p class="pb-divider-date">${esc(section.dateLabel)}</p>` : ''}
@@ -383,7 +433,13 @@ ${input.fontFaceCss}
 ${styleVarsCss(style)}
   @page {
     size: ${pageW}mm ${pageH}mm;
-    margin: ${m.top}mm ${m.outer}mm ${m.bottom}mm ${m.inner}mm;
+    /* screen: base margin is always 0 -- every page (bleed or content-box) sizes and
+       insets itself via its own element CSS instead (see pageNameFor's comment above),
+       since named @page rules are what the Paged.js polyfill can't reliably paginate.
+       preview/print: base margin is the content-box inset; bleed pages override it
+       to 0 via their own named @page rule (namedPageRules, below) -- real CSS paged
+       media, rendered by Chromium's native engine, which supports this fine. */
+    margin: ${isScreen ? '0' : `${m.top}mm ${m.outer}mm ${m.bottom}mm ${m.inner}mm`};
   }
   ${namedPageRules}
   * { box-sizing: border-box; }
@@ -457,7 +513,12 @@ ${styleVarsCss(style)}
     opacity: 0.5;
   }
   .pb-divider-date { font-size: 11pt; opacity: 0.75; margin: 0; }
-  .pb-divider-page { position: relative; }
+  /* A bleed page like .pb-fullbleed: it must be the full sheet size, otherwise it
+     collapses to height:0 (its only child .ph-divider-bg is position:absolute/inset:0,
+     which can't give the parent a height) and renders as a blank page. Reachable in
+     production when a chat/manual edit empties a page's last photo — GENERIC_TEMPLATE_
+     FOR_COUNT (lib/photo-book-ops.ts) maps a 0-photo page to the "divider" template. */
+  .pb-divider-page { width: ${pageW}mm; height: ${pageH}mm; position: relative; }
   .ph-divider-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.5; }
 
   /* ---- Content-box pages (framed / grids): normal margin, fill it symmetrically ---- */
