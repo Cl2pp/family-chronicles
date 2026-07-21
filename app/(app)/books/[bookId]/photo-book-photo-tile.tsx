@@ -34,7 +34,12 @@ export function PhotoBookPhotoTile({
     <Box pos="relative" {...boxProps}>
       <Card withBorder p={0} radius="sm" style={{ overflow: 'hidden', width: '100%', height: '100%' }}>
         <Image src={photo.url} alt="" w="100%" h="100%" fit="cover" />
-        {photo.excluded && <Overlay color="#000" backgroundOpacity={0.5} />}
+        {/* Decorative dim only — `pointerEvents: 'none'` is essential: a Mantine Overlay
+            defaults to zIndex 200 and otherwise sits ON TOP of the include button below,
+            swallowing the click so an excluded photo can never be re-included. */}
+        {photo.excluded && (
+          <Overlay color="#000" backgroundOpacity={0.5} style={{ pointerEvents: 'none' }} />
+        )}
       </Card>
       {!locked && (
         <Tooltip label={photo.excluded ? tp.include : tp.exclude}>
@@ -45,7 +50,9 @@ export function PhotoBookPhotoTile({
             radius="xl"
             aria-label={photo.excluded ? tp.include : tp.exclude}
             disabled={pending}
-            style={{ position: 'absolute', top: 4, right: 4 }}
+            // zIndex above the Overlay's default (200) so the button stays visible and
+            // clickable over the dim layer.
+            style={{ position: 'absolute', top: 4, right: 4, zIndex: 300 }}
             onClick={() => onToggleExcluded(photo.assetId, !photo.excluded)}
           >
             {photo.excluded ? <IconEye size={14} /> : <IconEyeOff size={14} />}
