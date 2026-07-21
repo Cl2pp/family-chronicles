@@ -15,26 +15,44 @@ import {
   Text,
   Title,
 } from '@mantine/core';
-import { IconArrowLeft, IconInfoCircle, IconMail } from '@tabler/icons-react';
+import {
+  IconArrowLeft,
+  IconDownload,
+  IconInfoCircle,
+  IconMail,
+} from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
 import type { BookFormat, BookQuote } from '@/lib/gelato';
-import type { BookStatus } from '@/lib/books';
+import type { BookKind, BookStatus } from '@/lib/books';
+import { isBookPrintFresh } from '@/lib/book-print-status';
 import { renderPreviewAction } from '../../actions';
 import posthog from 'posthog-js';
 
 interface OrderBook {
   id: string;
   title: string;
+  kind: BookKind;
   format: BookFormat;
   formatLabel: string;
   pageCount: number;
   storyCount: number;
+  /** Photo books only (`kind === 'photo'`) — how many photos are currently placed in the
+   *  book (excluded ones don't count). Null for story books. */
+  photoCount: number | null;
   status: BookStatus;
+  /** True when the book's content/plan changed since its stored print PDF was rendered
+   *  (`lib/books.ts`'s `BookDetail.layoutStale`). Photo books only — story books always
+   *  downgrade `status` back to `draft` on any content change, so `preview_ready` alone
+   *  means fresh for them (see `isBookPrintFresh`, `lib/book-print-status.ts`). */
+  layoutStale: boolean;
   errorMessage: string | null;
   /** True when the viewer can't read every story in the book — the all-chapters
-   *  print/order flow is off limits; the view explains why instead. */
+   *  print/order flow is off limits; the view explains why instead. Always false for
+   *  photo books (docs/PHOTO_BOOK_PLAN.md §2 — no per-viewer hiding). */
   accessBlocked: boolean;
+  /** True once a print PDF exists in S3 — gates the "Download PDF" button. */
+  hasPrint: boolean;
 }
 
 const eur = (n: number) =>
@@ -72,7 +90,17 @@ export function OrderView({
     return () => clearInterval(timer);
   }, [book.accessBlocked, book.status, book.id, router]);
 
-  const preparing = book.status !== 'preview_ready' && book.status !== 'ordered';
+  // For story books this is exactly the old `status !== 'preview_ready' && status !==
+  // 'ordered'` check (unchanged behavior — `isBookPrintFresh` ignores `layoutStale` for
+  // them, since their mutations already downgrade `status` back to `draft` on any
+  // content change). For photo books it ALSO treats a `preview_ready` book with
+  // `layoutStale: true` as still preparing — the narrow race where a mutation landed
+  // while a render was already in flight (see `lib/book-print-status.ts`) — so the price
+  // and Download button never show a PDF that predates the book's current content. That
+  // falls into the same "preparing" UI below as any other not-yet-rendered state, and
+  // reuses the same `preparePrintProof`/`renderPreviewAction` trigger and the `rendering`
+  // status poll above.
+  const preparing = !isBookPrintFresh(book.kind, book.status, book.layoutStale);
   const priced = quote?.priced ?? false;
   const priceLine = priced && quote?.total != null ? eur(quote.total) : to.priceOnRequest;
 
@@ -128,8 +156,8 @@ export function OrderView({
             <Text>{book.pageCount}</Text>
           </Group>
           <Group justify="space-between">
-            <Text c="dimmed">{to.summaryStories}</Text>
-            <Text>{book.storyCount}</Text>
+            <Text c="dimmed">{book.kind === 'photo' ? to.summaryPhotos : to.summaryStories}</Text>
+            <Text>{book.kind === 'photo' ? (book.photoCount ?? 0) : book.storyCount}</Text>
           </Group>
           <Group justify="space-between">
             <Text c="dimmed">{to.summaryReference}</Text>
@@ -138,6 +166,27 @@ export function OrderView({
             </Text>
           </Group>
         </Stack>
+
+        {/* Photo-book only (docs/PHOTO_BOOK_PLAN.md PR5, the v1 deliverable) — story
+            books keep their existing order-screen behavior unchanged (no download link
+            here yet; their PDF proof link lives on the builder page). */}
+        {book.kind === 'photo' && !preparing && book.hasPrint && (
+          <Button
+            component="a"
+            href={`/api/books/${book.id}/print`}
+            variant="light"
+            size="sm"
+            mt="sm"
+            fullWidth
+            leftSection={<IconDownload size={16} />}
+            onClick={() =>
+              posthog.__loaded &&
+              posthog.capture('book_pdf_downloaded', { book_id: book.id, kind: book.kind })
+            }
+          >
+            {to.downloadPdf}
+          </Button>
+        )}
 
         <Divider my="md" />
 

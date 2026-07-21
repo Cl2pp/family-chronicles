@@ -4,21 +4,28 @@ import { PAGEDJS_POLYFILL_URL } from '@/lib/pagedjs';
 
 /**
  * Photo-book typesetting: pure HTML/CSS generation, the photo-book counterpart of
- * `lib/book-layout.ts`'s `renderBookHtml`. PR2 only needs the `screen` variant working —
- * `app/api/books/[bookId]/preview-html/route.ts` serves it straight to the browser and
- * Paged.js paginates it client-side, exactly like the story book's live preview. `print`
- * is intentionally a thin pass-through of the same markup (no bleed math, no watermark
- * logic beyond what `screen` already needs) — the Chromium PDF render is PR5's
- * `render-book` photo branch; wiring it for real happens there. Keeping this file free of
- * I/O (like `book-layout.ts`) makes layout changes reviewable and unit-testable.
+ * `lib/book-layout.ts`'s `renderBookHtml`. Three variants, mirroring the story-book
+ * renderer's split:
+ *  - `screen` — the live builder preview (`app/api/books/[bookId]/preview-html/route.ts`),
+ *    served straight to the browser and paginated client-side by Paged.js. No bleed, no
+ *    watermark (an auth-gated editing surface, not a distributable file).
+ *  - `preview` — the low-res, watermarked PDF the worker's `render-book` photo branch
+ *    produces (`lib/book-render.ts`). No bleed (same reasoning as `screen`: it's a proof,
+ *    not a print file).
+ *  - `print` — the full-resolution, print-ready PDF: `BLEED_MM` of bleed on every edge,
+ *    `@page` sized to trim + bleed, no watermark.
  *
- * The renderer never decides *what* goes on a page — it renders whatever the
- * `PhotoBookPlan` (`lib/photo-book-plan.ts`) says. Callers resolve the plan's assetIds to
- * embeddable image `src`s (presigned S3 URLs for `screen`) and hand both to
+ * Keeping this file free of I/O (like `book-layout.ts`) makes layout changes reviewable
+ * and unit-testable: the renderer never decides *what* goes on a page (that's the
+ * `PhotoBookPlan`, `lib/photo-book-plan.ts`) and never resolves an image or a font itself
+ * — callers resolve the plan's assetIds to embeddable image `src`s (presigned S3 URLs for
+ * `screen`, `data:` URIs for `preview`/`print` — see `lib/book-render.ts`) and a variant-
+ * appropriate `@font-face` CSS block (`lib/photo-book-fonts.ts`'s `screenFontFaceCss` for
+ * `screen`, `embeddedFontFaceCss` for `preview`/`print`), and hand it all to
  * `renderPhotoBookHtml`.
  */
 
-export type PhotoLayoutVariant = 'screen' | 'print';
+export type PhotoLayoutVariant = 'screen' | 'preview' | 'print';
 
 export interface PhotoLayoutImage {
   assetId: string;
@@ -38,9 +45,27 @@ export interface PhotoLayoutInput {
    *  `lib/photo-book-content.ts`) — a missing entry (photo not yet presignable, e.g. no
    *  dimensions) is rendered as an empty slot rather than crashing the page. */
   images: Map<string, PhotoLayoutImage>;
+  /** `@font-face` rule text for the plan's style suite — `screenFontFaceCss`/
+   *  `embeddedFontFaceCss` from `lib/photo-book-fonts.ts`, chosen by the caller per
+   *  variant (see the module header). Injected verbatim into the `<style>` block. */
+  fontFaceCss: string;
   createdLabel: string;
   watermarkText?: string;
 }
+
+/** 3 mm bleed on every edge for the `print` variant — same value as `lib/book-layout.ts`'s
+ *  own `BLEED_MM` (kept as a separate constant, not imported, so this file stays free of
+ *  any dependency on the story-book renderer); exported so `lib/photo-book-content.ts`'s
+ *  print-embedding size calculation (`photoAssetPrintTargetSizeMm`) can size each photo to
+ *  EXACTLY the physical box it will render into, not an approximation. */
+export const PHOTO_BOOK_BLEED_MM = 3;
+
+/** The page's content-box margins (trim edge, `screen`/`preview`; before adding bleed for
+ *  `print`) — exported for the same reason as `PHOTO_BOOK_BLEED_MM`: the print-embedding
+ *  size calculation needs the exact content-box dimensions these margins carve out of the
+ *  page, so a photo is downscaled to precisely the pixels its slot will print at 300 dpi,
+ *  never more (bounding worker memory) and never less (bounding visible upscaling). */
+export const PHOTO_BOOK_CONTENT_MARGIN_MM = { top: 14, bottom: 16, inner: 16, outer: 14 } as const;
 
 const esc = (s: string) =>
   s
@@ -71,6 +96,9 @@ function styleVarsCss(s: PhotoStyleTokens): string {
     --pb-photo-shadow: ${s.photoShadow};
     --pb-photo-frame-border: ${s.photoFrameBorder ? `0.3mm solid ${s.photoFrameBorder}` : 'none'};
     --pb-caption-color: ${s.captionColor};
+    --pb-divider-ornament-display: ${s.dividerOrnament ? 'block' : 'none'};
+    --pb-photo-tape-display: ${s.photoTape ? 'block' : 'none'};
+    --pb-photo-tape-color: ${s.photoTapeColor ?? 'rgba(200, 200, 200, 0.6)'};
   }`;
 }
 
@@ -221,9 +249,24 @@ function pageNameFor(kind: string, index: number): string {
 
 export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
   const style = PHOTO_STYLE_TOKENS[input.plan.style];
-  const pageW = input.trim.w;
-  const pageH = input.trim.h;
-  const m = { top: 14, bottom: 16, inner: 16, outer: 14 };
+  // Bleed only applies to `print`: `screen` is never printed, and `preview` is a proof,
+  // not the binding print file — same split as `lib/book-layout.ts`'s `renderBookHtml`.
+  // Bleed pages (cover front/back, full-bleed photo, divider) bleed to the physical page
+  // edge in every variant via the named `@page { margin: 0 }` rules below; what changes
+  // for `print` is that the physical page itself grows by `PHOTO_BOOK_BLEED_MM` on every
+  // edge, so those pages extend 3mm past the trim line the way a real bleed setup needs.
+  const bleed = input.variant === 'print' ? PHOTO_BOOK_BLEED_MM : 0;
+  const pageW = input.trim.w + bleed * 2;
+  const pageH = input.trim.h + bleed * 2;
+  // Inner margins are measured from the TRIM edge; bleed is added on top — mirrors
+  // `renderBookHtml`'s `m` so a content-box page's physical content area is identical
+  // between variants (only the bleed pages around it grow).
+  const m = {
+    top: PHOTO_BOOK_CONTENT_MARGIN_MM.top + bleed,
+    bottom: PHOTO_BOOK_CONTENT_MARGIN_MM.bottom + bleed,
+    inner: PHOTO_BOOK_CONTENT_MARGIN_MM.inner + bleed,
+    outer: PHOTO_BOOK_CONTENT_MARGIN_MM.outer + bleed,
+  };
   const contentW = pageW - m.inner - m.outer;
   const contentH = pageH - m.top - m.bottom - 1;
 
@@ -235,8 +278,11 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
     return name;
   }
 
+  // Watermark only on `preview` — the low-res PDF proof. Never on `screen` (an
+  // auth-gated live-editing surface, not a distributable file) and never on `print` (the
+  // full-resolution, order-ready PDF must be clean) — same rule as `renderBookHtml`.
   const watermark =
-    input.variant === 'screen'
+    input.variant === 'preview'
       ? `<div class="watermark">${esc(input.watermarkText ?? 'PREVIEW')}</div>`
       : '';
 
@@ -333,6 +379,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
 <head>
 <meta charset="utf-8" />
 <style>
+${input.fontFaceCss}
 ${styleVarsCss(style)}
   @page {
     size: ${pageW}mm ${pageH}mm;
@@ -397,6 +444,18 @@ ${styleVarsCss(style)}
   }
   .pb-divider-kicker { font-size: 9pt; letter-spacing: 0.14em; font-variant: small-caps; opacity: 0.7; margin: 0 0 4mm; }
   .pb-divider h2 { font-family: var(--pb-font-heading); font-size: 22pt; margin: 0 0 2mm; }
+  /* Ornamental divider flourish (heirloom): a plain hairline rule above/below the
+     section title — on for every suite with dividerOrnament: true, off (display: none)
+     otherwise, so this rule is a no-op for every other suite. */
+  .pb-divider h2::before, .pb-divider h2::after {
+    content: '';
+    display: var(--pb-divider-ornament-display);
+    width: 16mm;
+    height: 0.3mm;
+    margin: 3mm auto;
+    background: currentColor;
+    opacity: 0.5;
+  }
   .pb-divider-date { font-size: 11pt; opacity: 0.75; margin: 0; }
   .pb-divider-page { position: relative; }
   .ph-divider-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.5; }
@@ -449,6 +508,7 @@ ${styleVarsCss(style)}
   .pb-framed { display: flex; align-items: center; justify-content: center; }
   .pb-framed-inner { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   .ph-frame {
+    position: relative;
     box-sizing: border-box;
     background: var(--pb-page-bg);
     padding: var(--pb-photo-mat);
@@ -457,6 +517,22 @@ ${styleVarsCss(style)}
     border-radius: var(--pb-photo-radius);
     width: 100%;
     height: 100%;
+  }
+  /* Washi-tape accent (journal): a small rotated strip pinned across the top edge of the
+     mat — on for every suite with photoTape: true, off (display: none) otherwise, so
+     this rule is a no-op for every other suite. */
+  .ph-frame::before {
+    content: '';
+    display: var(--pb-photo-tape-display);
+    position: absolute;
+    top: -4mm;
+    left: 50%;
+    width: 18mm;
+    height: 7mm;
+    margin-left: -9mm;
+    background: var(--pb-photo-tape-color);
+    box-shadow: 0 0.5mm 1mm rgba(0, 0, 0, 0.15);
+    transform: rotate(-3deg);
   }
   .ph-frame-img { width: 100%; height: 100%; object-fit: contain; display: block; border-radius: var(--pb-photo-radius); }
 

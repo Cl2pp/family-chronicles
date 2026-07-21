@@ -64,7 +64,7 @@ async function bookSummary(book: BookDetail, userId: string, access?: StoryAcces
     format: book.format,
     formatLabel: FORMAT_LABELS[book.format],
     status: book.status,
-    pageCount: book.pageCount ?? `~${estimatePageCount(book)} (estimated)`,
+    pageCount: book.pageCount ?? `~${await estimatePageCount(book)} (estimated)`,
     chronicle: book.chronicleName,
     layoutSource: book.layoutSource,
     // Chapters the acting user can't read (story access). When > 0, chapter

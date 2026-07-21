@@ -44,7 +44,7 @@ describe('validatePhotoBookPlan', () => {
   });
 
   it('rejects an unknown style id', () => {
-    const result = validatePhotoBookPlan(basePlan({ style: 'heirloom' as PhotoBookPlan['style'] }));
+    const result = validatePhotoBookPlan(basePlan({ style: 'sepia' as PhotoBookPlan['style'] }));
     expect(result.ok).toBe(false);
   });
 

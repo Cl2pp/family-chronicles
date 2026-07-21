@@ -22,20 +22,24 @@ import {
 } from '@mantine/core';
 import {
   IconArrowLeft,
+  IconDownload,
   IconExternalLink,
   IconEye,
   IconEyeOff,
   IconPhoto,
+  IconShoppingCart,
   IconSparkles,
   IconTrash,
 } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
+import { isBookPrintFresh } from '@/lib/book-print-status';
 import { PHOTO_BOOK_STYLES, type PhotoBookStyle } from '@/lib/photo-book-plan';
 import { BulkPhotoUploader } from '@/components/bulk-photo-uploader';
 import {
   deleteBookAction,
   regeneratePhotoBookLayoutAction,
+  renderPreviewAction,
   requestPhotoBookAiDesignAction,
   setPhotoBookStyleAction,
   setPhotoExcludedAction,
@@ -58,6 +62,7 @@ interface PhotoBookInfo {
   id: string;
   title: string;
   status: 'draft' | 'rendering' | 'preview_ready' | 'render_failed' | 'ordered';
+  errorMessage: string | null;
   /** Current style suite (`lib/photo-book-plan.ts`) — resolves/builds the plan
    *  server-side if there wasn't one yet, so this always has a value. */
   style: PhotoBookStyle;
@@ -70,6 +75,12 @@ interface PhotoBookInfo {
    *  Drives the "replace your manual edits?" consent modal below, same as the story
    *  book's `layoutSource`. */
   layoutSource: 'auto' | 'ai' | 'edited';
+  /** True when the book's content changed since its stored layout plan was built — a
+   *  `preview_ready` PDF built before that change is stale and must be re-rendered
+   *  before it's handed out (the "Download PDF" flow below). */
+  layoutStale: boolean;
+  /** True once a print PDF exists in S3 (regardless of staleness). */
+  hasPrint: boolean;
 }
 
 /**
@@ -97,6 +108,11 @@ export function PhotoBookBuilder({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [designConsentOpen, setDesignConsentOpen] = useState(false);
   const [regenerateConsentOpen, setRegenerateConsentOpen] = useState(false);
+  const [downloadRequesting, startDownloadRequest] = useTransition();
+  // True while waiting for a triggered render to finish before the PDF can be downloaded
+  // (as opposed to `downloadRequesting`, which only covers the initial "kick off the
+  // render" request — the render itself runs in the worker and is polled for below).
+  const [awaitingDownload, setAwaitingDownload] = useState(false);
   const isEdited = book.layoutSource === 'edited';
 
   const locked = book.status === 'ordered';
@@ -132,6 +148,74 @@ export function PhotoBookBuilder({
     }, 4000);
     return () => clearInterval(timer);
   }, [book.designing, book.id, router]);
+
+  // While a render triggered by the Download button is in flight, poll status the same
+  // way the order page already does for its own print-proof render (order-view.tsx) —
+  // once it settles, either download the PDF (preview_ready) or surface the failure.
+  useEffect(() => {
+    if (!awaitingDownload) return;
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/books/${book.id}/status`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { status: string };
+        if (data.status === 'preview_ready') {
+          setAwaitingDownload(false);
+          triggerDownload();
+          router.refresh();
+        } else if (data.status === 'render_failed') {
+          setAwaitingDownload(false);
+          notifications.show({ message: tp.downloadFailed, color: 'red' });
+          router.refresh();
+        }
+      } catch {
+        /* transient network error — next tick retries */
+      }
+    }, 4000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- triggerDownload/tp are stable for this component's lifetime
+  }, [awaitingDownload, book.id, router]);
+
+  /** Saves the current print PDF to disk via a throwaway anchor — same pattern as any
+   *  same-origin `download`-attribute link, just triggered from code once a render we
+   *  were waiting on has finished. */
+  function triggerDownload() {
+    const a = document.createElement('a');
+    a.href = `/api/books/${book.id}/print`;
+    a.download = `${book.title}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  /** The "Download PDF" button (docs/PHOTO_BOOK_PLAN.md PR5, the v1 deliverable): if the
+   *  book already has a fresh print PDF (`preview_ready` and not `layoutStale`), download
+   *  it immediately. Otherwise trigger a render first (`renderPreviewAction` — the same
+   *  action the order page's "prepare print proof" button calls, generalized in
+   *  `lib/books.ts`'s `requestPreview` to cover photo books) and wait for it, so a book
+   *  with a stale plan (photos added/excluded, a chat edit) never hands back an outdated
+   *  PDF. */
+  function downloadPdf() {
+    if (isBookPrintFresh('photo', book.status, book.layoutStale)) {
+      triggerDownload();
+      return;
+    }
+    if (book.status === 'rendering') {
+      // Some other trigger (the order page, a previous click) already has a render in
+      // flight — just wait for it instead of surfacing "already rendering" as an error.
+      setAwaitingDownload(true);
+      return;
+    }
+    startDownloadRequest(async () => {
+      const result = await renderPreviewAction(book.id);
+      if (result.error) {
+        notifications.show({ message: result.error, color: 'red' });
+        return;
+      }
+      setAwaitingDownload(true);
+      router.refresh();
+    });
+  }
 
   /** Runs the AI design pass; if it fails with the "manual edits" consent error, opens
    *  the confirm modal instead of just showing the error — the retry (with
@@ -239,20 +323,39 @@ export function PhotoBookBuilder({
           <Title order={2}>{book.title}</Title>
           <Badge variant="light">{t.books.status[book.status]}</Badge>
         </Group>
-        {!locked && (
-          <Tooltip label={tb.deleteBook}>
-            <ActionIcon
-              variant="subtle"
-              color="red"
-              size="lg"
-              aria-label={tb.deleteBook}
-              disabled={pending}
-              onClick={() => setDeleteOpen(true)}
-            >
-              <IconTrash size={18} />
-            </ActionIcon>
-          </Tooltip>
-        )}
+        <Group gap="sm">
+          {!locked && (
+            <Tooltip label={tb.deleteBook}>
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                size="lg"
+                aria-label={tb.deleteBook}
+                disabled={pending}
+                onClick={() => setDeleteOpen(true)}
+              >
+                <IconTrash size={18} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+          <Button
+            variant="default"
+            leftSection={<IconDownload size={16} />}
+            loading={downloadRequesting || awaitingDownload}
+            disabled={totalCount === 0}
+            onClick={downloadPdf}
+          >
+            {tp.downloadPdf}
+          </Button>
+          <Button
+            component={Link}
+            href={`/books/${book.id}/order`}
+            leftSection={<IconShoppingCart size={16} />}
+            disabled={!isBookPrintFresh('photo', book.status, book.layoutStale)}
+          >
+            {tb.orderCta}
+          </Button>
+        </Group>
       </Group>
 
       {!locked && (

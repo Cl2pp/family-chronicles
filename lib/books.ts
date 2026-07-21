@@ -50,6 +50,7 @@ import {
 } from '@/lib/book-layout-plan';
 import {
   buildAndPersistPhotoAutoPlan,
+  countPhotoBookPages,
   loadOrBuildPhotoPlan,
   loadPhotoBook,
   referencedPhotoAssetIds,
@@ -274,6 +275,11 @@ export interface BookDetail {
   /** Who last wrote the layout plan: the heuristic auto-layouter, an AI design pass, or a
    *  manual edit (manual edits are phase 4; the type already allows for them). */
   layoutSource: 'auto' | 'ai' | 'edited';
+  /** True when the book's content changed since `layoutPlan` was built (a photo was
+   *  added/excluded, a chat op touched the plan) — the render/download flow uses this to
+   *  decide whether a stored `preview_ready` PDF still matches the book's current content
+   *  or must be re-rendered first (docs/PHOTO_BOOK_PLAN.md PR5, "Download PDF"). */
+  layoutStale: boolean;
   /** Set while an AI design job is queued/running; null once it completes (success or
    *  fallback). Drives the builder's "Design my book" working state. */
   designRequestedAt: Date | null;
@@ -386,6 +392,7 @@ export async function getBookForUser(
     previewS3Key: row.book.previewS3Key,
     printS3Key: row.book.printS3Key,
     layoutSource: row.book.layoutSource as 'auto' | 'ai' | 'edited',
+    layoutStale: row.book.layoutStale,
     designRequestedAt: row.book.designRequestedAt,
     updatedAt: row.book.updatedAt,
     chapters: visibleChapters.map((c, i) => ({
@@ -530,11 +537,14 @@ export interface AddBookPhotoInput {
 }
 
 /** Access + lock gate shared by every photo-book mutation below — also used directly
- *  by the batch presign action, which needs the same check before signing PUT URLs. */
+ *  by the batch presign action, which needs the same check before signing PUT URLs.
+ *  Hands back the book's current `status` too, so mutations that need to know whether
+ *  to invalidate an existing print PDF (`invalidatePhotoBookPrint` below) don't have to
+ *  re-query for it. */
 export async function editablePhotoBook(
   bookId: string,
   userId: string,
-): Promise<{ ok: true; chronicleId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; chronicleId: string; status: BookStatus } | { ok: false; error: string }> {
   const [row] = await db
     .select({ chronicleId: books.chronicleId, kind: books.kind, status: books.status })
     .from(books)
@@ -547,7 +557,39 @@ export async function editablePhotoBook(
   if (row.status === 'ordered') {
     return err('This book has been ordered and is locked. Create a new book to make changes.');
   }
-  return { ok: true, chronicleId: row.chronicleId };
+  return { ok: true, chronicleId: row.chronicleId, status: row.status as BookStatus };
+}
+
+/**
+ * Root-cause fix for "the order screen can serve a stale print PDF for photo books"
+ * (docs/PHOTO_BOOK_PLAN.md PR5 review): a photo book's print PDF
+ * (`previewS3Key`/`printS3Key`) is a Chromium render of a PLAN snapshot, so once
+ * content or the plan itself changes, any `preview_ready` PDF may no longer match —
+ * exactly the situation the story book's `invalidatePreview()` already handles by
+ * downgrading `status` back to `draft`. This is the photo-book counterpart, called by
+ * every mutation that can make an existing print PDF stale (`addBookPhotos`,
+ * `setPhotoExcluded`, `updatePhotoBookLayout`): every reader of `books.status` — the
+ * order screen, the builder's Download/Order gates, `requestPreview`'s "already fresh,
+ * no-op" check — then treats the book as needing a fresh render again, with no extra
+ * staleness check required at the READ side.
+ *
+ * Deliberately narrower than `invalidatePreview()`: it only downgrades `preview_ready`,
+ * leaving `rendering`/`render_failed`/`draft` untouched. `rendering` in particular must
+ * survive a concurrent mutation unclobbered — flipping it to `draft` here would let a
+ * second `requestPreview` call race past its "a preview is already being rendered"
+ * guard and enqueue a duplicate render job. (That race window — a mutation landing
+ * mid-render — instead leaves `status: 'preview_ready'` with `layoutStale: true` once
+ * the in-flight render completes; `lib/book-print-status.ts`'s `isBookPrintFresh` is
+ * the read-side check that still catches that case.)
+ *
+ * Independent of `layoutStale`, which the caller manages separately and may leave
+ * `false` (e.g. `updatePhotoBookLayout` — the plan it just persisted already reflects
+ * the edit, so no rebuild is needed) even while this downgrades `status`: "does the
+ * stored PLAN need rebuilding from the photo set" and "does the stored PRINT PDF need
+ * re-rendering from the plan" are different questions.
+ */
+function invalidatePhotoBookPrint(currentStatus: BookStatus): Partial<typeof books.$inferInsert> {
+  return currentStatus === 'preview_ready' ? { status: 'draft' as const } : {};
 }
 
 /**
@@ -653,8 +695,14 @@ export async function addBookPhotos(input: {
     // stale so the next preview load rebuilds it (docs/PHOTO_BOOK_PLAN.md PR2, "Exclude/
     // include ... should mark the plan stale and rebuild" — the same applies to new
     // uploads). A no-op when there's no plan yet (`loadOrBuildPhotoPlan` only looks at
-    // `layoutStale` when `layoutPlan` is already set).
-    await db.update(books).set({ layoutStale: true, updatedAt: new Date() }).where(eq(books.id, input.bookId));
+    // `layoutStale` when `layoutPlan` is already set). Also downgrades a `preview_ready`
+    // book back to `draft` (`invalidatePhotoBookPrint`) — an existing print PDF was
+    // rendered before these photos existed, so it can no longer be trusted (PR5 review:
+    // "order screen can serve a stale print PDF for photo books").
+    await db
+      .update(books)
+      .set({ layoutStale: true, updatedAt: new Date(), ...invalidatePhotoBookPrint(gate.status) })
+      .where(eq(books.id, input.bookId));
   }
 
   for (const a of inserted) {
@@ -775,8 +823,12 @@ export async function setPhotoExcluded(input: {
 
   // The available photo set changed — the stored plan (if any) may now reference an
   // excluded photo or be missing a re-included one; flag it stale so the next preview
-  // load rebuilds it (docs/PHOTO_BOOK_PLAN.md PR2).
-  await db.update(books).set({ layoutStale: true, updatedAt: new Date() }).where(eq(books.id, input.bookId));
+  // load rebuilds it (docs/PHOTO_BOOK_PLAN.md PR2). Also downgrades a `preview_ready`
+  // book back to `draft` (`invalidatePhotoBookPrint`) — see `addBookPhotos` above.
+  await db
+    .update(books)
+    .set({ layoutStale: true, updatedAt: new Date(), ...invalidatePhotoBookPrint(gate.status) })
+    .where(eq(books.id, input.bookId));
   return { ok: true };
 }
 
@@ -1110,7 +1162,16 @@ export async function updatePhotoBookLayout(input: {
   // rolls back), and its subsequent plan read — a fresh query, not reused from before the
   // lock — then sees that committed change instead of clobbering it.
   return db.transaction(async (tx) => {
-    await tx.select({ id: books.id }).from(books).where(eq(books.id, input.bookId)).for('update');
+    // Also grabs `status` under the same lock (rather than reusing `gate.status` from
+    // the pre-lock read above): a render could start between that read and here, and
+    // downgrading a `rendering` book back to `draft` would let a second `requestPreview`
+    // call race past its "already rendering" guard and enqueue a duplicate render job.
+    const [locked] = await tx
+      .select({ id: books.id, status: books.status })
+      .from(books)
+      .where(eq(books.id, input.bookId))
+      .for('update');
+    if (!locked) return err('Book not found.');
 
     const loaded = await loadPhotoBook(input.bookId);
     let plan: PhotoBookPlan = await loadOrBuildPhotoPlan(input.bookId, loaded);
@@ -1160,8 +1221,17 @@ export async function updatePhotoBookLayout(input: {
     const set: Partial<typeof books.$inferInsert> = {
       layoutPlan: validated.plan,
       layoutSource: 'edited',
+      // The freshly-persisted plan above already reflects this edit, so it doesn't need
+      // rebuilding from the photo set (`layoutStale` stays false) — but any EXISTING
+      // print PDF was rendered from the plan as it was BEFORE this edit, so it can no
+      // longer be trusted; `invalidatePhotoBookPrint` downgrades a `preview_ready` book
+      // back to `draft` to force a fresh render (PR5 review: "order screen can serve a
+      // stale print PDF for photo books" — this is the one of the three flagged
+      // mutations that does NOT also set `layoutStale: true`, since a chat edit doesn't
+      // invalidate the plan itself, only any already-rendered PDF of it).
       layoutStale: false,
       updatedAt: new Date(),
+      ...invalidatePhotoBookPrint(locked.status as BookStatus),
     };
     if (coverAssetId !== undefined) set.coverAssetId = coverAssetId;
     await tx.update(books).set(set).where(eq(books.id, input.bookId));
@@ -1345,6 +1415,32 @@ export async function requestPreview(input: {
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+
+  // Photo books (docs/PHOTO_BOOK_PLAN.md PR5): a separate branch, not a rewrite of the
+  // story checks below — a photo book has no `chapters`/`hiddenChapterCount` (book_stories
+  // stays empty for it) and, unlike a story book, is never opened by a viewer with partial
+  // access (§2: "every chronicle member with access to the book sees them"), so neither of
+  // the story-only checks below applies.
+  if (gate.book.kind === 'photo') {
+    // Already fresh — nothing to (re-)render. Lets the "Download PDF" flow call this
+    // unconditionally before serving the PDF without forcing a wasteful Chromium re-run
+    // on a book whose print PDF already matches its current content.
+    if (gate.book.status === 'preview_ready' && !gate.book.layoutStale) return { ok: true };
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(bookPhotos)
+      .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.excluded, false)));
+    if (!count) return err('Add at least one photo before rendering.');
+    if (gate.book.status === 'rendering') return err('A preview is already being rendered.');
+
+    await db
+      .update(books)
+      .set({ status: 'rendering', errorMessage: null, updatedAt: new Date() })
+      .where(eq(books.id, input.bookId));
+    await enqueueRenderBook({ bookId: input.bookId });
+    return { ok: true };
+  }
+
   // The rendered PDF physically contains EVERY chapter — all-or-nothing: only
   // someone who can read all of the book's stories may trigger (and later fetch) it.
   if (gate.book.hiddenChapterCount > 0) {
@@ -1793,22 +1889,37 @@ export async function quoteBook(input: {
 }): Promise<Result<{ quote: BookQuote }>> {
   const book = await getBookForUser(input.bookId, input.userId);
   if (!book) return err('Book not found.');
-  // Quoting is part of the order flow, which needs the all-chapters print PDF.
+  // Quoting is part of the order flow, which needs the all-chapters print PDF. Photo
+  // books have no hidden-chapter concept (§2: every chronicle member with book access
+  // sees every photo), so this never blocks them — `hiddenChapterCount` is always 0.
   if (book.hiddenChapterCount > 0) {
     return err(
       "Some of this book's chapters are stories you don't have access to — the printed book contains every chapter, so only someone who can read all of them can price or order it.",
     );
   }
-  const pageCount = book.pageCount ?? estimatePageCount(book);
+  const pageCount = book.pageCount ?? (await estimatePageCount(book));
   const quote = await quoteBookPrice({ format: book.format, pageCount });
   return { ok: true, value: { quote } };
 }
 
 /**
- * Rough page estimate before a render exists: ~2.5 pages of prose per story plus
- * a page per two photos, front matter, and chapter starts on right-hand pages.
+ * Rough page estimate before a render exists. Story books: ~2.5 pages of prose per story
+ * plus a page per two photos, front matter, and chapter starts on right-hand pages — pure
+ * arithmetic over `book.chapters`, already loaded. Photo books: no `chapters` to estimate
+ * from (`book_stories` stays empty for them), so this loads/resolves the book's actual
+ * layout plan (`loadOrBuildPhotoPlan` — builds one if there isn't a usable one yet, same
+ * as the live preview) and counts its real pages (`countPhotoBookPages`,
+ * `lib/photo-book-content.ts`) — a photo book's page count is far more layout-dependent
+ * than a story book's (page templates hold 1-5 photos each), so a flat per-photo formula
+ * would be a much rougher guess than just resolving the plan, which the preview route
+ * does on every request anyway.
  */
-export function estimatePageCount(book: Pick<BookDetail, 'chapters'>): number {
+export async function estimatePageCount(book: Pick<BookDetail, 'id' | 'kind' | 'chapters'>): Promise<number> {
+  if (book.kind === 'photo') {
+    const loaded = await loadPhotoBook(book.id);
+    const plan = await loadOrBuildPhotoPlan(book.id, loaded);
+    return countPhotoBookPages(plan);
+  }
   const front = 4; // cover sheet, title page, TOC, blank
   const perStory = book.chapters.reduce(
     (sum, c) => sum + 3 + Math.ceil(c.photoCount / 2),

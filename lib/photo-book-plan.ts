@@ -18,13 +18,14 @@ import { z } from 'zod';
  * caller reads first.
  */
 
-/** PR2 ships 3 of the eventual 6 style suites (docs/PHOTO_BOOK_PLAN.md §7); `heirloom`,
- *  `bold`, `journal` land in PR5. The canonical id list lives here (not
+/** All 6 style suites (docs/PHOTO_BOOK_PLAN.md §7) — PR2 shipped `classic`/`modern`/
+ *  `gallery`; PR5 adds `heirloom`/`bold`/`journal`. The canonical id list lives here (not
  *  `lib/photo-book-styles.ts`) so the plan schema's `style` enum is the single source of
  *  truth — `lib/photo-book-styles.ts` imports `PhotoBookStyle` and maps each id to its
- *  design tokens, exactly like `LAYOUT_THEMES`/`THEME_TOKENS` split between
- *  `lib/book-layout-plan.ts` and `lib/book-layout.ts`. */
-export const PHOTO_BOOK_STYLES = ['classic', 'modern', 'gallery'] as const;
+ *  design tokens (palette, photo treatment, cover design) and, since PR5, its self-hosted
+ *  font pairing (`lib/photo-book-fonts.ts`) — exactly like `LAYOUT_THEMES`/`THEME_TOKENS`
+ *  split between `lib/book-layout-plan.ts` and `lib/book-layout.ts`. */
+export const PHOTO_BOOK_STYLES = ['classic', 'modern', 'gallery', 'heirloom', 'bold', 'journal'] as const;
 export type PhotoBookStyle = (typeof PHOTO_BOOK_STYLES)[number];
 
 /** The fixed layout vocabulary (docs/PHOTO_BOOK_PLAN.md §5 table). Slot counts are
