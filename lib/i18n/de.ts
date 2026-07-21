@@ -710,6 +710,18 @@ export const de: Dictionary = {
         noPhotosHint: 'Füge oben Fotos hinzu, um dieses Buch zu füllen.',
         exclude: 'Aus dem Buch ausschließen',
         include: 'Wieder ins Buch aufnehmen',
+        preview: 'Vorschau',
+        previewHint: 'Automatisch aus deinen Fotos erstellt — wähle einen Stil und generiere jederzeit neu.',
+        style: 'Stil',
+        styleNames: {
+          classic: 'Klassisch',
+          modern: 'Modern',
+          gallery: 'Galerie',
+        },
+        regenerate: 'Neu erstellen',
+        regenerating: 'Wird erstellt…',
+        regenerateHint: 'Baut das Layout aus deinen aktuellen Fotos neu auf — Abschnitte, Seiten und Cover.',
+        waitingForPhotos: 'Füge Fotos hinzu und lass sie analysieren, um eine Vorschau zu sehen.',
       },
     },
     order: {

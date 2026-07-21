@@ -1,0 +1,246 @@
+import { and, asc, eq, inArray } from 'drizzle-orm';
+import { db } from '@/db';
+import { assets, bookPhotos, books } from '@/db/schema';
+import {
+  checkPhotoBookPlanConsistency,
+  validatePhotoBookPlan,
+  type PhotoBookPlan,
+  type PhotoPlanContent,
+} from '@/lib/photo-book-plan';
+import { buildPhotoBookAutoLayout, type AutoLayoutPhoto } from '@/lib/photo-book-autolayout';
+
+/**
+ * Photo-book content loading + layout-plan resolution — the photo-book counterpart of
+ * `lib/book-content.ts`'s `loadBook`/`loadOrBuildPlan`/`buildAndPersistAutoPlan`, shared
+ * by the web process's live preview (`app/api/books/[bookId]/preview-html/route.ts`) and
+ * (from PR3 onward) the worker's AI design pass and print render. `lib/book-content.ts`
+ * itself is untouched — story books keep exactly the functions they had.
+ */
+
+export interface PhotoBookPhotoRef {
+  assetId: string;
+  s3Key: string;
+  thumbS3Key: string | null;
+  /** ~1600px WebP (lib/thumbnails.ts) — used for full-page preview slots. Null until the
+   *  worker's `thumbnail` job has run for this photo. */
+  displayS3Key: string | null;
+  mimeType: string;
+  width: number | null;
+  height: number | null;
+  position: number;
+  excluded: boolean;
+  excludedReason: string | null;
+  takenAt: Date | null;
+  gpsLat: number | null;
+  gpsLng: number | null;
+  phash: string | null;
+  blurScore: number | null;
+}
+
+export interface LoadedPhotoBook {
+  row: typeof books.$inferSelect;
+  /** EVERY photo in the book, excluded or not — the builder's tray needs the excluded
+   *  ones too, and `checkPhotoBookPlanConsistency` needs both sets to tell "excluded"
+   *  apart from "not in this book at all". Plan resolution below filters this down to
+   *  the available subset before handing it to the auto-layouter. */
+  photos: PhotoBookPhotoRef[];
+}
+
+export async function loadPhotoBook(bookId: string): Promise<LoadedPhotoBook> {
+  const [row] = await db.select().from(books).where(eq(books.id, bookId)).limit(1);
+  if (!row) throw new Error(`Book ${bookId} not found`);
+  if (row.kind !== 'photo') throw new Error(`Book ${bookId} is not a photo book`);
+
+  const rows = await db
+    .select({
+      assetId: assets.id,
+      s3Key: assets.s3Key,
+      thumbS3Key: assets.thumbS3Key,
+      displayS3Key: assets.displayS3Key,
+      mimeType: assets.mimeType,
+      width: assets.width,
+      height: assets.height,
+      position: bookPhotos.position,
+      excluded: bookPhotos.excluded,
+      excludedReason: bookPhotos.excludedReason,
+      takenAt: bookPhotos.takenAt,
+      gpsLat: bookPhotos.gpsLat,
+      gpsLng: bookPhotos.gpsLng,
+      phash: bookPhotos.phash,
+      blurScore: bookPhotos.blurScore,
+    })
+    .from(bookPhotos)
+    .innerJoin(assets, eq(bookPhotos.assetId, assets.id))
+    .where(eq(bookPhotos.bookId, bookId))
+    .orderBy(asc(bookPhotos.position));
+
+  return { row, photos: rows };
+}
+
+/** A plan with no cover hero and no sections — used as a last-resort fallback if the
+ *  auto-layouter (a pure function that should never produce an invalid plan) somehow
+ *  did, so the preview route degrades to "blank photo book" instead of a 500. */
+function emptyPlan(style: PhotoBookPlan['style'], title: string): PhotoBookPlan {
+  return { kind: 'photo', style, cover: { title }, sections: [] };
+}
+
+/**
+ * Loads the book's stored layout plan, or builds a fresh one with the deterministic
+ * auto-layouter when there isn't one yet or it's stale — the photo-book counterpart of
+ * `loadOrBuildPlan` in `lib/book-content.ts`. Same trust model: a non-stale stored plan
+ * is only re-validated against the SCHEMA, not re-checked against current content —
+ * `books.layout_stale` is the single source of truth for "does this plan still match
+ * what's in the book", flipped by every mutation that changes the available photo set
+ * (`lib/books.ts`'s `setPhotoExcluded`/`addBookPhotos`).
+ */
+export async function loadOrBuildPhotoPlan(bookId: string, loaded: LoadedPhotoBook): Promise<PhotoBookPlan> {
+  const { row } = loaded;
+
+  if (row.layoutPlan && !row.layoutStale) {
+    const validated = validatePhotoBookPlan(row.layoutPlan);
+    if (validated.ok) return validated.plan;
+    console.warn(
+      `[photo-book-content] stored plan for ${bookId} failed validation, rebuilding:`,
+      validated.error,
+    );
+  }
+
+  return buildAndPersistPhotoAutoPlan(bookId, loaded);
+}
+
+/**
+ * Always rebuilds the plan with the deterministic auto-layouter and persists it as
+ * `layout_source: 'auto'`, regardless of any existing plan/staleness — the explicit
+ * "regenerate" path, mirroring `buildAndPersistAutoPlan` in `lib/book-content.ts`.
+ *
+ * Two things happen here that the story path doesn't need:
+ *  1. Photos the layouter culled (near-duplicate/blurry, see
+ *     `lib/photo-book-autolayout.ts`'s header comment) are written to
+ *     `book_photos.excluded`/`excluded_reason` — the pure layouter only REPORTS them,
+ *     this is the "thin persistence wrapper" that actually applies it, so the builder's
+ *     tray shows them and a user can tap to re-include.
+ *  2. The freshly-built plan is validated + consistency-checked before being persisted
+ *     (docs/PHOTO_BOOK_PLAN.md PR2 scope explicitly asks for this as a safety net) — the
+ *     auto-layouter is a pure function that should never produce a bad plan, but this
+ *     runs in the web request path (the live preview), so a bug here degrades to an
+ *     empty-but-valid plan instead of a 500.
+ *
+ * Cover title/subtitle are NOT carried over from a prior plan (unlike style and cover
+ * hero, which are — see the story path's carry-over rule): a photo book's cover title has
+ * no independent editing surface yet in PR2 (that's a future targeted-op, PR4), so it
+ * should always track the book's current title/settings rather than freezing whatever it
+ * was on a previous build — the same behavior a story book's cover already has (its
+ * title/subtitle are book-level fields read fresh on every render, never stored in the
+ * plan at all).
+ */
+export async function buildAndPersistPhotoAutoPlan(
+  bookId: string,
+  loaded: LoadedPhotoBook,
+): Promise<PhotoBookPlan> {
+  const { row } = loaded;
+
+  const available = loaded.photos.filter((p) => !p.excluded);
+  const autoLayoutPhotos: AutoLayoutPhoto[] = available
+    .filter((p): p is PhotoBookPhotoRef & { width: number; height: number } => p.width != null && p.height != null)
+    .map((p) => ({
+      assetId: p.assetId,
+      width: p.width,
+      height: p.height,
+      position: p.position,
+      takenAt: p.takenAt,
+      gpsLat: p.gpsLat,
+      gpsLng: p.gpsLng,
+      phash: p.phash,
+      blurScore: p.blurScore,
+    }));
+
+  const existing = row.layoutPlan ? validatePhotoBookPlan(row.layoutPlan) : null;
+  const existingPlan = existing?.ok ? existing.plan : null;
+
+  const { plan: built, culled } = buildPhotoBookAutoLayout({
+    title: row.title,
+    coverAssetId: row.coverAssetId,
+    existingStyle: existingPlan?.style,
+    existingHeroAssetId: existingPlan?.cover.heroAssetId,
+    photos: autoLayoutPhotos,
+  });
+
+  if (culled.length > 0) {
+    const byReason = new Map<string, string[]>();
+    for (const c of culled) {
+      const ids = byReason.get(c.reason) ?? [];
+      ids.push(c.assetId);
+      byReason.set(c.reason, ids);
+    }
+    for (const [reason, assetIds] of byReason) {
+      await db
+        .update(bookPhotos)
+        .set({ excluded: true, excludedReason: reason, updatedAt: new Date() })
+        .where(and(eq(bookPhotos.bookId, bookId), inArray(bookPhotos.assetId, assetIds)));
+    }
+  }
+
+  const culledIds = new Set(culled.map((c) => c.assetId));
+  const content: PhotoPlanContent = {
+    availableAssetIds: available.map((p) => p.assetId).filter((id) => !culledIds.has(id)),
+    allAssetIds: loaded.photos.map((p) => p.assetId),
+  };
+
+  const validated = validatePhotoBookPlan(built);
+  const problems = validated.ok ? checkPhotoBookPlanConsistency(validated.plan, content) : [validated.error];
+  const plan = validated.ok && problems.length === 0 ? validated.plan : emptyPlan(built.style, row.title);
+  if (!validated.ok || problems.length > 0) {
+    console.error(
+      `[photo-book-content] auto-layouter produced an invalid/inconsistent plan for ${bookId}, falling back to empty:`,
+      problems,
+    );
+  }
+
+  await db
+    .update(books)
+    .set({ layoutPlan: plan, layoutSource: 'auto', layoutStale: false, updatedAt: new Date() })
+    .where(eq(books.id, bookId));
+
+  return plan;
+}
+
+/** Every assetId a plan actually renders — cover hero, cover back photos, and every
+ *  section page's photos. Mirrors `referencedAssetIds` in `lib/book-content.ts`. */
+export function referencedPhotoAssetIds(plan: PhotoBookPlan): Set<string> {
+  const ids = new Set<string>();
+  if (plan.cover.heroAssetId) ids.add(plan.cover.heroAssetId);
+  for (const id of plan.cover.backAssetIds ?? []) ids.add(id);
+  for (const section of plan.sections) {
+    for (const page of section.pages) {
+      for (const id of page.assetIds) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+/** Which single-photo templates render full-page — these want the ~1600px "display"
+ *  rendition (docs/PHOTO_BOOK_PLAN.md §8); every other placement (multi-photo grids,
+ *  the small back-cover photos) is fine at the 640px thumbnail. */
+const DISPLAY_QUALITY_TEMPLATES = new Set(['full-bleed', 'full-framed', 'divider']);
+
+/** For every photo the plan places, whether the preview should presign its `display`
+ *  rendition (falling back to the thumbnail/original) or the smaller thumbnail. A photo
+ *  placed in more than one role (unusual — `checkPhotoBookPlanConsistency` normally
+ *  forbids reusing a photo, but the cover hero always gets display quality regardless of
+ *  where else a bug might reference it) resolves to `'display'` if ANY placement wants it. */
+export function photoAssetRenditionNeeds(plan: PhotoBookPlan): Map<string, 'display' | 'thumb'> {
+  const needs = new Map<string, 'display' | 'thumb'>();
+  function want(id: string, level: 'display' | 'thumb') {
+    if (needs.get(id) === 'display') return;
+    needs.set(id, level);
+  }
+  if (plan.cover.heroAssetId) want(plan.cover.heroAssetId, 'display');
+  for (const id of plan.cover.backAssetIds ?? []) want(id, 'thumb');
+  for (const section of plan.sections) {
+    for (const page of section.pages) {
+      const level = DISPLAY_QUALITY_TEMPLATES.has(page.template) ? 'display' : 'thumb';
+      for (const id of page.assetIds) want(id, level);
+    }
+  }
+  return needs;
+}

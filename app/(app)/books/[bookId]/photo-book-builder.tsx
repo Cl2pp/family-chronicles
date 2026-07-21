@@ -20,11 +20,25 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
-import { IconArrowLeft, IconEye, IconEyeOff, IconPhoto, IconTrash } from '@tabler/icons-react';
+import {
+  IconArrowLeft,
+  IconExternalLink,
+  IconEye,
+  IconEyeOff,
+  IconPhoto,
+  IconSparkles,
+  IconTrash,
+} from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
+import { PHOTO_BOOK_STYLES, type PhotoBookStyle } from '@/lib/photo-book-plan';
 import { BulkPhotoUploader } from '@/components/bulk-photo-uploader';
-import { deleteBookAction, setPhotoExcludedAction } from '../actions';
+import {
+  deleteBookAction,
+  regeneratePhotoBookLayoutAction,
+  setPhotoBookStyleAction,
+  setPhotoExcludedAction,
+} from '../actions';
 
 export interface PhotoBookPhotoView {
   assetId: string;
@@ -41,12 +55,19 @@ interface PhotoBookInfo {
   id: string;
   title: string;
   status: 'draft' | 'rendering' | 'preview_ready' | 'render_failed' | 'ordered';
+  /** Current style suite (`lib/photo-book-plan.ts`) — resolves/builds the plan
+   *  server-side if there wasn't one yet, so this always has a value. */
+  style: PhotoBookStyle;
+  /** Cache-buster for the preview iframe — bumps whenever the book row changes
+   *  (same pattern as the story builder's `previewVersion`). */
+  previewVersion: number;
 }
 
 /**
- * The photo-book builder (PR 1 scope): bulk upload + a grid to review what's in the
- * book so far, with an exclude/include toggle and an analysis-progress indicator.
- * Layout/preview/PDF are later PRs — this view only manages the photo set itself.
+ * The photo-book builder: bulk upload + a grid to review what's in the book so far
+ * (exclude/include toggle, analysis-progress indicator — PR1 scope), plus the live
+ * auto-generated preview, a style-suite picker, and a regenerate button (PR2 scope,
+ * docs/PHOTO_BOOK_PLAN.md). Chat/voice refinement and the AI design pass are later PRs.
  */
 export function PhotoBookBuilder({
   book,
@@ -60,6 +81,7 @@ export function PhotoBookBuilder({
   const tp = tb.photoBook;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [regenerating, startRegenerate] = useTransition();
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   const locked = book.status === 'ordered';
@@ -77,6 +99,29 @@ export function PhotoBookBuilder({
     const timer = setInterval(() => router.refresh(), 4000);
     return () => clearInterval(timer);
   }, [totalCount, settledCount, router]);
+
+  function setStyle(style: PhotoBookStyle) {
+    if (style === book.style) return;
+    startTransition(async () => {
+      const result = await setPhotoBookStyleAction({ bookId: book.id, style });
+      if (result.error) {
+        notifications.show({ message: result.error, color: 'red' });
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  function regenerate() {
+    startRegenerate(async () => {
+      const result = await regeneratePhotoBookLayoutAction(book.id);
+      if (result.error) {
+        notifications.show({ message: result.error, color: 'red' });
+        return;
+      }
+      router.refresh();
+    });
+  }
 
   function toggleExcluded(assetId: string, excluded: boolean) {
     startTransition(async () => {
@@ -213,6 +258,76 @@ export function PhotoBookBuilder({
               </Box>
             ))}
           </SimpleGrid>
+        )}
+      </Card>
+
+      <Card withBorder radius="md" p="md">
+        <Group justify="space-between" mb="sm" wrap="wrap">
+          <Title order={4}>{tp.preview}</Title>
+          <Anchor href={`/api/books/${book.id}/preview-html`} target="_blank" fz={13}>
+            <Group gap={4}>
+              <IconExternalLink size={14} />
+              {tb.openInNewTab}
+            </Group>
+          </Anchor>
+        </Group>
+        <Text fz={12} c="dimmed" mb="sm">
+          {tp.previewHint}
+        </Text>
+
+        <Text fz={13} fw={500} mb={6}>
+          {tp.style}
+        </Text>
+        <Group gap={8} mb="md">
+          {PHOTO_BOOK_STYLES.map((style) => (
+            <Button
+              key={style}
+              size="compact-sm"
+              variant={style === book.style ? 'filled' : 'default'}
+              disabled={locked || pending}
+              onClick={() => setStyle(style)}
+            >
+              {tp.styleNames[style]}
+            </Button>
+          ))}
+        </Group>
+
+        <Group mb="sm">
+          <Tooltip label={tp.regenerateHint} disabled={locked}>
+            <Button
+              variant="light"
+              size="sm"
+              leftSection={<IconSparkles size={16} />}
+              loading={regenerating}
+              disabled={locked || totalCount === 0}
+              onClick={regenerate}
+            >
+              {regenerating ? tp.regenerating : tp.regenerate}
+            </Button>
+          </Tooltip>
+        </Group>
+
+        {settledCount > 0 ? (
+          <Box
+            component="iframe"
+            key={book.previewVersion}
+            src={`/api/books/${book.id}/preview-html?v=${book.previewVersion}`}
+            style={{
+              width: '100%',
+              height: 560,
+              border: '1px solid var(--mantine-color-slate-2)',
+              borderRadius: 8,
+              background: '#fff',
+            }}
+            title={tp.preview}
+          />
+        ) : (
+          <Stack align="center" gap={4} py="xl">
+            <IconPhoto size={28} stroke={1.4} color="var(--mantine-color-slate-4)" />
+            <Text c="dimmed" ta="center">
+              {tp.waitingForPhotos}
+            </Text>
+          </Stack>
         )}
       </Card>
 

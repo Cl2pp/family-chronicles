@@ -41,6 +41,12 @@ import {
   type LayoutTheme,
   type PlanContent,
 } from '@/lib/book-layout-plan';
+import {
+  buildAndPersistPhotoAutoPlan,
+  loadOrBuildPhotoPlan,
+  loadPhotoBook,
+} from '@/lib/photo-book-content';
+import { validatePhotoBookPlan, type PhotoBookStyle } from '@/lib/photo-book-plan';
 
 /**
  * Book domain — the ONE place book state changes. The Books UI (server actions)
@@ -621,7 +627,12 @@ export async function addBookPhotos(input: {
   const inserted = txResult.rows;
 
   if (inserted.length > 0) {
-    await db.update(books).set({ updatedAt: new Date() }).where(eq(books.id, input.bookId));
+    // New photos may change sectioning/pacing/cover pick — flag the stored plan (if any)
+    // stale so the next preview load rebuilds it (docs/PHOTO_BOOK_PLAN.md PR2, "Exclude/
+    // include ... should mark the plan stale and rebuild" — the same applies to new
+    // uploads). A no-op when there's no plan yet (`loadOrBuildPhotoPlan` only looks at
+    // `layoutStale` when `layoutPlan` is already set).
+    await db.update(books).set({ layoutStale: true, updatedAt: new Date() }).where(eq(books.id, input.bookId));
   }
 
   for (const a of inserted) {
@@ -730,6 +741,94 @@ export async function setPhotoExcluded(input: {
     .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.assetId, input.assetId)))
     .returning({ id: bookPhotos.id });
   if (updated.length === 0) return err('Photo not found in this book.');
+
+  // The available photo set changed — the stored plan (if any) may now reference an
+  // excluded photo or be missing a re-included one; flag it stale so the next preview
+  // load rebuilds it (docs/PHOTO_BOOK_PLAN.md PR2).
+  await db.update(books).set({ layoutStale: true, updatedAt: new Date() }).where(eq(books.id, input.bookId));
+  return { ok: true };
+}
+
+/**
+ * The photo book's current style suite id — resolves/builds the plan if needed (same
+ * "always have an answer" contract as `getBookLayoutSummary` for story books), so the
+ * builder's style picker always has a value to highlight, and the live preview and the
+ * picker never disagree about which suite is active.
+ *
+ * Cheap by default: the builder page (`app/(app)/books/[bookId]/page.tsx`) calls this
+ * purely to seed the style picker, and its `<iframe>` immediately fires a second request
+ * at `preview-html`, which resolves the SAME plan again (it needs the full content anyway
+ * to render). A valid, non-stale stored plan answers this from the `books` row alone —
+ * skipping `loadPhotoBook`'s full photo join and any rebuild — so the common case (every
+ * request after the book's first) doesn't pay for that load twice. Only a book with no
+ * usable plan yet takes the full build path, and it persists what it builds, so it's a
+ * one-time cost.
+ */
+export async function getPhotoBookStyle(
+  bookId: string,
+  userId: string,
+): Promise<Result<{ style: PhotoBookStyle }>> {
+  const [row] = await db
+    .select({ chronicleId: books.chronicleId, kind: books.kind, layoutPlan: books.layoutPlan, layoutStale: books.layoutStale })
+    .from(books)
+    .where(eq(books.id, bookId))
+    .limit(1);
+  if (!row) return err('Book not found.');
+  if (row.kind !== 'photo') return err('This is not a photo book.');
+  const m = await getMembership(row.chronicleId, userId);
+  if (!m) return err('Book not found.');
+
+  if (row.layoutPlan && !row.layoutStale) {
+    const validated = validatePhotoBookPlan(row.layoutPlan);
+    if (validated.ok) return { ok: true, value: { style: validated.plan.style } };
+    // Falls through to the full build below — same "rebuild on invalid stored plan"
+    // behavior `loadOrBuildPhotoPlan` has, just reached via the cheap path's own check.
+  }
+
+  const loaded = await loadPhotoBook(bookId);
+  const plan = await loadOrBuildPhotoPlan(bookId, loaded);
+  return { ok: true, value: { style: plan.style } };
+}
+
+/**
+ * Switch the photo book's style suite (the builder's swatch picker) — the photo-book
+ * counterpart of the story `set_theme` layout op. Like `set_theme`, this never marks the
+ * plan `edited` and never flips `layoutStale`: a style choice is a design preference that
+ * survives regeneration, not structural content the auto-layouter would need to redo.
+ */
+export async function setPhotoBookStyle(input: {
+  bookId: string;
+  userId: string;
+  style: PhotoBookStyle;
+}): Promise<Result> {
+  const gate = await editablePhotoBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+
+  const loaded = await loadPhotoBook(input.bookId);
+  const plan = await loadOrBuildPhotoPlan(input.bookId, loaded);
+  const validated = validatePhotoBookPlan({ ...plan, style: input.style });
+  if (!validated.ok) return err(`That change would leave the layout invalid: ${validated.error}`);
+
+  await db
+    .update(books)
+    .set({ layoutPlan: validated.plan, layoutStale: false, updatedAt: new Date() })
+    .where(eq(books.id, input.bookId));
+  return { ok: true };
+}
+
+/**
+ * Rebuild the photo book's plan from scratch with the deterministic auto-layouter — the
+ * "Generate/Regenerate" button (docs/PHOTO_BOOK_PLAN.md PR2, builder wiring). Unlike the
+ * story book's `resetBookLayout`, there is no manual-edit consent guard here yet: PR2
+ * ships no targeted photo-book edit ops (that's PR4), so `layoutSource` is always
+ * `'auto'` already and there's nothing a regenerate could silently overwrite.
+ */
+export async function regeneratePhotoBookLayout(input: { bookId: string; userId: string }): Promise<Result> {
+  const gate = await editablePhotoBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+
+  const loaded = await loadPhotoBook(input.bookId);
+  await buildAndPersistPhotoAutoPlan(input.bookId, loaded);
   return { ok: true };
 }
 

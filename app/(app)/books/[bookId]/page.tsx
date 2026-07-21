@@ -4,7 +4,13 @@ import { Box } from '@mantine/core';
 import { db } from '@/db';
 import { assets } from '@/db/schema';
 import { requireUser } from '@/lib/session';
-import { getBookForUser, getBookLayoutSummary, listBookPhotos, readyStoriesForChronicle } from '@/lib/books';
+import {
+  getBookForUser,
+  getBookLayoutSummary,
+  getPhotoBookStyle,
+  listBookPhotos,
+  readyStoriesForChronicle,
+} from '@/lib/books';
 import { loadStoryAccessContext } from '@/lib/story-access';
 import { presignGet } from '@/lib/s3';
 import { BookBuilder, type CoverOption } from './book-builder';
@@ -23,7 +29,10 @@ export default async function BookBuilderPage({
   if (!book) notFound();
 
   if (book.kind === 'photo') {
-    const photosResult = await listBookPhotos(bookId, user.id);
+    const [photosResult, styleResult] = await Promise.all([
+      listBookPhotos(bookId, user.id),
+      getPhotoBookStyle(bookId, user.id),
+    ]);
     const rows = photosResult.ok ? photosResult.value.photos : [];
     const photos: PhotoBookPhotoView[] = await Promise.all(
       rows.map(async (p) => ({
@@ -39,7 +48,13 @@ export default async function BookBuilderPage({
     return (
       <Box p="lg" maw={1200} mx="auto">
         <PhotoBookBuilder
-          book={{ id: book.id, title: book.title, status: book.status }}
+          book={{
+            id: book.id,
+            title: book.title,
+            status: book.status,
+            style: styleResult.ok ? styleResult.value.style : 'classic',
+            previewVersion: book.updatedAt.getTime(),
+          }}
           photos={photos}
         />
       </Box>

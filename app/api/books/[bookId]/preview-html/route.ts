@@ -12,6 +12,14 @@ import {
   referencedAssetIds,
   type PhotoRef,
 } from '@/lib/book-content';
+import { renderPhotoBookHtml, type PhotoLayoutImage } from '@/lib/photo-book-layout';
+import {
+  loadOrBuildPhotoPlan,
+  loadPhotoBook,
+  photoAssetRenditionNeeds,
+  referencedPhotoAssetIds,
+  type PhotoBookPhotoRef,
+} from '@/lib/photo-book-content';
 
 /**
  * The live builder preview: the same layout plan the worker prints to PDF,
@@ -32,12 +40,12 @@ export async function GET(
   const session = await getSession();
   if (!session?.user) return new NextResponse('Unauthorized', { status: 401 });
 
-  // Access gate — loadBook itself does no membership check, so this must run first.
+  // Access gate — loadBook/loadPhotoBook themselves do no membership check, so this
+  // must run first.
   const book = await getBookForUser(bookId, session.user.id);
   if (!book) return new NextResponse('Not found', { status: 404 });
-  // Photo books have no layout plan / HTML preview yet (docs/PHOTO_BOOK_PLAN.md PR 2+);
-  // `loadBook` below assumes a story book (>= 1 chapter) and throws otherwise.
-  if (book.kind === 'photo') return new NextResponse('Not found', { status: 404 });
+
+  if (book.kind === 'photo') return photoBookPreview(bookId, book.chronicleName);
 
   const loaded = await loadBook(bookId);
   await backfillDimensionsFromThumbnails(loaded.allPhotosById);
@@ -102,6 +110,63 @@ export async function GET(
     plan,
     chapters,
     coverImage,
+    createdLabel: new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long' }),
+  });
+
+  return new NextResponse(html, {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
+/**
+ * Photo-book counterpart of the story-book preview above (docs/PHOTO_BOOK_PLAN.md PR2):
+ * build/resolve the plan (`loadOrBuildPhotoPlan`, `lib/photo-book-content.ts`), presign
+ * every photo the plan places — the ~1600px "display" rendition for full-page slots, the
+ * 640px thumbnail for grids (`photoAssetRenditionNeeds`) — and render it with the same
+ * Paged.js screen-variant plumbing as story books (`lib/photo-book-layout.ts`). Photo
+ * books have no per-viewer story-access hiding (docs/PHOTO_BOOK_PLAN.md §2: "every
+ * chronicle member with access to the book sees them"), so there's no hidden-content
+ * filtering step here — `getBookForUser`'s membership check above is the whole gate.
+ */
+async function photoBookPreview(bookId: string, chronicleName: string): Promise<NextResponse> {
+  const loaded = await loadPhotoBook(bookId);
+  const plan = await loadOrBuildPhotoPlan(bookId, loaded);
+
+  const byId = new Map(loaded.photos.map((p) => [p.assetId, p]));
+  const needed = referencedPhotoAssetIds(plan);
+  const renditionNeeds = photoAssetRenditionNeeds(plan);
+
+  async function resolveImage(photo: PhotoBookPhotoRef, level: 'display' | 'thumb'): Promise<PhotoLayoutImage | null> {
+    if (!photo.width || !photo.height) return null;
+    try {
+      const key =
+        (level === 'display' ? photo.displayS3Key : null) ?? photo.thumbS3Key ?? photo.s3Key;
+      const mime = key === photo.s3Key ? photo.mimeType : 'image/webp';
+      const src = await presignGet(key, mime);
+      return { assetId: photo.assetId, src, width: photo.width, height: photo.height };
+    } catch (e) {
+      console.error(`[preview-html] failed to presign photo ${photo.assetId}:`, e);
+      return null;
+    }
+  }
+
+  const resolved = new Map<string, PhotoLayoutImage>();
+  for (const id of needed) {
+    const photo = byId.get(id);
+    if (!photo || photo.excluded) continue;
+    const image = await resolveImage(photo, renditionNeeds.get(id) ?? 'thumb');
+    if (image) resolved.set(id, image);
+  }
+
+  const html = renderPhotoBookHtml({
+    variant: 'screen',
+    chronicleName,
+    trim: TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'],
+    plan,
+    images: resolved,
     createdLabel: new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long' }),
   });
 

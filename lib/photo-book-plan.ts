@@ -1,0 +1,241 @@
+import { z } from 'zod';
+
+/**
+ * The photo-book layout plan (docs/PHOTO_BOOK_PLAN.md §5): the photo-book counterpart of
+ * `lib/book-layout-plan.ts`'s `LayoutPlan`, stored in the same `books.layout_plan` jsonb
+ * column. Same philosophy: **layout is data** — the deterministic auto-layouter
+ * (`lib/photo-book-autolayout.ts`) writes this shape today; a future AI pass (PR3) and
+ * targeted builder/chat edits (PR4) write the same shape; `lib/photo-book-layout.ts`
+ * renders whatever validates against this schema.
+ *
+ * `books.layout_plan` is untyped jsonb shared by both book kinds — the discriminator
+ * between "this is a `LayoutPlan`" and "this is a `PhotoBookPlan`" is the OWNING ROW's
+ * `books.kind` column, not a field inside the JSON itself (mirrors how every caller today
+ * — `preview-html`, `getBookLayoutSummary`, `updateBookLayout` — already branches on
+ * `book.kind` before ever touching `layoutPlan`). `kind: 'photo'` is still stamped onto
+ * the plan itself as a defensive tag (so a plan accidentally loaded through the wrong
+ * validator fails fast instead of silently misparsing), but it is never the switch a
+ * caller reads first.
+ */
+
+/** PR2 ships 3 of the eventual 6 style suites (docs/PHOTO_BOOK_PLAN.md §7); `heirloom`,
+ *  `bold`, `journal` land in PR5. The canonical id list lives here (not
+ *  `lib/photo-book-styles.ts`) so the plan schema's `style` enum is the single source of
+ *  truth — `lib/photo-book-styles.ts` imports `PhotoBookStyle` and maps each id to its
+ *  design tokens, exactly like `LAYOUT_THEMES`/`THEME_TOKENS` split between
+ *  `lib/book-layout-plan.ts` and `lib/book-layout.ts`. */
+export const PHOTO_BOOK_STYLES = ['classic', 'modern', 'gallery'] as const;
+export type PhotoBookStyle = (typeof PHOTO_BOOK_STYLES)[number];
+
+/** The fixed layout vocabulary (docs/PHOTO_BOOK_PLAN.md §5 table). Slot counts are
+ *  enforced per-template below (mirrors `photoRowBlockSchema`/`photoGridBlockSchema` in
+ *  `lib/book-layout-plan.ts`, which do the same thing for the story plan's blocks). */
+export const PHOTO_PAGE_TEMPLATES = [
+  'full-bleed',
+  'full-framed',
+  'two-horizontal',
+  'two-vertical',
+  'three-column',
+  'three-mixed',
+  'collage-4',
+  'collage-5',
+  'divider',
+] as const;
+export type PhotoPageTemplate = (typeof PHOTO_PAGE_TEMPLATES)[number];
+
+/** How many photo slots each template takes — a fixed number, or a `{min,max}` range for
+ *  `divider` (a section opener with an optional single muted photo). Exported so both the
+ *  schema below and `lib/photo-book-autolayout.ts` (which never needs to import zod) share
+ *  one definition of "how many photos does a `two-horizontal` page take". */
+export const PHOTO_PAGE_TEMPLATE_SLOTS: Record<PhotoPageTemplate, { min: number; max: number }> = {
+  'full-bleed': { min: 1, max: 1 },
+  'full-framed': { min: 1, max: 1 },
+  'two-horizontal': { min: 2, max: 2 },
+  'two-vertical': { min: 2, max: 2 },
+  'three-column': { min: 3, max: 3 },
+  'three-mixed': { min: 3, max: 3 },
+  'collage-4': { min: 4, max: 4 },
+  'collage-5': { min: 5, max: 5 },
+  divider: { min: 0, max: 1 },
+};
+
+/** One page template variant, its `assetIds` arity fixed by `PHOTO_PAGE_TEMPLATE_SLOTS` —
+ *  a structural, non-content-dependent constraint, so (mirroring `photoRowBlockSchema`'s
+ *  `.length(2)`) it belongs in the zod schema itself, not the consistency checker. Content
+ *  checks (do these ids exist? are any reused?) still belong to
+ *  `checkPhotoBookPlanConsistency` below, same split as the story plan. */
+/** Only ever called with a FIXED-arity template (every one except `divider`) — the ranged
+ *  case (`divider`, 0-1 photos) is built separately below, since `z.array().length(n)`
+ *  has no variable-arity equivalent to fall back to. */
+function pageVariantSchema<T extends PhotoPageTemplate>(template: T) {
+  const { min, max } = PHOTO_PAGE_TEMPLATE_SLOTS[template];
+  if (min !== max) throw new Error(`pageVariantSchema is only for fixed-arity templates, got ${template}`);
+  return z.object({
+    template: z.literal(template),
+    assetIds: z.array(z.string()).length(min),
+    /** Per-photo captions, same order/length as `assetIds` when present — a dense
+     *  collage has no room for these (mirrors `.photo-grid figcaption { display: none }`
+     *  in `lib/book-layout.ts`), but the renderer, not this schema, decides that. */
+    captions: z.array(z.string().nullable()).length(min).optional(),
+  });
+}
+
+function pageVariantSchemaRanged<T extends PhotoPageTemplate>(template: T) {
+  const { min, max } = PHOTO_PAGE_TEMPLATE_SLOTS[template];
+  return z.object({
+    template: z.literal(template),
+    assetIds: z.array(z.string()).min(min).max(max),
+    captions: z.array(z.string().nullable()).max(max).optional(),
+  });
+}
+
+export const pagePlanSchema = z.discriminatedUnion('template', [
+  pageVariantSchema('full-bleed'),
+  pageVariantSchema('full-framed'),
+  pageVariantSchema('two-horizontal'),
+  pageVariantSchema('two-vertical'),
+  pageVariantSchema('three-column'),
+  pageVariantSchema('three-mixed'),
+  pageVariantSchema('collage-4'),
+  pageVariantSchema('collage-5'),
+  pageVariantSchemaRanged('divider'),
+]);
+export type PhotoPagePlan = z.infer<typeof pagePlanSchema>;
+
+const sectionPlanSchema = z.object({
+  /** "Sommer in Italien" (AI, later PR) or a date-range fallback like "Juni 2025"
+   *  (auto-layouter) — always non-empty, never blank white space in the TOC/divider. */
+  title: z.string().min(1),
+  dateLabel: z.string().optional(),
+  /** No `.min(1)` here on purpose — mirrors `chapterPlanSchema.blocks` (also
+   *  unconstrained) in `lib/book-layout-plan.ts`: whether a section is allowed to be
+   *  empty is a CONTENT question ("did culling remove every photo in it"), so it's
+   *  `checkPhotoBookPlanConsistency`'s job, not the schema's. */
+  pages: z.array(pagePlanSchema),
+});
+export type PhotoSectionPlan = z.infer<typeof sectionPlanSchema>;
+
+const coverPlanSchema = z.object({
+  /** Optional, like the story plan's `coverPlanSchema.heroAssetId` — a brand new photo
+   *  book with zero uploaded (or all-excluded) photos has no possible hero yet. */
+  heroAssetId: z.string().optional(),
+  title: z.string().min(1),
+  subtitle: z.string().optional(),
+  /** 0-3 small photos for the back cover (docs/PHOTO_BOOK_PLAN.md §5). PR2's
+   *  auto-layouter never populates this (see `lib/photo-book-autolayout.ts`'s header
+   *  comment) — the style suite still renders a complete, photo-free back design — but
+   *  the field exists now so PR3's AI pass and PR4's targeted edits have somewhere to
+   *  write it without a schema migration. */
+  backAssetIds: z.array(z.string()).max(3).optional(),
+});
+export type PhotoCoverPlan = z.infer<typeof coverPlanSchema>;
+
+export const photoBookPlanSchema = z.object({
+  /** Defensive self-tag — see the module header comment. Every photo-book plan is this
+   *  literal; the real dispatch key is the owning `books.kind` row. */
+  kind: z.literal('photo'),
+  style: z.enum(PHOTO_BOOK_STYLES),
+  cover: coverPlanSchema,
+  sections: z.array(sectionPlanSchema),
+});
+export type PhotoBookPlan = z.infer<typeof photoBookPlanSchema>;
+
+export interface PhotoBookPlanValidationError {
+  ok: false;
+  error: string;
+}
+
+/** Parses + validates a photo-book plan against the schema. Throws nothing; returns a
+ *  Result — same contract as `validateLayoutPlan` in `lib/book-layout-plan.ts`. */
+export function validatePhotoBookPlan(
+  data: unknown,
+): { ok: true; plan: PhotoBookPlan } | PhotoBookPlanValidationError {
+  const result = photoBookPlanSchema.safeParse(data);
+  if (!result.success) {
+    return { ok: false, error: result.error.issues.map((i) => i.message).join('; ') };
+  }
+  return { ok: true, plan: result.data };
+}
+
+/** Minimal shape of "what the photo book currently contains", for consistency checking —
+ *  the photo-book counterpart of `PlanContent` in `lib/book-layout-plan.ts`. */
+export interface PhotoPlanContent {
+  /** Every photo asset id currently available to the layout (i.e. `book_photos.excluded
+   *  = false`) — a plan may reference only these. */
+  availableAssetIds: string[];
+  /** Every photo asset id in the book at all, excluded or not — lets "references a photo
+   *  that's excluded right now" read differently from "references a photo that was
+   *  deleted / never belonged to this book". */
+  allAssetIds: string[];
+}
+
+/**
+ * Checks a plan against the book's current photo set: every referenced asset must exist
+ * in the book and not be excluded, no photo may be placed twice anywhere in the book
+ * (cover hero, cover back, or any section page), every template's `assetIds`/`captions`
+ * arity must still match (defense in depth — the schema already enforces this for a plan
+ * that came through `validatePhotoBookPlan`, but this function is also meant to be safe
+ * to call on a plan mutated after validation, e.g. by a future targeted-edit op), and no
+ * section may have zero pages. Mirrors `checkPlanConsistency`'s rigor in
+ * `lib/book-layout-plan.ts`. Used to decide whether a stored plan is still usable or must
+ * be regenerated (`books.layout_stale`).
+ */
+export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: PhotoPlanContent): string[] {
+  const problems: string[] = [];
+  const available = new Set(content.availableAssetIds);
+  const all = new Set(content.allAssetIds);
+  const usageCount = new Map<string, number>();
+
+  function reference(id: string, where: string) {
+    if (!all.has(id)) {
+      problems.push(`${where} references a photo that is not in this book: ${id}`);
+    } else if (!available.has(id)) {
+      problems.push(`${where} references an excluded photo: ${id}`);
+    }
+    usageCount.set(id, (usageCount.get(id) ?? 0) + 1);
+  }
+
+  if (plan.cover.heroAssetId) reference(plan.cover.heroAssetId, 'Cover');
+  for (const id of plan.cover.backAssetIds ?? []) reference(id, 'Cover back');
+
+  // A book with actual content (any section with at least one page) must have a cover
+  // hero — a printed photo book can't have a blank front cover. An empty book (no
+  // sections, or sections with no pages left after culling/exclusion) is still legal
+  // without one, same as a freshly created photo book with zero uploaded photos.
+  const hasContent = plan.sections.some((section) => section.pages.length > 0);
+  if (hasContent && !plan.cover.heroAssetId) {
+    problems.push('Cover has no heroAssetId, but the book has content');
+  }
+
+  for (const section of plan.sections) {
+    if (section.pages.length === 0) {
+      problems.push(`Section "${section.title}" has no pages`);
+      continue;
+    }
+    for (const page of section.pages) {
+      const slots = PHOTO_PAGE_TEMPLATE_SLOTS[page.template];
+      if (page.assetIds.length < slots.min || page.assetIds.length > slots.max) {
+        const expected = slots.min === slots.max ? `${slots.min}` : `${slots.min}-${slots.max}`;
+        problems.push(
+          `Section "${section.title}": a ${page.template} page has ${page.assetIds.length} photo(s), expected ${expected}`,
+        );
+      }
+      if (page.captions && page.captions.length !== page.assetIds.length) {
+        problems.push(
+          `Section "${section.title}": a ${page.template} page has ${page.captions.length} caption(s) for ${page.assetIds.length} photo(s)`,
+        );
+      }
+      for (const id of page.assetIds) reference(id, `Section "${section.title}"`);
+    }
+  }
+
+  for (const [id, count] of usageCount) {
+    if (count > 1) problems.push(`Photo ${id} is placed ${count} times in the book`);
+  }
+
+  return problems;
+}
+
+export function isPhotoBookPlanConsistent(plan: PhotoBookPlan, content: PhotoPlanContent): boolean {
+  return checkPhotoBookPlanConsistency(plan, content).length === 0;
+}
