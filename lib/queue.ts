@@ -71,6 +71,16 @@ const QUEUE_OPTIONS: Partial<Record<keyof typeof QUEUES, QueueOptions>> = {
   // worker (`handlePhotoVision`) marks the batch's still-unscored photos settled-but-
   // failed so the builder's analysis-progress poll can terminate.
   photoVision: { retryLimit: 4, retryDelay: 15, retryBackoff: true },
+  // The photo-book design pass is the longest-running job in the system: two vision calls
+  // with a Chromium proof render between them (`lib/photo-book-ai-layout.ts`), measured at
+  // ~3.5-4.5 minutes for a 36-photo book and scaling with photo count up to
+  // MAX_PHOTOS_PER_BOOK (300). pg-boss's default expiry is 15 minutes, which a large book
+  // could plausibly cross — and the default retry would then start a SECOND full pass
+  // (two more paid model calls) over a book whose first pass may still be running.
+  // Generous ceiling, and no retry: if a pass really dies, `isDesignInFlight`
+  // (`lib/photo-book-design-stage.ts`) releases the book after 20 minutes and the user can
+  // ask for it again deliberately, rather than silently paying for it twice.
+  designPhotoBook: { expireInSeconds: 1800, retryLimit: 0 },
 };
 
 const globalForBoss = globalThis as unknown as { __boss?: Promise<PgBoss> };
@@ -82,14 +92,25 @@ export async function getBoss(): Promise<PgBoss> {
       const boss = new PgBoss({ connectionString: env.DATABASE_URL });
       boss.on('error', (err) => console.error('[pg-boss] error', err));
       await boss.start();
-      // createQueue is required in pg-boss v10+; ignore "already exists" (also means
-      // QUEUE_OPTIONS only take effect for a queue's first-ever creation — fine here,
-      // this deploys before the queue exists anywhere).
+      // createQueue is required in pg-boss v10+. `createQueue` only applies QUEUE_OPTIONS
+      // when it actually creates the queue, so an already-existing queue would keep
+      // whatever options it was born with — which is how a policy change (e.g. giving
+      // `design-photo-book` a longer expiry once the pass grew a second model call) would
+      // silently never reach production. `updateQueue` afterwards makes the map above the
+      // real source of truth on every boot, for new and existing queues alike.
       for (const [key, name] of Object.entries(QUEUES) as [keyof typeof QUEUES, string][]) {
+        const options = QUEUE_OPTIONS[key];
         try {
-          await boss.createQueue(name, QUEUE_OPTIONS[key]);
+          await boss.createQueue(name, options);
         } catch {
           /* queue already exists */
+        }
+        if (!options) continue;
+        try {
+          await boss.updateQueue(name, options);
+        } catch (e) {
+          // Non-fatal: the queue keeps its previous options and the worker still runs.
+          console.error(`[pg-boss] could not update options for queue ${name}:`, e);
         }
       }
       return boss;

@@ -2,6 +2,8 @@ import {
   PHOTO_BOOK_STYLES,
   PHOTO_PAGE_TEMPLATES,
   PHOTO_PAGE_TEMPLATE_SLOTS,
+  photoOrientation,
+  templateRendersCaptions,
   type PhotoBookPlan,
   type PhotoBookStyle,
   type PhotoPagePlan,
@@ -189,22 +191,10 @@ export interface PhotoBookRepairResult {
   changes: string[];
 }
 
-type Orientation = 'portrait' | 'landscape' | 'square';
-
-/** Same thresholds as `classify` in `lib/photo-book-autolayout.ts` and `orientationOf` in
- *  `lib/photo-book-lint.ts` — see the latter's comment on keeping one definition. */
-function orientationOf(photo: LintPhoto): Orientation {
-  const ratio = photo.width / photo.height;
-  if (ratio < 0.9) return 'portrait';
-  if (ratio > 1.1) return 'landscape';
-  return 'square';
-}
-
-/** Templates that render captions at all (the inverse of `CAPTION_LESS_TEMPLATES` in
- *  `lib/photo-book-lint.ts`; `renderPage` in `lib/photo-book-layout.ts` is the authority). */
-function rendersCaptions(template: PhotoPageTemplate): boolean {
-  return template !== 'collage-4' && template !== 'collage-5' && template !== 'divider';
-}
+/** The shared definitions — see `photoOrientation`'s doc comment in
+ *  `lib/photo-book-plan.ts` for why these live in exactly one place. */
+const orientationOf = photoOrientation;
+const rendersCaptions = templateRendersCaptions;
 
 /**
  * The best template for a given set of photos — the shared "which layout fits these
@@ -215,9 +205,18 @@ function rendersCaptions(template: PhotoPageTemplate): boolean {
  *
  * Only ever called with 1-5 photos; `pageSizes` below is what guarantees that.
  */
-export function templateForGroup(photos: LintPhoto[]): { template: PhotoPageTemplate; ordered: LintPhoto[] } {
+export function templateForGroup(input: LintPhoto[]): { template: PhotoPageTemplate; ordered: LintPhoto[] } {
+  // Deduplicate FIRST, and pick the template from what survives. A model that lists the
+  // same photo twice on one page used to slip through here and come out as a `three-mixed`
+  // holding only two ids (the landscape-promotion below filtered by assetId, which removed
+  // both copies of the repeated one) — a schema-invalid page that failed validation and
+  // took the entire design down with it, which is precisely the single-duplicate failure
+  // this module exists to absorb.
+  const seen = new Set<string>();
+  const photos = input.filter((p) => !seen.has(p.assetId) && seen.add(p.assetId));
   const shapes = photos.map(orientationOf);
-  const landscapes = photos.filter((_, i) => shapes[i] === 'landscape');
+  // Index-based, so promotion can never depend on assetId uniqueness again.
+  const landscapeIndex = shapes.indexOf('landscape');
 
   switch (photos.length) {
     case 1:
@@ -233,10 +232,10 @@ export function templateForGroup(photos: LintPhoto[]): { template: PhotoPageTemp
     case 3:
       // A single landscape ruins a 3-up justified row (see `three-column`'s rule) — those
       // trios become `three-mixed` with the landscape promoted to the dominant slot.
-      return landscapes.length > 0
+      return landscapeIndex >= 0
         ? {
             template: 'three-mixed',
-            ordered: [landscapes[0], ...photos.filter((p) => p.assetId !== landscapes[0].assetId)],
+            ordered: [photos[landscapeIndex], ...photos.filter((_, i) => i !== landscapeIndex)],
           }
         : { template: 'three-column', ordered: photos };
     case 4:
@@ -279,7 +278,14 @@ function rebuildPage(page: PhotoPagePlan, survivors: LintPhoto[]): PhotoPagePlan
   if (survivors.length === 0) return null;
   const intact = survivors.length === page.assetIds.length;
   const captionsOk = !page.captions || page.captions.length === page.assetIds.length;
-  if (intact && captionsOk && templateFits(page.template, survivors)) return page;
+  // Arity is checked HERE and not assumed: this function's whole promise is that what it
+  // returns satisfies `checkPhotoBookPlanConsistency`, and an incoming page can already
+  // violate its template's slot count (a hand-edited stored plan, or a page an earlier
+  // coercion mis-grouped). Without this the fast path below waved such a page straight
+  // through and repair silently failed to repair it.
+  const slots = PHOTO_PAGE_TEMPLATE_SLOTS[page.template];
+  const arityOk = survivors.length >= slots.min && survivors.length <= slots.max;
+  if (intact && captionsOk && arityOk && templateFits(page.template, survivors)) return page;
 
   const captionFor = new Map<string, string | null>();
   page.assetIds.forEach((id, i) => captionFor.set(id, page.captions?.[i] ?? null));
@@ -407,20 +413,39 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
       used.add(spare.assetId);
       changes.push(`picked ${spare.assetId} as the cover hero (the plan had none)`);
     } else {
-      const first = repaired[0].pages[0];
-      const borrowedId = first.assetIds[0];
-      const remaining = first.assetIds
-        .slice(1)
-        .map((id) => byId.get(id))
-        .filter((p): p is LintPhoto => p != null);
-      const rebuilt = remaining.length > 0 ? rebuildPage(first, remaining) : null;
-      const pages = rebuilt ? [rebuilt, ...repaired[0].pages.slice(1)] : repaired[0].pages.slice(1);
-      repaired =
-        pages.length > 0
-          ? [{ ...repaired[0], pages }, ...repaired.slice(1)]
-          : repaired.slice(1);
-      cover.heroAssetId = borrowedId;
-      changes.push(`promoted ${borrowedId} from page one to the cover hero (the plan had none)`);
+      // Borrow from the first page that actually HOLDS a photo — not simply the first page,
+      // which may be a photo-less `divider`. Taking `assetIds[0]` off one of those set the
+      // hero to `undefined` while the book still had content, so the plan failed the
+      // "content needs a cover" consistency rule and was thrown away — in the stale-plan
+      // path that meant the AI design got overwritten by the auto layout, the exact
+      // destruction this module exists to prevent.
+      const si = repaired.findIndex((s) => s.pages.some((p) => p.assetIds.length > 0));
+      const pi = si >= 0 ? repaired[si].pages.findIndex((p) => p.assetIds.length > 0) : -1;
+      if (si >= 0 && pi >= 0) {
+        const donor = repaired[si].pages[pi];
+        const borrowedId = donor.assetIds[0];
+        const remaining = donor.assetIds
+          .slice(1)
+          .map((id) => byId.get(id))
+          .filter((p): p is LintPhoto => p != null);
+        const rebuilt = remaining.length > 0 ? rebuildPage(donor, remaining) : null;
+        const pages = rebuilt
+          ? repaired[si].pages.map((p, i) => (i === pi ? rebuilt : p))
+          : repaired[si].pages.filter((_, i) => i !== pi);
+        repaired =
+          pages.length > 0
+            ? repaired.map((s, i) => (i === si ? { ...s, pages } : s))
+            : repaired.filter((_, i) => i !== si);
+        cover.heroAssetId = borrowedId;
+        changes.push(`promoted ${borrowedId} from a section page to the cover hero (the plan had none)`);
+      } else {
+        // Every remaining page is a photo-less divider, so there is no hero to be had and
+        // nothing to show. Drop those pages rather than return a plan that claims content
+        // it can't cover — an empty plan is at least a legal one, and the caller treats it
+        // as "nothing usable here" (`photoBookPlanHasContent`, `lib/photo-book-plan.ts`).
+        changes.push('dropped section openers that had no photos left to open');
+        repaired = [];
+      }
     }
   }
 

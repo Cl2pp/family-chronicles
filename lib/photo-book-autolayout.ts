@@ -1,7 +1,13 @@
 import { hammingDistance } from '@/lib/photo-hash';
 import { DEFAULT_PHOTO_BOOK_GROUPING, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
-import type { PhotoBookPlan, PhotoBookStyle, PhotoPagePlan, PhotoSectionPlan } from '@/lib/photo-book-plan';
+import {
+  photoOrientation,
+  type PhotoBookPlan,
+  type PhotoBookStyle,
+  type PhotoPagePlan,
+  type PhotoSectionPlan,
+} from '@/lib/photo-book-plan';
 
 /**
  * The photo-book deterministic auto-layouter (docs/PHOTO_BOOK_PLAN.md §6, producer #1) —
@@ -163,15 +169,9 @@ const BLUR_RELATIVE_THRESHOLD = 0.12;
 /** Never blur-cull a section (or the whole book, for cover-picking) down to zero. */
 const MIN_SURVIVORS = 1;
 
-/** Aspect-ratio buckets driving template choice (docs/PHOTO_BOOK_PLAN.md §6 pacing). */
-type Orientation = 'portrait' | 'landscape' | 'square';
-
-function classify(p: AutoLayoutPhoto): Orientation {
-  const ratio = p.width / p.height;
-  if (ratio < 0.9) return 'portrait';
-  if (ratio > 1.1) return 'landscape';
-  return 'square';
-}
+/** Aspect-ratio classification driving template choice (docs/PHOTO_BOOK_PLAN.md §6 pacing)
+ *  — the one shared definition, see `photoOrientation` in `lib/photo-book-plan.ts`. */
+const classify = photoOrientation;
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;

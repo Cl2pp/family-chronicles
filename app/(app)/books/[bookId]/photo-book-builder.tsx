@@ -150,17 +150,23 @@ export function PhotoBookBuilder({
   const [awaitingDownload, setAwaitingDownload] = useState(false);
   const [designStage, setDesignStage] = useState<PhotoBookDesignStage | null>(book.designStage);
   const [serverStage, setServerStage] = useState<PhotoBookDesignStage | null>(book.designStage);
-  // Land on the book itself when there is one. The wizard used to always mount at step 1
-  // (upload), so coming back to a finished book meant clicking forward to find it again —
-  // and, worse, step 2's preview iframe was mounted inside a `display: none` panel the
-  // whole time, which is what made it come up blank (see `PhotoBookCreateStep`).
-  const [step, setStep] = useState(book.generatedAt ? 1 : 0);
   const isEdited = book.layoutSource === 'edited';
 
   const locked = book.status === 'ordered';
   const totalCount = photos.length;
   const settledCount = photos.filter((p) => p.metaSettled).length;
   const analysisComplete = totalCount > 0 && settledCount >= totalCount;
+
+  // Land on the book itself when there is one. The wizard used to always mount at step 1
+  // (upload), so coming back to a finished book meant clicking forward to find it again —
+  // and, worse, step 2's preview iframe was mounted inside a `display: none` panel the
+  // whole time, which is what made it come up blank (see `PhotoBookCreateStep`).
+  //
+  // Gated by the SAME predicate as `goToStep` below, not merely by `generatedAt`: a
+  // generated book whose newly-added photos are still being analysed must not open on the
+  // create step, or "Design again" would run over photos that have no vision scores yet
+  // (and, in by-topic mode, land every one of them in the untagged leftover section).
+  const [step, setStep] = useState(canAccessPhotoBookStep(1, analysisComplete, book.generatedAt) ? 1 : 0);
 
   // Analysis runs server-side (the `photo-meta` and `photo-vision` worker jobs) with no
   // other signal the client can see — poll while photos are still unsettled, same
@@ -335,15 +341,11 @@ export function PhotoBookBuilder({
   }
 
   /**
-   * The config panel's "organise by" choice (`lib/photo-book-grouping.ts`). Unlike the
-   * other settings this one decides what a SECTION is, which no in-place patch can apply
-   * to an existing plan — so on a book that has already been generated, saving it is
-   * immediately followed by a fresh design pass. Before the first generation it's just a
-   * saved preference that the upcoming "Buch erstellen" will use.
-   *
-   * The design pass is only auto-triggered for a plan the user hasn't hand-edited: silently
-   * discarding manual edits is exactly what the consent modal exists to prevent, so an
-   * edited book saves the setting and leaves the re-design to the explicit button.
+   * The config panel's "organise by" choice (`lib/photo-book-grouping.ts`). Whether saving
+   * it also re-designs the book is decided SERVER-side, in `updatePhotoBookSettings` — the
+   * rule ("re-sectioning needs a real design pass, unless the layout was hand-edited")
+   * belongs with the mutation so every caller obeys it, not just this panel. All that's
+   * left here is telling the user which of those happened.
    */
   function setGrouping(photoGrouping: PhotoBookGrouping) {
     if (photoGrouping === book.photoGrouping) return;
@@ -353,10 +355,7 @@ export function PhotoBookBuilder({
         notifications.show({ message: result.error, color: 'red' });
         return;
       }
-      if (book.generatedAt && !isEdited) {
-        const design = await requestPhotoBookAiDesignAction({ bookId: book.id });
-        if (design.error) notifications.show({ message: design.error, color: 'red' });
-      } else if (book.generatedAt) {
+      if (result.redesign === 'skipped-edited') {
         notifications.show({ message: tp.config.groupingNeedsRedesign, color: 'blue' });
       }
       router.refresh();

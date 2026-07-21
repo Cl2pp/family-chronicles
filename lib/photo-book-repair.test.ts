@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { checkPhotoBookPlanConsistency, type PhotoBookPlan } from '@/lib/photo-book-plan';
+import {
+  checkPhotoBookPlanConsistency,
+  photoBookPlanHasContent,
+  validatePhotoBookPlan,
+  type PhotoBookPlan,
+} from '@/lib/photo-book-plan';
 import { lintPhotoBookPlan, type LintPhoto } from '@/lib/photo-book-lint';
-import { repairPhotoBookPlan, templateForGroup } from '@/lib/photo-book-repair';
+import { coercePhotoBookPlan, repairPhotoBookPlan, templateForGroup } from '@/lib/photo-book-repair';
 
 const portrait = (id: string): LintPhoto => ({ assetId: id, width: 3000, height: 4000 });
 const landscape = (id: string): LintPhoto => ({ assetId: id, width: 4000, height: 3000 });
@@ -144,5 +149,93 @@ describe('repairPhotoBookPlan', () => {
     const { plan: repaired } = repairPhotoBookPlan(plan, { photos });
     expect(repaired.sections[0].pages[0].template).toBe('three-mixed');
     expect(lintPhotoBookPlan(repaired, photos).filter((f) => f.code === 'template-orientation')).toEqual([]);
+  });
+});
+
+/**
+ * Regressions from the code review of the design-pass hardening PR. Each of these was a
+ * live defect in the first cut: the module written so that ONE small flaw can't destroy a
+ * design still let three separate small flaws destroy it (or, worse, quietly persist a book
+ * with nothing in it).
+ */
+describe('repair regressions', () => {
+  it('survives the same photo listed twice on one page', () => {
+    // Was: the 3-photo path promoted a landscape by filtering on assetId, which removed BOTH
+    // copies of the repeated id and left a `three-mixed` page holding two photos — schema
+    // invalid, so the whole plan was discarded and the book fell back to the auto layout.
+    const photos = [landscape('a'), portrait('b'), landscape('hero')];
+    const raw = {
+      kind: 'photo',
+      style: 'classic',
+      cover: { title: 'T', heroAssetId: 'hero' },
+      sections: [{ title: 'S', pages: [{ template: 'collage-4', assetIds: ['a', 'a', 'b'] }] }],
+    };
+    const coerced = coercePhotoBookPlan(raw, { photos, fallbackTitle: 'T', fallbackStyle: 'classic' })!;
+    const { plan } = repairPhotoBookPlan(coerced.plan, { photos });
+    const validated = validatePhotoBookPlan(plan);
+    expect(validated.ok).toBe(true);
+    expect(checkPhotoBookPlanConsistency(plan, contentOf(photos))).toEqual([]);
+  });
+
+  it('takes the cover hero from a page that has one, not from a photo-less divider', () => {
+    // Was: it always borrowed from `pages[0]`, so a section opening with an empty divider
+    // produced `heroAssetId: undefined` on a book that still had content — rejected by the
+    // consistency check, which in the stale-plan path meant the AI design was overwritten.
+    const photos = [portrait('a'), portrait('b'), portrait('c')];
+    const plan = planOf([
+      {
+        title: 'S',
+        pages: [
+          { template: 'divider', assetIds: [] },
+          { template: 'three-column', assetIds: ['a', 'b', 'c'] },
+        ],
+      },
+    ]);
+    const { plan: repaired } = repairPhotoBookPlan(plan, { photos });
+    expect(repaired.cover.heroAssetId).toBe('a');
+    expect(checkPhotoBookPlanConsistency(repaired, contentOf(photos))).toEqual([]);
+  });
+
+  it('re-fits a page whose stored template no longer matches its photo count', () => {
+    // Was: the "nothing changed" fast path returned any intact page untouched without
+    // re-checking arity, so repair could not fix a mismatch it inherited — breaking its own
+    // documented guarantee that the result passes the consistency check.
+    const photos = [landscape('hero'), portrait('a'), portrait('b')];
+    // A stored plan hand-edited into an illegal shape: three-column with only two photos.
+    const plan = {
+      kind: 'photo',
+      style: 'classic',
+      cover: { title: 'T', heroAssetId: 'hero' },
+      sections: [{ title: 'S', pages: [{ template: 'three-column', assetIds: ['a', 'b'] }] }],
+    } as unknown as PhotoBookPlan;
+    const { plan: repaired } = repairPhotoBookPlan(plan, { photos });
+    expect(validatePhotoBookPlan(repaired).ok).toBe(true);
+    expect(repaired.sections[0].pages[0]).toMatchObject({ template: 'two-vertical', assetIds: ['a', 'b'] });
+  });
+
+  it('reports "no content" when every photo the model named is unusable', () => {
+    // Was: this repaired to zero sections, which is legal AND consistency-clean (no content
+    // means no cover hero is required), so the design pass persisted it as an AI design and
+    // the user got a front cover, a back cover, and nothing in between.
+    const photos = [landscape('a'), portrait('b')];
+    const raw = {
+      kind: 'photo',
+      style: 'classic',
+      cover: { title: 'T' },
+      sections: [{ title: 'S', pages: [{ template: 'two-vertical', assetIds: ['zz', 'yy'] }] }],
+    };
+    const coerced = coercePhotoBookPlan(raw, { photos, fallbackTitle: 'T', fallbackStyle: 'classic' })!;
+    const { plan } = repairPhotoBookPlan(coerced.plan, { photos });
+    expect(checkPhotoBookPlanConsistency(plan, contentOf(photos))).toEqual([]);
+    // ...which is exactly why the caller must ask this separate question before storing it.
+    expect(photoBookPlanHasContent(plan)).toBe(false);
+  });
+
+  it('does not mistake a book of empty section openers for content', () => {
+    const photos = [portrait('a')];
+    const plan = planOf([{ title: 'S', pages: [{ template: 'divider', assetIds: [] }] }]);
+    const { plan: repaired } = repairPhotoBookPlan(plan, { photos });
+    expect(photoBookPlanHasContent(repaired)).toBe(false);
+    expect(checkPhotoBookPlanConsistency(repaired, contentOf(photos))).toEqual([]);
   });
 });

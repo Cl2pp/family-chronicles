@@ -18,6 +18,8 @@ import {
   PHOTO_BOOK_STYLES,
   PHOTO_PAGE_TEMPLATES,
   PHOTO_PAGE_TEMPLATE_SLOTS,
+  photoBookPlanHasContent,
+  photoOrientation,
   type PhotoBookPlan,
   type PhotoPlanContent,
 } from '@/lib/photo-book-plan';
@@ -70,9 +72,10 @@ const MAX_VISION_IMAGES = 40;
  *  outrank a photo the vision pass actively liked. */
 const NEUTRAL_RANK_SCORE = 5;
 
-function orientation(width: number, height: number): 'landscape' | 'portrait' | 'square' {
-  const ratio = width / height;
-  return ratio > 1.1 ? 'landscape' : ratio < 0.9 ? 'portrait' : 'square';
+/** The one shared definition (`lib/photo-book-plan.ts`), so the shape printed for each
+ *  photo in the prompt is exactly the shape the design check will judge it by. */
+function orientation(width: number, height: number): string {
+  return photoOrientation({ width, height });
 }
 
 /** Ranks a photo for vision-image selection: explicit `coverCandidate` first, then
@@ -459,6 +462,19 @@ function acceptPlan(
     .filter((id) => !referenced.has(id));
   if (missing.length > 0) {
     console.error(`[photo-book-ai-layout] ${label} for ${bookId} still omits force-included photo(s):`, missing);
+    return null;
+  }
+
+  // An empty plan is legal — `checkPhotoBookPlanConsistency` doesn't even require a cover
+  // hero once there's no content to cover — but it is not a BOOK. If the model referenced
+  // nothing usable (hallucinated ids, or every photo it named has since been excluded),
+  // coerce+repair correctly reduce that to zero sections, and without this check the worker
+  // would persist those zero sections as `layout_source: 'ai'` with `generated_at` stamped:
+  // the user clicks "Buch erstellen" and gets a front cover, a back cover, and nothing in
+  // between, while the auto layout that would have produced a real book is never reached.
+  // Treat it as "no usable plan" so the caller falls back.
+  if (!photoBookPlanHasContent(validated.plan)) {
+    console.error(`[photo-book-ai-layout] ${label} for ${bookId} placed no photos at all — treating as unusable`);
     return null;
   }
 

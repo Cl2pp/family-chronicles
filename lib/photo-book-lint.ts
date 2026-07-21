@@ -1,5 +1,11 @@
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
-import type { PhotoBookPlan, PhotoPageTemplate } from '@/lib/photo-book-plan';
+import {
+  CAPTION_LESS_TEMPLATES,
+  photoOrientation,
+  type PhotoBookPlan,
+  type PhotoOrientation,
+  type PhotoPageTemplate,
+} from '@/lib/photo-book-plan';
 
 /**
  * Deterministic design review of a finished `PhotoBookPlan` — "does this layout actually
@@ -59,17 +65,12 @@ export interface LintPhoto {
   analysis?: PhotoAnalysis | null;
 }
 
-type Orientation = 'portrait' | 'landscape' | 'square';
+type Orientation = PhotoOrientation;
 
-/** Same thresholds as `classify` in `lib/photo-book-autolayout.ts` — one definition of
- *  "portrait" across the layouter, the linter, and the AI prompt keeps the rules the model
- *  is told identical to the rules it's judged by. */
-function orientationOf(photo: LintPhoto): Orientation {
-  const ratio = photo.width / photo.height;
-  if (ratio < 0.9) return 'portrait';
-  if (ratio > 1.1) return 'landscape';
-  return 'square';
-}
+/** The one shared definition (`photoOrientation`, `lib/photo-book-plan.ts`) — see its doc
+ *  comment for why the layouter, this check, the repair pass and the prompt must not each
+ *  keep their own copy of the thresholds. */
+const orientationOf = photoOrientation;
 
 /**
  * Which photo shapes each template actually renders well, and why — the single source of
@@ -160,9 +161,6 @@ const WEAK_AESTHETIC = 3.5;
 const MAX_TEMPLATE_RUN = 2;
 /** A section with fewer pages than this doesn't earn its own divider. */
 const MIN_SECTION_PAGES = 2;
-/** Templates whose renderer intentionally drops captions (`renderPage` in
- *  `lib/photo-book-layout.ts` — a dense mosaic has no room, a divider already has a title). */
-const CAPTION_LESS_TEMPLATES: PhotoPageTemplate[] = ['collage-4', 'collage-5', 'divider'];
 
 /** Every assetId the plan places anywhere — a local copy of `referencedPhotoAssetIds`
  *  (`lib/photo-book-content.ts`), which can't be imported here without dragging `@/db` and

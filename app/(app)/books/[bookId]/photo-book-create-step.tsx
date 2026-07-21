@@ -55,6 +55,11 @@ import type { PhotoBookInfo, PhotoBookPhotoView } from './photo-book-builder';
  *  top-left corner of page one instead of the whole page; `fitPages()` in
  *  `lib/photo-book-layout.ts` does the matching client-side zoom-to-fit inside whatever
  *  height this aspect ratio produces. */
+/** Below this share of photos carrying what a grouping needs (GPS for "by place", a vision
+ *  score for "by topic"), the panel warns before the option is picked — the clustering would
+ *  collapse into one meaningless chapter. */
+const MIN_GROUPING_COVERAGE = 0.5;
+
 const TRIM_ASPECT: Record<BookFormat, number> = {
   'hardcover-21x28': 210 / 280,
   'hardcover-20x20': 200 / 200,
@@ -113,18 +118,21 @@ function PhotoBookConfigPanel({
   const usable = photos.filter((p) => !p.excluded);
   const withLocation = usable.filter((p) => p.hasLocation).length;
   const withAnalysis = usable.filter((p) => p.hasAnalysis).length;
-  const coverage =
-    book.photoGrouping === 'location'
-      ? withLocation / Math.max(1, usable.length)
-      : book.photoGrouping === 'topic'
-        ? withAnalysis / Math.max(1, usable.length)
-        : 1;
-  const groupingWarning =
-    usable.length > 0 && coverage < 0.5
-      ? book.photoGrouping === 'location'
-        ? tc.groupingWarnings.location(withLocation, usable.length)
-        : tc.groupingWarnings.topic(withAnalysis, usable.length)
-      : null;
+  /** The caveat for one option, or null. Computed PER OPTION rather than for the saved
+   *  grouping, because clicking an option is what commits it — and on an
+   *  already-generated book that immediately spends a full design pass. A warning that
+   *  only appeared afterwards would be telling the user about a mistake they had already
+   *  paid for. */
+  function warningFor(option: PhotoBookGrouping): string | null {
+    if (usable.length === 0) return null;
+    if (option === 'location' && withLocation < usable.length * MIN_GROUPING_COVERAGE) {
+      return tc.groupingWarnings.location(withLocation, usable.length);
+    }
+    if (option === 'topic' && withAnalysis < usable.length * MIN_GROUPING_COVERAGE) {
+      return tc.groupingWarnings.topic(withAnalysis, usable.length);
+    }
+    return null;
+  }
 
   return (
     <Stack gap="md">
@@ -157,27 +165,32 @@ function PhotoBookConfigPanel({
           {tc.groupingIntro}
         </Text>
         <Stack gap={6}>
-          {PHOTO_BOOK_GROUPINGS.map((option) => (
-            <Button
-              key={option}
-              size="compact-sm"
-              variant={option === book.photoGrouping ? 'filled' : 'default'}
-              disabled={disabled}
-              justify="flex-start"
-              onClick={() => option !== book.photoGrouping && onSetGrouping(option)}
-            >
-              {tc.groupingOptions[option]}
-            </Button>
-          ))}
+          {PHOTO_BOOK_GROUPINGS.map((option) => {
+            const warning = warningFor(option);
+            return (
+              <Box key={option}>
+                <Button
+                  fullWidth
+                  size="compact-sm"
+                  variant={option === book.photoGrouping ? 'filled' : 'default'}
+                  disabled={disabled}
+                  justify="flex-start"
+                  onClick={() => option !== book.photoGrouping && onSetGrouping(option)}
+                >
+                  {tc.groupingOptions[option]}
+                </Button>
+                {warning && (
+                  <Text fz={11} c="orange.7" mt={3}>
+                    {warning}
+                  </Text>
+                )}
+              </Box>
+            );
+          })}
         </Stack>
         <Text fz={11} c="dimmed" mt={6}>
           {tc.groupingHints[book.photoGrouping]}
         </Text>
-        {groupingWarning && (
-          <Text fz={11} c="orange.7" mt={4}>
-            {groupingWarning}
-          </Text>
-        )}
       </Box>
       <Box>
         <Text fz={13} fw={500} mb={6}>

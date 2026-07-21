@@ -25,6 +25,7 @@ import {
   updateBookLayout,
   updatePhotoBookSettings,
   type AddBookPhotoInput,
+  type UpdatePhotoBookSettingsOutcome,
   type BookPhotoItem,
   type LayoutOp,
 } from '@/lib/books';
@@ -213,11 +214,11 @@ export async function updatePhotoBookSettingsAction(input: {
   format?: BookFormat;
   coverType?: BookCoverType;
   photoGrouping?: PhotoBookGrouping;
-}): Promise<{ error?: string }> {
+}): Promise<{ error?: string; redesign?: UpdatePhotoBookSettingsOutcome['redesign'] }> {
   const user = await requireUser();
   const result = await updatePhotoBookSettings({ ...input, userId: user.id });
   if (result.ok) revalidatePath(`/books/${input.bookId}`);
-  return result.ok ? {} : { error: result.error };
+  return result.ok ? { redesign: result.value.redesign } : { error: result.error };
 }
 
 export async function updateBookAction(input: {

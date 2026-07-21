@@ -966,12 +966,20 @@ export async function updatePhotoBookSettings(input: {
   format?: BookFormat;
   coverType?: BookCoverType;
   photoGrouping?: PhotoBookGrouping;
-}): Promise<Result> {
+}): Promise<Result<UpdatePhotoBookSettingsOutcome>> {
   const gate = await editablePhotoBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
 
   const [row] = await db
-    .select({ title: books.title, subtitle: books.subtitle, layoutPlan: books.layoutPlan })
+    .select({
+      title: books.title,
+      subtitle: books.subtitle,
+      layoutPlan: books.layoutPlan,
+      photoGrouping: books.photoGrouping,
+      layoutSource: books.layoutSource,
+      generatedAt: books.generatedAt,
+      designRequestedAt: books.designRequestedAt,
+    })
     .from(books)
     .where(eq(books.id, input.bookId))
     .limit(1);
@@ -993,11 +1001,11 @@ export async function updatePhotoBookSettings(input: {
   if (input.subtitle !== undefined) set.subtitle = nextSubtitle;
   if (input.format !== undefined) set.format = input.format;
   if (input.coverType !== undefined) set.coverType = input.coverType;
-  // Only takes effect the next time the book is generated — it decides what a section IS,
-  // which is not something that can be patched into an existing plan the way a cover title
-  // can. Deliberately does NOT flip `layoutStale`: that would make the next page load
-  // rebuild the book behind the user's back (and, for an AI-designed book, only repair it —
-  // repair never re-sections). The builder wires the control to a regenerate instead.
+  // Deliberately does NOT flip `layoutStale`: that would make the next page load rebuild
+  // the book behind the user's back (and for an AI-designed book only REPAIR it, which
+  // never re-sections). Re-sectioning needs a real design pass, queued below.
+  const groupingChanged =
+    input.photoGrouping !== undefined && input.photoGrouping !== parsePhotoGrouping(row.photoGrouping);
   if (input.photoGrouping !== undefined) set.photoGrouping = input.photoGrouping;
 
   const coverTextChanged =
@@ -1027,7 +1035,37 @@ export async function updatePhotoBookSettings(input: {
   }
 
   await db.update(books).set(set).where(eq(books.id, input.bookId));
-  return { ok: true };
+
+  // Changing how the book is ORGANISED changes what a section is, which no in-place patch
+  // can express — the book has to be designed again. That rule lives here, with the
+  // mutation, rather than in the builder: `lib/books.ts` is the one place book state
+  // changes (AGENTS.md), so every caller — the config panel, the chat agent, anything
+  // later — gets the same behaviour instead of the UI having to remember to re-trigger it.
+  // A book that has never been generated needs nothing: the first "Buch erstellen" will
+  // read the new setting. A hand-edited layout is left alone, because auto-designing over
+  // manual edits is exactly what the consent prompt exists to prevent.
+  if (groupingChanged && row.generatedAt) {
+    if (row.layoutSource === 'edited') {
+      return { ok: true, value: { redesign: 'skipped-edited' } };
+    }
+    if (isDesignInFlight(row.designRequestedAt)) {
+      return { ok: true, value: { redesign: 'already-running' } };
+    }
+    await db
+      .update(books)
+      .set({ designRequestedAt: new Date(), designStage: 'preparing' })
+      .where(eq(books.id, input.bookId));
+    await enqueueDesignPhotoBook({ bookId: input.bookId });
+    return { ok: true, value: { redesign: 'queued' } };
+  }
+
+  return { ok: true, value: { redesign: 'not-needed' } };
+}
+
+/** What `updatePhotoBookSettings` did about re-designing the book, so the UI can say so
+ *  without re-deriving the rule (see the end of that function). */
+export interface UpdatePhotoBookSettingsOutcome {
+  redesign: 'not-needed' | 'queued' | 'skipped-edited' | 'already-running';
 }
 
 /**

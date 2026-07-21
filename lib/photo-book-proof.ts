@@ -1,6 +1,5 @@
-import puppeteer from 'puppeteer';
 import sharp from 'sharp';
-import { env } from '@/lib/env';
+import { withChromium } from '@/lib/chromium';
 import { getObjectBuffer } from '@/lib/s3';
 import { renderPhotoBookHtml, type PhotoLayoutImage } from '@/lib/photo-book-layout';
 import { embeddedFontFaceCss } from '@/lib/photo-book-fonts';
@@ -153,7 +152,6 @@ export async function renderProofPages(
   if (wantedIndices.length === 0) return [];
   const { labels } = planPageLabels(plan);
 
-  let browser;
   try {
     const images = await embedImages(loaded, plan);
     const html = renderPhotoBookHtml({
@@ -172,39 +170,37 @@ export async function renderProofPages(
       watermarkText: '',
     });
 
-    browser = await puppeteer.launch({
-      executablePath: env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
-    });
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1200, height: 1600, deviceScaleFactor: 1 });
-    await page.setContent(html, { waitUntil: 'load', timeout: 120_000 });
+    // Shared, serialized browser (`lib/chromium.ts`) — a proof render must never run a
+    // second Chromium alongside a print render on the same box.
+    return await withChromium('photo-book proof', async (browser) => {
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1200, height: 1600, deviceScaleFactor: 1 });
+      await page.setContent(html, { waitUntil: 'load', timeout: 120_000 });
 
-    const handles = await page.$$('section.page');
-    const out: ProofPageImage[] = [];
-    for (const index of wantedIndices) {
-      const handle = handles[index];
-      if (!handle) continue;
-      try {
-        const shot = (await handle.screenshot({ type: 'png' })) as Buffer;
-        const jpeg = await sharp(shot)
-          .resize({ width: PROOF_MAX_EDGE, height: PROOF_MAX_EDGE, fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: PROOF_JPEG_QUALITY, mozjpeg: true })
-          .toBuffer();
-        out.push({
-          index,
-          label: labels[index] ?? `page ${index}`,
-          dataUri: `data:image/jpeg;base64,${jpeg.toString('base64')}`,
-        });
-      } catch (e) {
-        console.warn(`[photo-book-proof] failed to screenshot page ${index}:`, e);
+      const handles = await page.$$('section.page');
+      const out: ProofPageImage[] = [];
+      for (const index of wantedIndices) {
+        const handle = handles[index];
+        if (!handle) continue;
+        try {
+          const shot = (await handle.screenshot({ type: 'png' })) as Buffer;
+          const jpeg = await sharp(shot)
+            .resize({ width: PROOF_MAX_EDGE, height: PROOF_MAX_EDGE, fit: 'inside', withoutEnlargement: true })
+            .jpeg({ quality: PROOF_JPEG_QUALITY, mozjpeg: true })
+            .toBuffer();
+          out.push({
+            index,
+            label: labels[index] ?? `page ${index}`,
+            dataUri: `data:image/jpeg;base64,${jpeg.toString('base64')}`,
+          });
+        } catch (e) {
+          console.warn(`[photo-book-proof] failed to screenshot page ${index}:`, e);
+        }
       }
-    }
-    return out;
+      return out;
+    });
   } catch (e) {
     console.error('[photo-book-proof] proof render failed, continuing without page images:', e);
     return [];
-  } finally {
-    await browser?.close().catch(() => {});
   }
 }
