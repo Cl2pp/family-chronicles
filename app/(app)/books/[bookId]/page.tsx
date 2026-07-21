@@ -49,6 +49,8 @@ export default async function BookBuilderPage({
         excluded: p.excluded,
         metaSettled: p.metaSettled,
         metaFailed: p.metaFailed,
+        hasLocation: p.hasLocation,
+        hasAnalysis: p.hasAnalysis,
       })),
     );
 
@@ -96,6 +98,7 @@ export default async function BookBuilderPage({
             previewVersion: book.updatedAt.getTime(),
             designing: isDesignInFlight(book.designRequestedAt),
             designStage: parseDesignStage(book.designStage),
+            photoGrouping: book.photoGrouping,
             generatedAt: book.generatedAt ? book.generatedAt.toISOString() : null,
             layoutSource: book.layoutSource,
             layoutStale: book.layoutStale,

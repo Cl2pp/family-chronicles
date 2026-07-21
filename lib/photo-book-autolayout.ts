@@ -1,4 +1,5 @@
 import { hammingDistance } from '@/lib/photo-hash';
+import { DEFAULT_PHOTO_BOOK_GROUPING, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
 import type { PhotoBookPlan, PhotoBookStyle, PhotoPagePlan, PhotoSectionPlan } from '@/lib/photo-book-plan';
 
@@ -106,6 +107,10 @@ export interface PhotoBookAutoLayoutInput {
   /** Title for the trailing section holding photos with no capture time at all.
    *  Defaults to a German label, same reasoning as `dateLocale`. */
   undatedSectionTitle?: string;
+  /** How the user asked for this book to be organised (`books.photo_grouping`, see
+   *  `lib/photo-book-grouping.ts`). Defaults to chronological — what every book did before
+   *  the setting existed. */
+  grouping?: PhotoBookGrouping;
   /** Every photo currently AVAILABLE to the layout — i.e. `book_photos.excluded = false`
    *  (a user's own exclusions are never second-guessed here; see the module header). */
   photos: AutoLayoutPhoto[];
@@ -292,7 +297,27 @@ function dateRangeLabel(min: Date, max: Date, locale: string): string {
   return `${monthYear(min, locale)} – ${monthYear(max, locale)}`;
 }
 
-function sectionTitle(photos: AutoLayoutPhoto[], locale: string, undatedTitle: string): string {
+function sectionTitle(
+  photos: AutoLayoutPhoto[],
+  locale: string,
+  undatedTitle: string,
+  grouping: PhotoBookGrouping = DEFAULT_PHOTO_BOOK_GROUPING,
+): string {
+  // A by-topic section is defined by what it shows, so a date range would actively
+  // mislabel it — name it after its most common scene tag instead. Those tags come out of
+  // the vision pass in English (`lib/photo-vision.ts`), which is the accepted cost of a
+  // fallback title: the AI design pass is the normal producer here and writes titles in the
+  // chronicle's own language. Location sections keep a date-range label — v1 has no
+  // reverse geocoding (docs/PHOTO_BOOK_PLAN.md §4), and "48.14, 11.58" is worse than a
+  // date.
+  if (grouping === 'topic') {
+    const counts = new Map<string, number>();
+    for (const photo of photos) {
+      for (const tag of new Set(tagsOf(photo))) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+    if (top) return top[0].replace(/(^|\s)\S/g, (c) => c.toUpperCase());
+  }
   const times = photos.filter((p) => p.takenAt != null).map((p) => p.takenAt!.getTime());
   if (times.length === 0) return undatedTitle;
   return dateRangeLabel(new Date(Math.min(...times)), new Date(Math.max(...times)), locale);
@@ -553,20 +578,234 @@ function paceSection(photos: AutoLayoutPhoto[]): PhotoPagePlan[] {
   return pages;
 }
 
+/* ──────────────────────────────────────────────────────────────────────────────
+ * Non-chronological groupings (`lib/photo-book-grouping.ts`): the user's "organise this
+ * book by topic / by place" choice.
+ *
+ * Chronological sectioning above is *sequential* — sections are a partition of one
+ * timeline, so only ADJACENT groups may merge and order is fixed. Topic and location are
+ * not: any two clusters may be the closest pair, and the resulting sections have to be put
+ * in some order afterwards. That's why these use their own affinity-based consolidation
+ * rather than reusing `mergeTinySections`/`capSectionCount`, which are left exactly as they
+ * were so chronological books lay out byte-for-byte as before.
+ * ────────────────────────────────────────────────────────────────────────────── */
+
+/** Photos within this radius of a cluster's centroid belong to the same place. Chosen to
+ *  hold a whole town/resort/trip destination together (so a week in one place is one
+ *  section, not one per excursion) while still separating genuinely different places —
+ *  the same order of magnitude as `GPS_JUMP_KM`'s "a short flight/drive" boundary. */
+const LOCATION_CLUSTER_KM = 25;
+
+/** Groups photos by GPS proximity: greedy single-pass clustering against running centroids,
+ *  oldest photo first so a cluster is seeded by the first visit to a place. Photos with no
+ *  coordinates can't be placed at all — they come back as a trailing group, exactly like
+ *  undated photos in chronological mode. */
+function sectionizeByLocation(photos: AutoLayoutPhoto[]): { groups: AutoLayoutPhoto[][]; leftover: AutoLayoutPhoto[] } {
+  const located = photos
+    .filter((p) => p.gpsLat != null && p.gpsLng != null)
+    .slice()
+    .sort((a, b) => (a.takenAt?.getTime() ?? 0) - (b.takenAt?.getTime() ?? 0) || a.position - b.position);
+  const leftover = photos.filter((p) => p.gpsLat == null || p.gpsLng == null).sort((a, b) => a.position - b.position);
+
+  const clusters: { photos: AutoLayoutPhoto[]; lat: number; lng: number }[] = [];
+  for (const photo of located) {
+    let best: (typeof clusters)[number] | null = null;
+    let bestKm = Infinity;
+    for (const cluster of clusters) {
+      const km = haversineKm(cluster.lat, cluster.lng, photo.gpsLat!, photo.gpsLng!);
+      if (km < bestKm) {
+        bestKm = km;
+        best = cluster;
+      }
+    }
+    if (best && bestKm <= LOCATION_CLUSTER_KM) {
+      // Running mean, so a cluster's centre follows the photos actually in it rather than
+      // being pinned to whichever one happened to arrive first.
+      best.lat = (best.lat * best.photos.length + photo.gpsLat!) / (best.photos.length + 1);
+      best.lng = (best.lng * best.photos.length + photo.gpsLng!) / (best.photos.length + 1);
+      best.photos.push(photo);
+    } else {
+      clusters.push({ photos: [photo], lat: photo.gpsLat!, lng: photo.gpsLng! });
+    }
+  }
+  return { groups: clusters.map((c) => c.photos), leftover };
+}
+
+/** The scene tags a photo contributes, lowercased. Empty for a photo the vision pass hasn't
+ *  scored — those can't be grouped by topic and land in the trailing group. */
+function tagsOf(photo: AutoLayoutPhoto): string[] {
+  return (photo.analysis?.sceneTags ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean);
+}
+
+/** Groups photos by their most distinctive shared scene tag: each photo joins the cluster of
+ *  its rarest tag, so a "birthday" photo that also carries the ubiquitous "group photo" tag
+ *  lands with the other birthdays rather than in a catch-all. Photos with no tags come back
+ *  as a trailing group. */
+function sectionizeByTopic(photos: AutoLayoutPhoto[]): { groups: AutoLayoutPhoto[][]; leftover: AutoLayoutPhoto[] } {
+  const frequency = new Map<string, number>();
+  for (const photo of photos) {
+    for (const tag of new Set(tagsOf(photo))) frequency.set(tag, (frequency.get(tag) ?? 0) + 1);
+  }
+
+  const byTag = new Map<string, AutoLayoutPhoto[]>();
+  const leftover: AutoLayoutPhoto[] = [];
+  for (const photo of photos) {
+    const tags = [...new Set(tagsOf(photo))];
+    if (tags.length === 0) {
+      leftover.push(photo);
+      continue;
+    }
+    // Rarest tag wins; ties broken alphabetically so the grouping stays deterministic.
+    const key = tags.sort((a, b) => (frequency.get(a) ?? 0) - (frequency.get(b) ?? 0) || a.localeCompare(b))[0];
+    const bucket = byTag.get(key) ?? [];
+    bucket.push(photo);
+    byTag.set(key, bucket);
+  }
+
+  const groups = [...byTag.values()].map((g) =>
+    g.slice().sort((a, b) => (a.takenAt?.getTime() ?? 0) - (b.takenAt?.getTime() ?? 0) || a.position - b.position),
+  );
+  return { groups, leftover: leftover.sort((a, b) => a.position - b.position) };
+}
+
+/** How strongly two groups want to be merged — higher is closer. */
+type Affinity = (a: AutoLayoutPhoto[], b: AutoLayoutPhoto[]) => number;
+
+/** Mean position of a group, for location affinity. */
+function centroid(photos: AutoLayoutPhoto[]): { lat: number; lng: number } | null {
+  const located = photos.filter((p) => p.gpsLat != null && p.gpsLng != null);
+  if (located.length === 0) return null;
+  return {
+    lat: located.reduce((s, p) => s + p.gpsLat!, 0) / located.length,
+    lng: located.reduce((s, p) => s + p.gpsLng!, 0) / located.length,
+  };
+}
+
+const locationAffinity: Affinity = (a, b) => {
+  const ca = centroid(a);
+  const cb = centroid(b);
+  if (!ca || !cb) return -Infinity;
+  return -haversineKm(ca.lat, ca.lng, cb.lat, cb.lng);
+};
+
+/** Jaccard overlap of the two groups' tag vocabularies. */
+const topicAffinity: Affinity = (a, b) => {
+  const ta = new Set(a.flatMap(tagsOf));
+  const tb = new Set(b.flatMap(tagsOf));
+  if (ta.size === 0 || tb.size === 0) return -Infinity;
+  let shared = 0;
+  for (const tag of ta) if (tb.has(tag)) shared++;
+  return shared / (ta.size + tb.size - shared);
+};
+
+/** Merges undersized groups into their closest sibling, then merges the closest remaining
+ *  pair until the group count is under the same size-proportional cap chronological mode
+ *  uses. Any pair may merge (see the section header). A group with no affinity to anything
+ *  (`-Infinity` everywhere — e.g. the only one with GPS) is left alone rather than forced
+ *  into an arbitrary neighbour. */
+function consolidateByAffinity(groups: AutoLayoutPhoto[][], affinity: Affinity, totalPhotos: number): AutoLayoutPhoto[][] {
+  const out = groups.map((g) => g.slice());
+
+  function bestPartner(index: number): number | null {
+    let best: number | null = null;
+    let bestScore = -Infinity;
+    for (let j = 0; j < out.length; j++) {
+      if (j === index) continue;
+      const score = affinity(out[index], out[j]);
+      if (score > bestScore) {
+        bestScore = score;
+        best = j;
+      }
+    }
+    return bestScore === -Infinity ? null : best;
+  }
+
+  let merged = true;
+  while (merged && out.length > 1) {
+    merged = false;
+    for (let i = 0; i < out.length; i++) {
+      if (out[i].length >= MIN_SECTION_SIZE) continue;
+      const partner = bestPartner(i);
+      if (partner == null) continue;
+      out[partner] = [...out[partner], ...out[i]];
+      out.splice(i, 1);
+      merged = true;
+      break; // structure changed — restart the scan
+    }
+  }
+
+  const maxSections = Math.max(1, Math.ceil(totalPhotos / SECTION_CAP_DIVISOR));
+  while (out.length > maxSections && out.length > 1) {
+    let bestPair: [number, number] | null = null;
+    let bestScore = -Infinity;
+    for (let i = 0; i < out.length; i++) {
+      for (let j = i + 1; j < out.length; j++) {
+        const score = affinity(out[i], out[j]);
+        if (score > bestScore) {
+          bestScore = score;
+          bestPair = [i, j];
+        }
+      }
+    }
+    // Nothing has any affinity left (all groups mutually unrelated) — merging further would
+    // be arbitrary, so accept being over the cap.
+    if (!bestPair) break;
+    const [i, j] = bestPair;
+    out[i] = [...out[i], ...out[j]];
+    out.splice(j, 1);
+  }
+
+  return out;
+}
+
+/** Earliest capture time in a group, for ordering sections. Groups with no dated photo sort
+ *  last (Infinity), which is where an undated/unlocated tail belongs. */
+function earliestTime(photos: AutoLayoutPhoto[]): number {
+  const times = photos.filter((p) => p.takenAt != null).map((p) => p.takenAt!.getTime());
+  return times.length > 0 ? Math.min(...times) : Number.POSITIVE_INFINITY;
+}
+
 /**
- * The deterministic time/GPS-based photo groupings (sectioning, tiny-section merge,
- * section-count cap) — exactly the grouping `buildPhotoBookAutoLayout` uses for its own
- * sections, exposed standalone so the AI design pass (`lib/photo-book-ai-layout.ts`) can
- * label each photo with a candidate cluster in its prompt, giving the model a sensible
- * starting point for its own section boundaries instead of inventing groupings from raw
- * timestamps itself. Excluding already-excluded photos is the caller's job — this groups
- * whatever `photos` it's given.
+ * The candidate photo groupings for a book — sectioning, tiny-section merge, section-count
+ * cap — for the user's chosen organisation (`lib/photo-book-grouping.ts`). Exactly what
+ * `buildPhotoBookAutoLayout` uses for its own sections, exposed standalone so the AI design
+ * pass (`lib/photo-book-ai-layout.ts`) can label each photo with a candidate cluster in its
+ * prompt, giving the model a sensible starting point for its own section boundaries instead
+ * of inventing groupings from raw timestamps itself. Excluding already-excluded photos is
+ * the caller's job — this groups whatever `photos` it's given.
+ *
+ * `'chronological'` (the default, and what every book got before the setting existed) is
+ * unchanged. The other two group by place/theme and are then ORDERED by their earliest
+ * photo, so even a by-topic book still moves broadly forwards in time rather than landing
+ * in whatever order the clustering happened to produce.
  */
-export function computeCandidateSections(photos: AutoLayoutPhoto[]): AutoLayoutPhoto[][] {
-  const { dated, undated } = splitByCaptureTime(photos);
-  let groups = mergeTinySections(sectionizeByBoundary(dated));
-  if (undated.length > 0) groups = [...groups, undated];
-  return capSectionCount(groups);
+export function computeCandidateSections(
+  photos: AutoLayoutPhoto[],
+  grouping: PhotoBookGrouping = DEFAULT_PHOTO_BOOK_GROUPING,
+): AutoLayoutPhoto[][] {
+  if (grouping === 'chronological') {
+    const { dated, undated } = splitByCaptureTime(photos);
+    let groups = mergeTinySections(sectionizeByBoundary(dated));
+    if (undated.length > 0) groups = [...groups, undated];
+    return capSectionCount(groups);
+  }
+
+  const { groups: raw, leftover } =
+    grouping === 'location' ? sectionizeByLocation(photos) : sectionizeByTopic(photos);
+  const affinity = grouping === 'location' ? locationAffinity : topicAffinity;
+  // The leftover tail (no GPS / no tags) is consolidated separately — it has no affinity to
+  // anything by definition, so it would otherwise block the merge loops.
+  const consolidated = consolidateByAffinity(raw, affinity, photos.length).sort(
+    (a, b) => earliestTime(a) - earliestTime(b),
+  );
+  if (leftover.length === 0) return consolidated;
+  // A handful of unplaceable photos joins the last section rather than earning a section of
+  // its own; a real pile of them gets one.
+  if (leftover.length < MIN_SECTION_SIZE && consolidated.length > 0) {
+    const last = consolidated[consolidated.length - 1];
+    return [...consolidated.slice(0, -1), [...last, ...leftover]];
+  }
+  return [...consolidated, leftover];
 }
 
 /**
@@ -608,7 +847,8 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   // ("a force-excluded photo is ALWAYS excluded") holds regardless of caller behavior.
   const usablePhotos = input.photos.filter((p) => p.userDecision !== 'exclude');
 
-  const groups = computeCandidateSections(usablePhotos);
+  const grouping = input.grouping ?? DEFAULT_PHOTO_BOOK_GROUPING;
+  const groups = computeCandidateSections(usablePhotos, grouping);
 
   // Resolved up front (before any culling runs) so the score-aware cullers below can
   // protect it from their own candidacy — see `cullEyesClosed`'s doc comment for why. A
@@ -674,7 +914,7 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
     // which `checkPhotoBookPlanConsistency` also rejects.
     if (interior.length === 0) continue;
     sections.push({
-      title: sectionTitle(group, locale, undatedTitle),
+      title: sectionTitle(group, locale, undatedTitle, grouping),
       pages: paceSection(interior),
     });
   }

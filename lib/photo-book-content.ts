@@ -11,6 +11,7 @@ import {
 } from '@/lib/photo-book-plan';
 import { buildPhotoBookAutoLayout, resolveUsableHeroId, type AutoLayoutPhoto } from '@/lib/photo-book-autolayout';
 import { repairPhotoBookPlan } from '@/lib/photo-book-repair';
+import { parsePhotoGrouping } from '@/lib/photo-book-grouping';
 import { parseStoredPhotoAnalysis, type PhotoAnalysis } from '@/lib/photo-analysis';
 
 /**
@@ -277,6 +278,7 @@ export async function buildAndPersistPhotoAutoPlan(
     coverAssetId,
     existingStyle: existingPlan?.style,
     existingHeroAssetId,
+    grouping: parsePhotoGrouping(row.photoGrouping),
     photos: autoLayoutPhotos,
   });
 

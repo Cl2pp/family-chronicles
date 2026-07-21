@@ -765,6 +765,29 @@ export const de: Dictionary = {
             'Wähle Stil, Einband und Größe und gib deinem Buch einen Titel — dann erstellst du es, und die KI gestaltet ein komplettes Layout aus deinen Fotos.',
           bookTitle: 'Titel',
           subtitle: 'Untertitel',
+          grouping: 'Aufbau des Buches',
+          groupingIntro: 'Wonach sollen die Kapitel gebildet werden?',
+          groupingOptions: {
+            chronological: 'Chronologisch',
+            topic: 'Nach Thema',
+            location: 'Nach Ort',
+          },
+          groupingHints: {
+            chronological:
+              'Ein Kapitel pro Anlass, von früher nach später — wie ein Tagebuch.',
+            topic:
+              'Fotos, die dasselbe zeigen, kommen zusammen — Geburtstage zu Geburtstagen, Strandtage zu Strandtagen, auch über Jahre hinweg.',
+            location:
+              'Fotos vom selben Ort kommen zusammen. Fotos ohne GPS-Daten landen in einem eigenen Kapitel am Ende.',
+          },
+          groupingWarnings: {
+            location: (withGps: number, total: number) =>
+              `Nur ${withGps} von ${total} Fotos haben GPS-Daten. Die übrigen landen in einem gemeinsamen Kapitel am Ende — vielleicht passt „Chronologisch“ oder „Nach Thema“ besser.`,
+            topic: (scored: number, total: number) =>
+              `Erst ${scored} von ${total} Fotos wurden analysiert. Ohne Analyse lassen sich Fotos nicht nach Thema gruppieren.`,
+          },
+          groupingNeedsRedesign:
+            'Gespeichert. Weil du das Layout von Hand bearbeitet hast, wird das Buch nicht automatisch neu gestaltet — nutze dafür „Mein Buch gestalten“.',
           coverType: 'Einband',
           coverTypeOptions: {
             hardcover: 'Hardcover',

@@ -29,6 +29,7 @@ import {
   type LayoutOp,
 } from '@/lib/books';
 import type { PhotoBookStyle } from '@/lib/photo-book-plan';
+import type { PhotoBookGrouping } from '@/lib/photo-book-grouping';
 import { runBookAgent, runPhotoBookAgent, type ChatTurn } from '@/lib/ai/agent';
 import type { Receipt, ToolContext } from '@/lib/ai/tools';
 import { getI18n } from '@/lib/i18n/server';
@@ -211,6 +212,7 @@ export async function updatePhotoBookSettingsAction(input: {
   subtitle?: string | null;
   format?: BookFormat;
   coverType?: BookCoverType;
+  photoGrouping?: PhotoBookGrouping;
 }): Promise<{ error?: string }> {
   const user = await requireUser();
   const result = await updatePhotoBookSettings({ ...input, userId: user.id });

@@ -312,6 +312,38 @@ section boundaries and **titles**, hero picks, template rhythm, optional short
 **captions** (from `shortDescription`, rewritten in the chronicle's language), cover
 title suggestion. Validated + consistency-checked; on any failure the auto plan stands.
 
+### 6b. "How should this book be organised?" (`books.photo_grouping`)
+
+Sectioning used to be one fixed idea — split the timeline on time/GPS gaps. But the same
+200 photos are a travel diary, a book of occasions, or a book of places depending on a
+decision only the owner can make, so it's now theirs: a three-way choice in the builder's
+config panel, made **before** generating (`lib/photo-book-grouping.ts`, default
+`chronological` — what every existing book already is).
+
+It feeds both producers, not just the prompt. `computeCandidateSections(photos, grouping)`
+does the clustering:
+
+- **chronological** — unchanged: time gaps > 8h, GPS jumps > 50km, adjacent-only merging.
+- **location** — greedy clustering against running centroids (25km radius), so a week in
+  one place is one section and a place revisited months later rejoins its own section
+  rather than starting a new one. Photos with no EXIF GPS get a trailing section.
+- **topic** — each photo joins the cluster of its *rarest* scene tag, so an ubiquitous tag
+  ("group photo", "family") can't swallow the distinctive ones. Unscored photos trail.
+
+Topic and location are non-sequential — any two clusters may be the closest pair — so they
+use affinity-based consolidation (merge undersized groups into their closest sibling, then
+merge closest pairs down to the same size-proportional cap) and are then ordered by their
+earliest photo, so even a by-topic book moves broadly forwards in time. The AI pass gets
+both the matching clusters and an explicit instruction (`groupingInstruction`), restated in
+the review round so a revision can't quietly reorganise the book back into a timeline.
+
+Measured on a real 36-photo book: chronological gives 5 date clusters; topic gives
+`pet/home`, `couple/selfie`, `beach/sunset/ocean`, `mountains/skiing`, `friends/concert`,
+which the design pass named *Das Paar*, *Skifahren in den Bergen*, *Am Strand*, *Mit
+Freunden*, *Zuhause & Alltag*. That same book has GPS on **zero** photos — which is why the
+config panel checks coverage and warns before you pick a grouping the photos can't support,
+rather than silently producing one meaningless chapter.
+
 ### 6a. Design-pass hardening (post-launch)
 
 The first shipped version of the AI pass was **all-or-nothing**, and in production that

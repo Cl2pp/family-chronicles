@@ -22,6 +22,7 @@ import { useI18n } from '@/lib/i18n/client';
 import { isBookPrintFresh } from '@/lib/book-print-status';
 import { canAccessPhotoBookStep } from '@/lib/photo-book-step-gate';
 import type { PhotoBookDesignStage } from '@/lib/photo-book-design-stage';
+import type { PhotoBookGrouping } from '@/lib/photo-book-grouping';
 import type { PhotoBookStyle } from '@/lib/photo-book-plan';
 import type { BookCoverType, BookFormat, BookQuote } from '@/lib/gelato';
 import {
@@ -48,6 +49,11 @@ export interface PhotoBookPhotoView {
   metaSettled: boolean;
   /** True when analysis permanently failed for this photo. */
   metaFailed: boolean;
+  /** Whether this photo has EXIF GPS / a vision score — the two things the by-place and
+   *  by-topic groupings cluster on. The config panel warns when a chosen grouping has too
+   *  little of what it needs (see `PhotoBookConfigPanel`). */
+  hasLocation: boolean;
+  hasAnalysis: boolean;
 }
 
 export interface PhotoBookInfo {
@@ -77,6 +83,9 @@ export interface PhotoBookInfo {
   /** How far that pass has got (`books.design_stage`) — drives Step 2's progress
    *  checklist. Null when nothing is running. */
   designStage: PhotoBookDesignStage | null;
+  /** How the user asked the book to be organised (`books.photo_grouping`) — chronological,
+   *  by topic, or by place. Feeds both layout producers; see `lib/photo-book-grouping.ts`. */
+  photoGrouping: PhotoBookGrouping;
   /** ISO timestamp of the last time a design job completed for this book (success or
    *  auto-fallback), or null if it never has — `books.generated_at`. This is the Step 2
    *  gate: null means show the config-only "not generated yet" view, non-null means show
@@ -325,6 +334,35 @@ export function PhotoBookBuilder({
     });
   }
 
+  /**
+   * The config panel's "organise by" choice (`lib/photo-book-grouping.ts`). Unlike the
+   * other settings this one decides what a SECTION is, which no in-place patch can apply
+   * to an existing plan — so on a book that has already been generated, saving it is
+   * immediately followed by a fresh design pass. Before the first generation it's just a
+   * saved preference that the upcoming "Buch erstellen" will use.
+   *
+   * The design pass is only auto-triggered for a plan the user hasn't hand-edited: silently
+   * discarding manual edits is exactly what the consent modal exists to prevent, so an
+   * edited book saves the setting and leaves the re-design to the explicit button.
+   */
+  function setGrouping(photoGrouping: PhotoBookGrouping) {
+    if (photoGrouping === book.photoGrouping) return;
+    startTransition(async () => {
+      const result = await updatePhotoBookSettingsAction({ bookId: book.id, photoGrouping });
+      if (result.error) {
+        notifications.show({ message: result.error, color: 'red' });
+        return;
+      }
+      if (book.generatedAt && !isEdited) {
+        const design = await requestPhotoBookAiDesignAction({ bookId: book.id });
+        if (design.error) notifications.show({ message: design.error, color: 'red' });
+      } else if (book.generatedAt) {
+        notifications.show({ message: tp.config.groupingNeedsRedesign, color: 'blue' });
+      }
+      router.refresh();
+    });
+  }
+
   /** The config panel's primary "Create book" / "Buch erstellen" CTA — the first design
    *  pass this book ever gets. Reuses the same AI design action the post-generation
    *  "Design again" affordance calls (`designBook` below); the only difference is WHEN
@@ -491,6 +529,7 @@ export function PhotoBookBuilder({
             onCreateBook={createBook}
             onDesignBook={designBook}
             onSetStyle={setStyle}
+            onSetGrouping={setGrouping}
             onUpdateSettings={updateSettings}
             onBack={() => setStep(0)}
             onNext={() => goToStep(2)}

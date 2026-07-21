@@ -493,6 +493,12 @@ export const books = pgTable(
     printS3Key: text('print_s3_key'),
     /** Layout plan (lib/book-layout-plan.ts) — what goes where; the renderer's input. */
     layoutPlan: jsonb('layout_plan'),
+    /** Photo books only: how the user asked for the book to be organised — one of
+     *  `PHOTO_BOOK_GROUPINGS` (`lib/photo-book-grouping.ts`). Chosen in the builder's
+     *  config panel before generating, and read by BOTH producers (the AI design pass and
+     *  the deterministic auto-layouter) to decide what makes a section. Untyped text like
+     *  `layoutSource`; null (every book predating this) means chronological. */
+    photoGrouping: text('photo_grouping'),
     /** Who last wrote layoutPlan: the heuristic auto-layouter, an AI pass, or a manual edit. */
     layoutSource: text('layout_source').notNull().default('auto'),
     /** Content changed since layoutPlan was made (paragraph counts/photos may no longer match). */

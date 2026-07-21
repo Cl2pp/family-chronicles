@@ -41,6 +41,7 @@ import {
   PHOTO_BOOK_DESIGN_STAGES,
   type PhotoBookDesignStage,
 } from '@/lib/photo-book-design-stage';
+import { PHOTO_BOOK_GROUPINGS, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
 import type { BookCoverType, BookFormat } from '@/lib/gelato';
 import { PhotoBookChat } from './photo-book-chat';
 import { PhotoBookPhotoTile } from './photo-book-photo-tile';
@@ -78,15 +79,19 @@ type SettingsPatch = {
  */
 function PhotoBookConfigPanel({
   book,
+  photos,
   locked,
   pending,
   onSetStyle,
+  onSetGrouping,
   onUpdateSettings,
 }: {
   book: PhotoBookInfo;
+  photos: PhotoBookPhotoView[];
   locked: boolean;
   pending: boolean;
   onSetStyle: (style: PhotoBookStyle) => void;
+  onSetGrouping: (grouping: PhotoBookGrouping) => void;
   onUpdateSettings: (patch: SettingsPatch) => void;
 }) {
   const { t } = useI18n();
@@ -99,6 +104,27 @@ function PhotoBookConfigPanel({
   const [subtitle, setSubtitle] = useState(book.subtitle ?? '');
 
   const disabled = locked || pending;
+
+  // "By place" needs EXIF GPS and "by topic" needs a vision score; a photo set that mostly
+  // lacks either would silently collapse into one meaningless chapter (photos stripped of
+  // location by a messaging app, scans, screenshots — the first real book we looked at had
+  // GPS on exactly none of its 36 photos). Say so before the user generates a book, not
+  // after.
+  const usable = photos.filter((p) => !p.excluded);
+  const withLocation = usable.filter((p) => p.hasLocation).length;
+  const withAnalysis = usable.filter((p) => p.hasAnalysis).length;
+  const coverage =
+    book.photoGrouping === 'location'
+      ? withLocation / Math.max(1, usable.length)
+      : book.photoGrouping === 'topic'
+        ? withAnalysis / Math.max(1, usable.length)
+        : 1;
+  const groupingWarning =
+    usable.length > 0 && coverage < 0.5
+      ? book.photoGrouping === 'location'
+        ? tc.groupingWarnings.location(withLocation, usable.length)
+        : tc.groupingWarnings.topic(withAnalysis, usable.length)
+      : null;
 
   return (
     <Stack gap="md">
@@ -118,6 +144,41 @@ function PhotoBookConfigPanel({
           subtitle !== (book.subtitle ?? '') && onUpdateSettings({ subtitle: subtitle || null })
         }
       />
+      {/* How the book is organised. This is the most consequential choice on the panel —
+          the same photos become a timeline, a book of occasions, or a book of places — so
+          it sits above the visual settings, with each option's effect spelled out rather
+          than left to the label. It only takes effect on the next generation, which is why
+          `onSetGrouping` re-runs the design pass once the book already exists. */}
+      <Box>
+        <Text fz={13} fw={500} mb={2}>
+          {tc.grouping}
+        </Text>
+        <Text fz={12} c="dimmed" mb={8}>
+          {tc.groupingIntro}
+        </Text>
+        <Stack gap={6}>
+          {PHOTO_BOOK_GROUPINGS.map((option) => (
+            <Button
+              key={option}
+              size="compact-sm"
+              variant={option === book.photoGrouping ? 'filled' : 'default'}
+              disabled={disabled}
+              justify="flex-start"
+              onClick={() => option !== book.photoGrouping && onSetGrouping(option)}
+            >
+              {tc.groupingOptions[option]}
+            </Button>
+          ))}
+        </Stack>
+        <Text fz={11} c="dimmed" mt={6}>
+          {tc.groupingHints[book.photoGrouping]}
+        </Text>
+        {groupingWarning && (
+          <Text fz={11} c="orange.7" mt={4}>
+            {groupingWarning}
+          </Text>
+        )}
+      </Box>
       <Box>
         <Text fz={13} fw={500} mb={6}>
           {tp.style}
@@ -245,6 +306,7 @@ export function PhotoBookCreateStep({
   onCreateBook,
   onDesignBook,
   onSetStyle,
+  onSetGrouping,
   onUpdateSettings,
   onBack,
   onNext,
@@ -266,6 +328,7 @@ export function PhotoBookCreateStep({
   onCreateBook: () => void;
   onDesignBook: () => void;
   onSetStyle: (style: PhotoBookStyle) => void;
+  onSetGrouping: (grouping: PhotoBookGrouping) => void;
   onUpdateSettings: (patch: SettingsPatch) => void;
   onBack: () => void;
   onNext: () => void;
@@ -361,9 +424,11 @@ export function PhotoBookCreateStep({
               </Text>
               <PhotoBookConfigPanel
                 book={book}
+                photos={photos}
                 locked={locked}
                 pending={pending}
                 onSetStyle={onSetStyle}
+                onSetGrouping={onSetGrouping}
                 onUpdateSettings={onUpdateSettings}
               />
               <Button
@@ -535,9 +600,11 @@ export function PhotoBookCreateStep({
       >
         <PhotoBookConfigPanel
           book={book}
+          photos={photos}
           locked={locked}
           pending={pending}
           onSetStyle={onSetStyle}
+          onSetGrouping={onSetGrouping}
           onUpdateSettings={onUpdateSettings}
         />
         <Group mt="lg" wrap="wrap">

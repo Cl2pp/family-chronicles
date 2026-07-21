@@ -8,6 +8,11 @@ import { encodePhotoForVision } from '@/lib/vision-image';
 import { loadPhotoBook, type LoadedPhotoBook, type PhotoBookPhotoRef } from '@/lib/photo-book-content';
 import { computeCandidateSections, type AutoLayoutPhoto } from '@/lib/photo-book-autolayout';
 import {
+  groupingInstruction,
+  parsePhotoGrouping,
+  type PhotoBookGrouping,
+} from '@/lib/photo-book-grouping';
+import {
   checkPhotoBookPlanConsistency,
   validatePhotoBookPlan,
   PHOTO_BOOK_STYLES,
@@ -210,8 +215,19 @@ async function chronicleContext(chronicleId: string): Promise<{ languageName: st
   };
 }
 
-function systemPrompt(languageName: string): string {
-  return `You are an experienced photo-book designer working for "Familienwerk", a private family memoir app. You are given one family's photo book: every available photo's metadata (id, when/roughly where it was taken, a candidate time-based cluster, its vision-analysis scores if available, and its pixel size) and, for the more important ones, the actual images. Your job is to propose a JSON "layout plan" (docs/PHOTO_BOOK_PLAN.md §5) that groups the photos into sections, gives each section a real title, picks a cover hero, and lays every section out page by page.
+/** What the candidate clusters in the prompt were grouped by, so the sentence introducing
+ *  them matches the grouping the rest of the prompt asks for. */
+const CLUSTER_BASIS: Record<PhotoBookGrouping, string> = {
+  chronological: 'time and place',
+  topic: 'shared subject matter',
+  location: 'GPS proximity',
+};
+
+function systemPrompt(languageName: string, grouping: PhotoBookGrouping): string {
+  return `You are an experienced photo-book designer working for "Familienwerk", a private family memoir app. You are given one family's photo book: every available photo's metadata (id, when/roughly where it was taken, a candidate cluster, its vision-analysis scores if available, and its pixel size) and, for the more important ones, the actual images. Your job is to propose a JSON "layout plan" (docs/PHOTO_BOOK_PLAN.md §5) that groups the photos into sections, gives each section a real title, picks a cover hero, and lays every section out page by page.
+
+How this book is to be organised — the reader chose this themselves in the app, so it is a requirement, not a suggestion:
+${groupingInstruction(grouping)}
 
 ${schemaText()}
 
@@ -221,7 +237,7 @@ ${HARD_RULES}
 
 Design goals — this is where your judgment (and the ability to actually see the photos) matters, and is the entire reason this pass exists instead of a mechanical date-range layout:
 - NAME sections from what's actually in them ("Am Strand", "Omas Geburtstag") rather than a generic date range — put the date range in "dateLabel" instead if you want to keep it visible.
-- Keep sections in roughly chronological order (matching the photos' capture times) — this is a family memoir on a timeline, not a shuffled gallery.
+- Follow the organisation the reader chose (stated at the top) when deciding what belongs in a section and in what order the sections run. Everything below is about how each section then LOOKS.
 - Pick the cover hero: prefer a photo whose analysis marks it "coverCandidate", and among those the highest "aestheticScore" — a warm, clear, well-composed photo of people, not a blurry or eyes-closed one. The cover's title/subtitle text is fixed by the user's own settings and not yours to change — spend your judgment on the hero pick instead.
 - FILL THE PAGE, SYMMETRICALLY. Never leave a photo hugging one side of the page with white space beside it; prefer templates that span the full width (two-*, three-*, collage-*) for photos that go together, and reserve "full-bleed"/"full-framed" for photos that deserve to stand alone.
 - Vary the rhythm across sections — don't give every section the identical page pattern. A section opener is usually its own strong single-photo page; some sections can build to another strong single-photo page mid-way; others stay all multi-photo pages. A book that "breathes" differently section to section reads as designed, not generated.
@@ -275,8 +291,12 @@ async function buildMessages(
   loaded: LoadedPhotoBook,
   available: (AutoLayoutPhoto & { s3Key: string; thumbS3Key: string | null })[],
   languageName: string,
+  grouping: PhotoBookGrouping,
 ): Promise<ChatCompletionMessageParam[]> {
-  const sections = computeCandidateSections(available);
+  // The candidate clusters are computed the SAME way the user asked the book to be
+  // organised, so the starting point the model is given already agrees with the
+  // instruction it is being held to.
+  const sections = computeCandidateSections(available, grouping);
   const clusterIndex = new Map<string, number>();
   sections.forEach((section, i) => section.forEach((p) => clusterIndex.set(p.assetId, i)));
 
@@ -286,7 +306,7 @@ async function buildMessages(
     {
       type: 'text',
       text:
-        `Design the layout for "${loaded.row.title}" (${available.length} available photo${available.length === 1 ? '' : 's'}, grouped below into ${sections.length} candidate cluster${sections.length === 1 ? '' : 's'} by time/place — feel free to keep, merge, split, or rename these). ` +
+        `Design the layout for "${loaded.row.title}" (${available.length} available photo${available.length === 1 ? '' : 's'}, grouped below into ${sections.length} candidate cluster${sections.length === 1 ? '' : 's'} by ${CLUSTER_BASIS[grouping]} — feel free to keep, merge, split, or rename these). ` +
         `You can see ${visionIds.size} of the photos as actual images below (the rest are described by metadata only — the strongest candidates by score were prioritized). Reply with the JSON layout plan only.`,
     },
     { type: 'text', text: `Available photos (${available.length}):\n${available.map((p) => photoTableLine(p, clusterIndex.get(p.assetId)!)).join('\n')}` },
@@ -301,7 +321,7 @@ async function buildMessages(
   }
 
   return [
-    { role: 'system', content: systemPrompt(languageName) },
+    { role: 'system', content: systemPrompt(languageName, grouping) },
     { role: 'user', content: userParts },
   ];
 }
@@ -472,11 +492,16 @@ function buildReviewMessages(
   available: (AutoLayoutPhoto & { s3Key: string })[],
   languageName: string,
   clusterIndex: Map<string, number>,
+  grouping: PhotoBookGrouping,
 ): ChatCompletionMessageParam[] {
   const parts: ChatCompletionContentPart[] = [
     {
       type: 'text',
       text:
+        // Restated here so a revision can't quietly reorganise a by-topic book back into a
+        // timeline: this message is a fresh conversation, the model has no memory of the
+        // draft round's system prompt.
+        `The reader's chosen organisation for this book, unchanged:\n${groupingInstruction(grouping)}\n\n` +
         `Here is the layout plan you produced:\n\n${JSON.stringify(plan)}\n\n` +
         (findings.length > 0
           ? `An automated design check found these problems:\n${formatLintFindings(findings)}\n\n`
@@ -546,7 +571,8 @@ export async function proposePhotoBookPlan(
     }
 
     const { languageName, name: chronicleName } = await chronicleContext(loaded.row.chronicleId);
-    const messages = await buildMessages(loaded, available, languageName);
+    const grouping = parsePhotoGrouping(loaded.row.photoGrouping);
+    const messages = await buildMessages(loaded, available, languageName, grouping);
 
     await stage('drafting');
     const completion = await openrouter.chat.completions.create({
@@ -583,12 +609,12 @@ export async function proposePhotoBookPlan(
 
     await stage('reviewing');
     const clusterIndex = new Map<string, number>();
-    computeCandidateSections(available).forEach((section, i) =>
+    computeCandidateSections(available, grouping).forEach((section, i) =>
       section.forEach((p) => clusterIndex.set(p.assetId, i)),
     );
     const reviewCompletion = await openrouter.chat.completions.create({
       model: env.STYLING_MODEL,
-      messages: buildReviewMessages(draft, draftFindings, proofs, available, languageName, clusterIndex),
+      messages: buildReviewMessages(draft, draftFindings, proofs, available, languageName, clusterIndex, grouping),
       ...OPENROUTER_ROUTING,
     });
     const reviewText = reviewCompletion.choices[0]?.message?.content;

@@ -747,6 +747,28 @@ export const en = {
             'Pick a style, cover and size, and give your book a title — then create it and let AI design a complete layout from your photos.',
           bookTitle: 'Title',
           subtitle: 'Subtitle',
+          grouping: 'How the book is organised',
+          groupingIntro: 'What should the chapters be built around?',
+          groupingOptions: {
+            chronological: 'Chronologically',
+            topic: 'By topic',
+            location: 'By place',
+          },
+          groupingHints: {
+            chronological: 'One chapter per occasion, earliest first — like a diary.',
+            topic:
+              'Photos showing the same thing go together — birthdays with birthdays, beach days with beach days, even years apart.',
+            location:
+              'Photos taken in the same place go together. Photos without GPS data get their own chapter at the end.',
+          },
+          groupingWarnings: {
+            location: (withGps: number, total: number) =>
+              `Only ${withGps} of ${total} photos have GPS data. The rest end up in one shared chapter at the end — “Chronologically” or “By topic” may suit these photos better.`,
+            topic: (scored: number, total: number) =>
+              `Only ${scored} of ${total} photos have been analysed so far. Without analysis, photos can't be grouped by topic.`,
+          },
+          groupingNeedsRedesign:
+            "Saved. Because you've edited this layout by hand, the book won't be redesigned automatically — use \u201cDesign my book\u201d when you're ready.",
           coverType: 'Cover',
           coverTypeOptions: {
             hardcover: 'Hardcover',

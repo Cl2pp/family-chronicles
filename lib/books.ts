@@ -71,6 +71,7 @@ import {
 } from '@/lib/photo-book-ops';
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
 import { isDesignInFlight } from '@/lib/photo-book-design-stage';
+import { parsePhotoGrouping, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
 
 /**
  * Book domain — the ONE place book state changes. The Books UI (server actions)
@@ -287,6 +288,9 @@ export interface BookDetail {
   /** Set while an AI design job is queued/running; null once it completes (success or
    *  fallback). Drives the builder's "Design my book" working state. */
   designRequestedAt: Date | null;
+  /** How the user asked this photo book to be organised (`books.photo_grouping`) — see
+   *  `lib/photo-book-grouping.ts`. Always chronological for story books. */
+  photoGrouping: PhotoBookGrouping;
   /** How far the in-flight photo-book design pass has got (`books.design_stage`) — see
    *  `lib/photo-book-design-stage.ts`. Null when nothing is running (or for story books). */
   designStage: string | null;
@@ -407,6 +411,7 @@ export async function getBookForUser(
     layoutStale: row.book.layoutStale,
     designRequestedAt: row.book.designRequestedAt,
     designStage: row.book.designStage,
+    photoGrouping: parsePhotoGrouping(row.book.photoGrouping),
     generatedAt: row.book.generatedAt,
     updatedAt: row.book.updatedAt,
     chapters: visibleChapters.map((c, i) => ({
@@ -757,6 +762,15 @@ export interface BookPhotoItem {
   /** True when analysis permanently failed for this photo — the builder shows this
    *  distinctly from "still analyzing". */
   metaFailed: boolean;
+  /** True when this photo carries EXIF GPS coordinates. Only the "organise by place"
+   *  grouping needs it (`lib/photo-book-grouping.ts`), and it needs it badly enough that
+   *  the builder warns before letting a user pick that mode for a set of photos that
+   *  mostly has no location at all — phone screenshots, scans, and anything stripped by a
+   *  messaging app arrive without it. */
+  hasLocation: boolean;
+  /** True once this photo has a vision score, which is what the "organise by topic"
+   *  grouping clusters on. */
+  hasAnalysis: boolean;
 }
 
 /** Every photo of a photo book, in upload order, for the builder's grid. */
@@ -786,6 +800,8 @@ export async function listBookPhotos(
       excluded: bookPhotos.excluded,
       excludedReason: bookPhotos.excludedReason,
       takenAt: bookPhotos.takenAt,
+      gpsLat: bookPhotos.gpsLat,
+      analysis: bookPhotos.analysis,
       analysisStatus: bookPhotos.analysisStatus,
     })
     .from(bookPhotos)
@@ -809,6 +825,8 @@ export async function listBookPhotos(
         takenAt: r.takenAt,
         metaSettled: r.analysisStatus === 'done' || r.analysisStatus === 'failed',
         metaFailed: r.analysisStatus === 'failed',
+        hasLocation: r.gpsLat != null,
+        hasAnalysis: r.analysis != null,
       })),
     },
   };
@@ -947,6 +965,7 @@ export async function updatePhotoBookSettings(input: {
   subtitle?: string | null;
   format?: BookFormat;
   coverType?: BookCoverType;
+  photoGrouping?: PhotoBookGrouping;
 }): Promise<Result> {
   const gate = await editablePhotoBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
@@ -974,6 +993,12 @@ export async function updatePhotoBookSettings(input: {
   if (input.subtitle !== undefined) set.subtitle = nextSubtitle;
   if (input.format !== undefined) set.format = input.format;
   if (input.coverType !== undefined) set.coverType = input.coverType;
+  // Only takes effect the next time the book is generated — it decides what a section IS,
+  // which is not something that can be patched into an existing plan the way a cover title
+  // can. Deliberately does NOT flip `layoutStale`: that would make the next page load
+  // rebuild the book behind the user's back (and, for an AI-designed book, only repair it —
+  // repair never re-sections). The builder wires the control to a regenerate instead.
+  if (input.photoGrouping !== undefined) set.photoGrouping = input.photoGrouping;
 
   const coverTextChanged =
     (input.title !== undefined && nextTitle !== row.title) ||
