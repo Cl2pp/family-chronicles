@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Badge, Card, Group, SimpleGrid, Stack, Text } from '@mantine/core';
-import { IconBook2, IconChevronRight } from '@tabler/icons-react';
+import { IconBook2, IconChevronRight, IconPhoto } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
 import type { BookListItem } from '@/lib/books';
 import { NewBookButton } from './new-book-button';
@@ -35,13 +35,18 @@ export function BooksView({ books }: { books: BookListItem[] }) {
           >
             <Group justify="space-between" wrap="nowrap">
               <Group gap={10} wrap="nowrap" style={{ minWidth: 0 }}>
-                <IconBook2 size={22} stroke={1.6} color="var(--mantine-color-brand-6)" />
+                {b.kind === 'photo' ? (
+                  <IconPhoto size={22} stroke={1.6} color="var(--mantine-color-brand-6)" />
+                ) : (
+                  <IconBook2 size={22} stroke={1.6} color="var(--mantine-color-brand-6)" />
+                )}
                 <Stack gap={2} style={{ minWidth: 0 }}>
                   <Text fw={600} truncate>
                     {b.title}
                   </Text>
                   <Text fz={12} c="dimmed" truncate>
-                    {b.chronicleName} · {t.books.storyCount(b.storyCount)}
+                    {b.chronicleName}
+                    {b.kind === 'story' ? ` · ${t.books.storyCount(b.storyCount)}` : ''}
                     {b.pageCount ? ` · ${t.books.pageCount(b.pageCount)}` : ''}
                   </Text>
                 </Stack>

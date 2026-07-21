@@ -123,6 +123,10 @@ export async function loadBook(bookId: string): Promise<LoadedBook> {
   const photosByStory = new Map<string, PhotoRef[]>();
   const allPhotosById = new Map<string, PhotoRef>();
   for (const p of photoRows) {
+    // `assets.storyId` is nullable (book-owned photos), but this query is filtered to
+    // `storyId IN (storyIds)` (all non-null book_stories.story_id values), so it's
+    // never null in practice — the guard just satisfies the type.
+    if (!p.storyId) continue;
     const ref: PhotoRef = {
       id: p.id,
       storyId: p.storyId,

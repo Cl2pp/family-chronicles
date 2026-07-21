@@ -587,7 +587,13 @@ export const en = {
     noBooksHint:
       'Pick stories, arrange them, and we typeset them into a printable family book with photos.',
     needStories: 'You need at least one finished story before you can create a book.',
+    needChronicle: 'Create or join a family chronicle before you can create a book.',
     defaultTitle: (chronicle: string) => `The ${chronicle} Book`,
+    defaultPhotoBookTitle: (chronicle: string) => `The ${chronicle} Photo Book`,
+    kindStory: 'Story book',
+    kindStoryHint: 'Typeset your written stories into chapters with photos.',
+    kindPhoto: 'Photo book',
+    kindPhotoHint: 'Upload 100+ photos — we sort, clean up, and lay them out automatically.',
     storyCount: (n: number) => (n === 1 ? '1 story' : `${n} stories`),
     pageCount: (n: number) => `${n} pages`,
     status: {
@@ -662,6 +668,31 @@ export const en = {
         'This book\'s layout has been edited by hand. Doing this now will replace those edits with a freshly generated layout.',
       overwriteEditsConfirm: 'Replace edits',
       overwriteEditsCancel: 'Cancel',
+      photoBook: {
+        addPhotos: 'Add photos',
+        uploadProgress: (done: number, total: number) => `${done} / ${total} uploaded`,
+        someFailed: (n: number) =>
+          n === 1 ? '1 photo could not be uploaded.' : `${n} photos could not be uploaded.`,
+        invalidSkipped: (n: number) =>
+          n === 1
+            ? '1 photo could not be uploaded (unsupported or too large).'
+            : `${n} photos could not be uploaded (unsupported or too large).`,
+        selectionCapped: (max: number) =>
+          `Only the first ${max} photos were added — select fewer at a time to add the rest.`,
+        uploadFailed: 'Upload failed — please try again.',
+        photos: 'Photos',
+        analyzedProgress: (analyzed: number, total: number) => `${analyzed} / ${total} analyzed`,
+        analyzing: 'Analyzing…',
+        analysisFailed: 'Could not be analyzed',
+        someUnanalyzed: (n: number) =>
+          n === 1
+            ? '1 photo could not be analyzed — it still works fine in the book.'
+            : `${n} photos could not be analyzed — they still work fine in the book.`,
+        noPhotosYet: 'No photos yet',
+        noPhotosHint: 'Add photos above to start building this book.',
+        exclude: 'Exclude from book',
+        include: 'Include in book',
+      },
     },
     order: {
       title: 'Order your book',

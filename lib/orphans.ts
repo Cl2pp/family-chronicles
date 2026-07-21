@@ -14,7 +14,16 @@ import { deleteObject, listObjects } from '@/lib/s3';
  */
 // `thumbs/` is worker-written, not browser-uploaded, but sweeping it the same way
 // reclaims thumbnails whose asset rows are gone (e.g. after a story delete raced).
-const SWEPT_PREFIXES = ['chat/photos/', 'chat/audio/', 'stories/photos/', 'avatars/', 'thumbs/'];
+// `books/photos/` is the bulk photo-book uploader's prefix (lib/books.ts,
+// addBookPhotos) — same abandoned-upload risk as `stories/photos/`.
+const SWEPT_PREFIXES = [
+  'chat/photos/',
+  'chat/audio/',
+  'stories/photos/',
+  'books/photos/',
+  'avatars/',
+  'thumbs/',
+];
 
 /**
  * How long an object may sit unreferenced before it counts as abandoned. Comfortably

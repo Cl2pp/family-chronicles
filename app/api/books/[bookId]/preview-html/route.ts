@@ -35,6 +35,9 @@ export async function GET(
   // Access gate — loadBook itself does no membership check, so this must run first.
   const book = await getBookForUser(bookId, session.user.id);
   if (!book) return new NextResponse('Not found', { status: 404 });
+  // Photo books have no layout plan / HTML preview yet (docs/PHOTO_BOOK_PLAN.md PR 2+);
+  // `loadBook` below assumes a story book (>= 1 chapter) and throws otherwise.
+  if (book.kind === 'photo') return new NextResponse('Not found', { status: 404 });
 
   const loaded = await loadBook(bookId);
   await backfillDimensionsFromThumbnails(loaded.allPhotosById);
