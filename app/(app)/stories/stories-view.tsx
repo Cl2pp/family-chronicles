@@ -69,8 +69,8 @@ interface YearGroup {
 /**
  * Bucket stories into year groups for the timeline along the chosen date axis.
  *
- * - 'happened': group by event year, oldest first, Undated last; within a year the
- *   stories run in event-date order (submission date breaks ties).
+ * - 'happened': group by event year, newest first, Undated last; within a year the
+ *   most recent event comes first (submission date breaks ties).
  * - 'added': group by the year each story was added, newest first; within a year the
  *   newest submission comes first. Every story has a submission date, so there is no
  *   Undated bucket here.
@@ -106,12 +106,12 @@ function groupStories(
   }
   const dated: YearGroup[] = [...buckets.entries()]
     .filter((e) => e[0] !== null)
-    .sort((a, b) => (a[0] as number) - (b[0] as number))
+    .sort((a, b) => (b[0] as number) - (a[0] as number))
     .map(([year, group]) => ({
       year,
       label: String(year),
       stories: [...group].sort(
-        (a, b) => (eventTime(a) as number) - (eventTime(b) as number) || createdTime(a) - createdTime(b),
+        (a, b) => (eventTime(b) as number) - (eventTime(a) as number) || createdTime(b) - createdTime(a),
       ),
     }));
 
