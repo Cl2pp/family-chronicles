@@ -845,12 +845,16 @@ export async function editablePhotoBook(
   userId: string,
 ): Promise<{ ok: true; chronicleId: string; status: BookStatus } | { ok: false; error: string }> {
   const [row] = await db
-    .select({ chronicleId: books.chronicleId, kind: books.kind, status: books.status })
+    .select({ chronicleId: books.chronicleId, layoutPlan: books.layoutPlan, status: books.status })
     .from(books)
     .where(eq(books.id, bookId))
     .limit(1);
   if (!row) return err('Book not found.');
-  if (row.kind !== 'photo') return err('This is not a photo book.');
+  // Engine gate, not a kind gate: these mutations belong to the unified builder, which
+  // now serves EVERY book except one still holding a legacy story-book plan (those keep
+  // the old builder until their owner converts). Gating on `kind` here would have left
+  // every story-entry book in a builder whose controls all failed.
+  if (isLegacyStoryPlan(row.layoutPlan)) return err('This book still uses the old layout — switch it to the new layout first.');
   const gate = await ensureBookAccess(row.chronicleId, userId);
   if (!gate.ok) return gate;
   if (row.status === 'ordered') {
@@ -1059,12 +1063,12 @@ export async function listBookPhotos(
   userId: string,
 ): Promise<Result<{ photos: BookPhotoItem[] }>> {
   const [row] = await db
-    .select({ chronicleId: books.chronicleId, kind: books.kind })
+    .select({ chronicleId: books.chronicleId, layoutPlan: books.layoutPlan })
     .from(books)
     .where(eq(books.id, bookId))
     .limit(1);
   if (!row) return err('Book not found.');
-  if (row.kind !== 'photo') return err('This is not a photo book.');
+  if (isLegacyStoryPlan(row.layoutPlan)) return err('This book still uses the old layout — switch it to the new layout first.');
   const m = await getMembership(row.chronicleId, userId);
   if (!m) return err('Book not found.');
 
@@ -1170,12 +1174,12 @@ export async function getPhotoBookStyle(
   userId: string,
 ): Promise<Result<{ style: PhotoBookStyle }>> {
   const [row] = await db
-    .select({ chronicleId: books.chronicleId, kind: books.kind, layoutPlan: books.layoutPlan, layoutStale: books.layoutStale })
+    .select({ chronicleId: books.chronicleId, layoutPlan: books.layoutPlan, layoutStale: books.layoutStale })
     .from(books)
     .where(eq(books.id, bookId))
     .limit(1);
   if (!row) return err('Book not found.');
-  if (row.kind !== 'photo') return err('This is not a photo book.');
+  if (isLegacyStoryPlan(row.layoutPlan)) return err('This book still uses the old layout — switch it to the new layout first.');
   const m = await getMembership(row.chronicleId, userId);
   if (!m) return err('Book not found.');
 
@@ -1505,12 +1509,12 @@ export interface PhotoBookSummary {
  */
 export async function getPhotoBookSummary(bookId: string, userId: string): Promise<Result<PhotoBookSummary>> {
   const [row] = await db
-    .select({ chronicleId: books.chronicleId, kind: books.kind, title: books.title, status: books.status, layoutSource: books.layoutSource })
+    .select({ chronicleId: books.chronicleId, layoutPlan: books.layoutPlan, title: books.title, status: books.status, layoutSource: books.layoutSource })
     .from(books)
     .where(eq(books.id, bookId))
     .limit(1);
   if (!row) return err('Book not found.');
-  if (row.kind !== 'photo') return err('This is not a photo book.');
+  if (isLegacyStoryPlan(row.layoutPlan)) return err('This book still uses the old layout — switch it to the new layout first.');
   const m = await getMembership(row.chronicleId, userId);
   if (!m) return err('Book not found.');
 
@@ -1856,6 +1860,10 @@ export async function setBookStories(input: {
   // story now mirrors its photos into `book_photos` — so without it, attaching stories
   // to a photo book would inject photos into its grid, count them against the upload
   // cap, and race `addBookPhotos` for positions.
+  // A photo-ENTRY book (no chapters, built from uploads) has no chapter list to
+  // replace; attaching stories to one would inject their mirrored photos into its grid
+  // and count them against the upload cap. The unified builder's own story picker
+  // (PR D) is what will make this a real capability; until then it stays refused.
   if (gate.book.kind === 'photo') {
     return err('This is a photo book — it is built from uploaded photos, not from stories.');
   }
@@ -1936,7 +1944,7 @@ export async function requestPreview(input: {
   // stays empty for it) and, unlike a story book, is never opened by a viewer with partial
   // access (§2: "every chronicle member with access to the book sees them"), so neither of
   // the story-only checks below applies.
-  if (gate.book.kind === 'photo') {
+  if (!isLegacyStoryPlan(gate.book.layoutPlan)) {
     // Already fresh — nothing to (re-)render. Lets the "Download PDF" flow call this
     // unconditionally before serving the PDF without forcing a wasteful Chromium re-run
     // on a book whose print PDF already matches its current content.
@@ -1997,6 +2005,15 @@ export async function requestAiDesign(input: {
   if (!gate.ok) return gate;
   const hidden = hiddenChaptersError(gate.book);
   if (hidden) return hidden;
+  // A legacy book must never be redesigned in place: the design pass writes a UNIFIED
+  // plan, which would silently convert the book and throw away the very look this
+  // fork exists to preserve. Converting is the user's explicit call
+  // (`convertBookToUnifiedLayout`), never a side effect of pressing "Design my book".
+  if (isLegacyStoryPlan(gate.book.layoutPlan)) {
+    return err(
+      'This book still uses the old layout. Switch it to the new layout first — then the AI can design it.',
+    );
+  }
   if (gate.book.chapters.length === 0) return err('Add at least one story before designing.');
   if (gate.book.designRequestedAt) return err('An AI design pass is already running for this book.');
   if (gate.book.layoutSource === 'edited' && !input.overwriteEdits) {
@@ -2489,8 +2506,10 @@ export async function quoteBook(input: {
  * would be a much rougher guess than just resolving the plan, which the preview route
  * does on every request anyway.
  */
-export async function estimatePageCount(book: Pick<BookDetail, 'id' | 'kind' | 'chapters'>): Promise<number> {
-  if (book.kind === 'photo') {
+export async function estimatePageCount(
+  book: Pick<BookDetail, 'id' | 'kind' | 'chapters' | 'layoutPlan'>,
+): Promise<number> {
+  if (!isLegacyStoryPlan(book.layoutPlan)) {
     const loaded = await loadPhotoBook(book.id);
     const plan = await loadOrBuildPhotoPlan(book.id, loaded);
     return countPhotoBookPages(plan);

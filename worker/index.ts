@@ -18,6 +18,7 @@ import {
 } from '@/lib/queue';
 import { markRenderFailed, renderBook } from '@/lib/book-render';
 import { proposePhotoBookPlan } from '@/lib/photo-book-ai-layout';
+import { isLegacyStoryPlan } from '@/lib/book-plan-kind';
 import type { PhotoBookDesignStage } from '@/lib/photo-book-design-stage';
 import { buildAndPersistPhotoAutoPlan, loadPhotoBook } from '@/lib/photo-book-content';
 import { styleStory } from '@/lib/ai/openrouter';
@@ -97,11 +98,25 @@ async function handleRenderBook(data: RenderBookJob) {
  * than before it was clicked, only either improved or unchanged.
  */
 async function handleDesignBook(data: DesignBookJob) {
-  // Both design queues now run the SAME pass. The legacy `design-book` queue stays
-  // registered for one release so jobs enqueued before the unified deploy still drain;
-  // every enqueue site targets `design-photo-book`. A book still holding a stored
-  // story-book plan is converted explicitly by its owner (`convertBookToUnifiedLayout`),
-  // never by a background job, so there is nothing kind-specific left to do here.
+  // Both design queues now run the SAME pass — the legacy `design-book` queue stays
+  // registered for one release so jobs enqueued before the unified deploy still drain.
+  //
+  // A legacy book must never reach the unified pass: it writes a `PhotoBookPlan`, which
+  // would silently convert the book and destroy the look the legacy fork exists to
+  // preserve. `requestAiDesign` already refuses for those, so this is defense in depth
+  // for a job enqueued before that guard shipped — clear the in-flight flag and stop.
+  const [row] = await db
+    .select({ layoutPlan: books.layoutPlan })
+    .from(books)
+    .where(eq(books.id, data.bookId))
+    .limit(1);
+  if (row && isLegacyStoryPlan(row.layoutPlan)) {
+    console.log(
+      `[worker] design-book skipped for legacy book ${data.bookId} — it must be converted to the new layout first`,
+    );
+    await db.update(books).set({ designRequestedAt: null }).where(eq(books.id, data.bookId));
+    return;
+  }
   await handleDesignPhotoBook({ bookId: data.bookId });
 }
 

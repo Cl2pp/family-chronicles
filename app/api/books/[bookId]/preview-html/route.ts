@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/session';
-import { getBookForUser } from '@/lib/books';
+import { getBookForUser, type BookDetail } from '@/lib/books';
 import { presignGet } from '@/lib/s3';
 import { renderBookHtml, type LayoutChapterContent, type LayoutImage } from '@/lib/book-layout';
 import {
@@ -50,9 +50,7 @@ export async function GET(
 
   // Engine fork, not a kind fork: every book previews through the photo-book renderer
   // except one still holding a stored story-book plan (see `lib/book-plan-kind.ts`).
-  if (!isLegacyStoryPlan(book.layoutPlan)) {
-    return photoBookPreview(bookId, book.chronicleName, session.user.id);
-  }
+  if (!isLegacyStoryPlan(book.layoutPlan)) return photoBookPreview(bookId, book);
 
   const loaded = await loadBook(bookId);
   await backfillDimensionsFromThumbnails(loaded.allPhotosById);
@@ -143,18 +141,16 @@ export async function GET(
  * cover hero included. Filtering happens on the OUTPUT only — the stored plan is always
  * built from the full content, so a partial view can never overwrite it.
  */
-async function photoBookPreview(
-  bookId: string,
-  chronicleName: string,
-  userId: string,
-): Promise<NextResponse> {
+async function photoBookPreview(bookId: string, book: BookDetail): Promise<NextResponse> {
   const loaded = await loadPhotoBook(bookId);
   const plan = await loadOrBuildPhotoPlan(bookId, loaded);
 
-  // `getBookForUser` already computed which chapters this viewer may read.
-  const detail = await getBookForUser(bookId, userId);
-  const hasHidden = (detail?.hiddenChapterCount ?? 0) > 0;
-  const visibleStories = new Set((detail?.chapters ?? []).map((c) => c.storyId));
+  // The caller already loaded this — `getBookForUser` computes the viewer's story-access
+  // context, which is the expensive part of this route; re-fetching it here would double
+  // that cost on the live-preview hot path.
+  const chronicleName = book.chronicleName;
+  const hasHidden = book.hiddenChapterCount > 0;
+  const visibleStories = new Set(book.chapters.map((c) => c.storyId));
 
   const byId = new Map(loaded.photos.map((p) => [p.assetId, p]));
   const needed = referencedPhotoAssetIds(plan);

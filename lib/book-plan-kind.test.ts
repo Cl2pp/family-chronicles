@@ -89,3 +89,32 @@ describe('routing stability against real producer output', () => {
     expect(bookEngineFor(unified)).toBe('unified');
   });
 });
+
+/**
+ * Regressions from the review of PR C. Both were the same mistake: the ROUTING moved to
+ * the engine while the GATES stayed on `books.kind`, so a book could be sent to a
+ * builder whose every control then refused it.
+ *
+ * These assert the property at the source — a brand-new book (no plan yet, `kind`
+ * still 'story') must answer 'unified' — so any future gate written against `kind`
+ * shows up as a contradiction against this test's premise rather than as a silently
+ * broken builder in production.
+ */
+describe('a brand-new story-entry book routes to the unified engine', () => {
+  it('has no plan yet, so it is unified regardless of books.kind', () => {
+    // `createBook` inserts no layout_plan and leaves kind at its 'story' default.
+    expect(bookEngineFor(null)).toBe('unified');
+  });
+
+  it('stays unified once the auto-layouter has written its first plan', () => {
+    const firstPlan = {
+      kind: 'photo',
+      style: 'classic',
+      cover: { title: 'Familienwerk', heroAssetId: 'a1' },
+      sections: [
+        { title: 'Kapitel', storyId: 's1', pages: [{ template: 'text', from: 0, to: 3 }] },
+      ],
+    };
+    expect(bookEngineFor(firstPlan)).toBe('unified');
+  });
+});

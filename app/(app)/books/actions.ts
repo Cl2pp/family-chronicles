@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { requireUser } from '@/lib/session';
+import { isLegacyStoryPlan } from '@/lib/book-plan-kind';
 import { resolveActiveChronicle } from '@/lib/chronicles';
 import {
   addBookPhotos,
@@ -387,7 +388,9 @@ async function runPhotoBookChatTurn(input: {
   const message = input.message.trim();
   if (!message) return { error: tc.error };
   const book = await getBookForUser(input.bookId, user.id);
-  if (!book || book.kind !== 'photo') return { error: tc.error };
+  // Engine gate, not a kind gate — this chat belongs to the unified builder, which now
+  // serves every book except one still on a legacy story-book plan.
+  if (!book || isLegacyStoryPlan(book.layoutPlan)) return { error: tc.error };
   if (book.status === 'ordered') return { error: t.books.builder.orderedNote };
 
   // The photo book chat never creates or switches chronicles (no such tools in its

@@ -935,7 +935,7 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   const grouping = input.grouping ?? DEFAULT_PHOTO_BOOK_GROUPING;
   // Chapters own their photos; everything else (direct uploads) still clusters by the
   // reader's chosen grouping into sections that follow the chapters.
-  const chapters = (input.chapters ?? []).filter((c) => c.paragraphCount > 0 || true);
+  const chapters = input.chapters ?? [];
   const chapterOwned = new Set(chapters.map((c) => c.storyId));
   const unowned = usablePhotos.filter((p) => !p.storyId || !chapterOwned.has(p.storyId));
   const groups: Array<{ photos: AutoLayoutPhoto[]; chapter?: AutoLayoutChapter }> = [
