@@ -1,5 +1,15 @@
-import { PHOTO_BOOK_BLEED_MM, PHOTO_BOOK_CONTENT_MARGIN_MM } from '@/lib/photo-book-layout';
+import {
+  PHOTO_BOOK_BLEED_MM,
+  PHOTO_BOOK_CONTENT_MARGIN_MM,
+  rowStackCellSizesMm,
+  TEMPLATE_ROW_ARRANGEMENT,
+} from '@/lib/photo-book-layout';
 import type { PhotoBookPlan } from '@/lib/photo-book-plan';
+
+/** Pixel dimensions of the photos a plan places, keyed by assetId — lets the sizing
+ *  functions below replay the renderer's exact justified-row math instead of guessing
+ *  per-template slot fractions. */
+export type PhotoDimsById = Map<string, { width: number; height: number }>;
 
 /**
  * Pure page-count/print-sizing math for photo-book plans — deliberately its own module,
@@ -57,6 +67,7 @@ export interface PrintTargetSizeMm {
 export function photoAssetPrintTargetSizeMm(
   plan: PhotoBookPlan,
   trim: { w: number; h: number },
+  dims?: PhotoDimsById,
 ): Map<string, PrintTargetSizeMm> {
   const sizes = new Map<string, PrintTargetSizeMm>();
   const pageW = trim.w + PHOTO_BOOK_BLEED_MM * 2;
@@ -77,6 +88,36 @@ export function photoAssetPrintTargetSizeMm(
 
   for (const section of plan.sections) {
     for (const page of section.pages) {
+      const rows = TEMPLATE_ROW_ARRANGEMENT[page.template];
+      if (rows) {
+        // A justified row stack: replay the renderer's own math (shared helper — the
+        // one source of geometry) so every photo is embedded at exactly the pixels its
+        // cell prints at. A justified cell's width depends on its ROW-MATES' aspect
+        // ratios (a landscape sharing a row with a portrait can span ~70% of the
+        // width), which is why fixed per-template fractions systematically undershot.
+        const photoDims = page.assetIds.map((id) => dims?.get(id));
+        if (photoDims.every((d): d is { width: number; height: number } => d != null)) {
+          const aspectRows: number[][] = [];
+          let offset = 0;
+          for (const size of rows) {
+            aspectRows.push(photoDims.slice(offset, offset + size).map((d) => d.width / d.height));
+            offset += size;
+          }
+          const cells = rowStackCellSizesMm(aspectRows, { w: contentW, h: contentH });
+          let idx = 0;
+          cells.forEach((row) =>
+            row.forEach((cell) => {
+              set(page.assetIds[idx], cell.w, cell.h);
+              idx += 1;
+            }),
+          );
+        } else {
+          // Dimensions unknown (shouldn't happen for a placeable photo) — err large:
+          // the whole content box per slot. Costs memory, never softens the print.
+          for (const id of page.assetIds) set(id, contentW, contentH);
+        }
+        continue;
+      }
       switch (page.template) {
         case 'divider':
           for (const id of page.assetIds) set(id, pageW, pageH);
@@ -88,42 +129,25 @@ export function photoAssetPrintTargetSizeMm(
         case 'full-framed':
           for (const id of page.assetIds) set(id, contentW, contentH);
           break;
-        // The multi-photo templates are justified row stacks: any photo in a
-        // single-photo row can span the full content width, and a photo in a shared row
-        // gets a proportional share — the estimates below stay deliberately generous
-        // (a row's height depends on its siblings' aspect ratios, unknown here).
-        case 'two-horizontal':
-          for (const id of page.assetIds) set(id, contentW, contentH / 2);
-          break;
-        case 'two-vertical':
-          for (const id of page.assetIds) set(id, contentW / 2, contentH);
-          break;
-        case 'three-column':
-          for (const id of page.assetIds) set(id, contentW / 3, contentH);
-          break;
-        case 'three-mixed': {
-          const [dominant, ...rest] = page.assetIds;
-          if (dominant) set(dominant, contentW, (contentH * 2) / 3);
-          for (const id of rest) set(id, contentW / 2, contentH / 2);
-          break;
-        }
-        case 'four-mixed': {
-          const [dominant, ...rest] = page.assetIds;
-          if (dominant) set(dominant, contentW, (contentH * 2) / 3);
-          for (const id of rest) set(id, contentW / 3, contentH / 2);
-          break;
-        }
-        case 'collage-4':
-          for (const id of page.assetIds) set(id, contentW / 2, contentH / 2);
-          break;
-        case 'collage-5':
-          for (const id of page.assetIds) set(id, contentW / 2, contentH / 2);
-          break;
-        case 'collage-6':
-          for (const id of page.assetIds) set(id, contentW / 2, contentH / 2);
-          break;
       }
     }
   }
   return sizes;
+}
+
+/** The widest box (mm) each plan photo renders into on the PRINT page — the row-stack
+ *  cell width for justified slots, the content box for full-page slots, the physical
+ *  sheet for the cover hero/divider backdrops. Feeds `photoAssetRenditionNeeds` in
+ *  `lib/photo-book-content.ts`: a slot wider than the ~1600px display rendition can
+ *  serve at 300 dpi must print from the original. */
+export function photoSlotPrintWidthsMm(
+  plan: PhotoBookPlan,
+  trim: { w: number; h: number },
+  dims: PhotoDimsById,
+): Map<string, number> {
+  const widths = new Map<string, number>();
+  for (const [id, size] of photoAssetPrintTargetSizeMm(plan, trim, dims)) {
+    widths.set(id, size.w);
+  }
+  return widths;
 }

@@ -1,4 +1,4 @@
-import type { PhotoBookPlan, PhotoPagePlan } from '@/lib/photo-book-plan';
+import type { PhotoBookPlan, PhotoPagePlan, PhotoPageTemplate } from '@/lib/photo-book-plan';
 import { PHOTO_STYLE_TOKENS, type PhotoStyleTokens } from '@/lib/photo-book-styles';
 import { PAGEDJS_POLYFILL_URL } from '@/lib/pagedjs';
 
@@ -143,14 +143,56 @@ function framedFigure(image: PhotoLayoutImage | undefined, caption?: string | nu
 }
 
 /** The page's content box in mm — what a content-box page's photos may fill. */
-interface ContentBox {
+export interface ContentBox {
   w: number;
   h: number;
 }
 
 /** Uniform gap between photos, horizontal and vertical (mm) — one value for the whole
- *  book, whatever the arrangement, so every page reads as the same grid system. */
-const PHOTO_GAP_MM = 4;
+ *  book, whatever the arrangement, so every page reads as the same grid system.
+ *  Exported for `lib/photo-book-print-sizing.ts`, whose per-slot pixel budgets replay
+ *  this exact geometry. */
+export const PHOTO_GAP_MM = 4;
+
+/** How each multi-photo template splits its photos into justified rows (in `assetIds`
+ *  order), or `null` for templates that aren't row stacks (single-photo pages and
+ *  dividers). THE single definition of every template's geometry — the renderer
+ *  (`rowStackPage` below) and the print-sizing module both read it, so the pixels a
+ *  photo is embedded at can never drift from the box it actually renders into. */
+export const TEMPLATE_ROW_ARRANGEMENT: Record<PhotoPageTemplate, number[] | null> = {
+  'full-bleed': null,
+  'full-framed': null,
+  'two-vertical': [2],
+  'three-column': [3],
+  'two-horizontal': [1, 1],
+  'three-mixed': [1, 2],
+  'four-mixed': [1, 3],
+  'collage-4': [2, 2],
+  'collage-5': [2, 3],
+  'collage-6': [3, 3],
+  divider: null,
+};
+
+/**
+ * The row-stack math, standalone: given each row's photo aspect ratios and the content
+ * box, returns every cell's exact size in mm. Within a row every cell shares one height
+ * and its width is `aspect × height`, so the row fills `box.w` exactly; a stack whose
+ * natural height exceeds `box.h` is scaled down uniformly (photos shrink, never crop).
+ * Shared by the renderer (below) and `photoAssetPrintTargetSizeMm` /
+ * `photoAssetRenditionNeeds` (print embedding + rendition tier) — see
+ * `TEMPLATE_ROW_ARRANGEMENT`.
+ */
+export function rowStackCellSizesMm(aspectRows: number[][], box: ContentBox): { w: number; h: number }[][] {
+  const naturalHeights = aspectRows.map((row) => {
+    const gaps = (row.length - 1) * PHOTO_GAP_MM;
+    const aspectSum = row.reduce((sum, a) => sum + a, 0);
+    return (box.w - gaps) / aspectSum;
+  });
+  const gapsH = (aspectRows.length - 1) * PHOTO_GAP_MM;
+  const totalH = naturalHeights.reduce((a, b) => a + b, 0) + gapsH;
+  const scale = totalH > box.h ? (box.h - gapsH) / (totalH - gapsH) : 1;
+  return aspectRows.map((row, r) => row.map((a) => ({ w: a * naturalHeights[r] * scale, h: naturalHeights[r] * scale })));
+}
 
 /** Aspect ratio stood in for a photo the caller couldn't resolve (`ph-missing`) — the
  *  placeholder tile still has to occupy a plausible slot in the row math. */
@@ -180,26 +222,16 @@ function aspectOf(p: RowPhoto): number {
  * to crop — exactly the "half the photo is missing" defect this renderer replaced.
  */
 function rowStackHtml(rows: RowPhoto[][], box: ContentBox): string {
-  const naturalHeights = rows.map((row) => {
-    const gaps = (row.length - 1) * PHOTO_GAP_MM;
-    const aspectSum = row.reduce((sum, p) => sum + aspectOf(p), 0);
-    return (box.w - gaps) / aspectSum;
-  });
-  const gapsH = (rows.length - 1) * PHOTO_GAP_MM;
-  const totalH = naturalHeights.reduce((a, b) => a + b, 0) + gapsH;
-  const scale = totalH > box.h ? (box.h - gapsH) / (totalH - gapsH) : 1;
-
+  const cellSizes = rowStackCellSizesMm(rows.map((row) => row.map(aspectOf)), box);
   const rowsHtml = rows
     .map((row, r) => {
-      const h = naturalHeights[r] * scale;
       const cells = row
-        .map((p) => {
-          const w = aspectOf(p) * h;
+        .map((p, i) => {
           const photo = p.image ? img(p.image, 'ph-jimg') : `<div class="ph-jimg ph-missing"></div>`;
-          return `<div class="ph-jcell" style="width: ${w.toFixed(2)}mm">${withCaption(photo, p.caption)}</div>`;
+          return `<div class="ph-jcell" style="width: ${cellSizes[r][i].w.toFixed(2)}mm">${withCaption(photo, p.caption)}</div>`;
         })
         .join('\n');
-      return `<div class="ph-jrow" style="height: ${h.toFixed(2)}mm">${cells}</div>`;
+      return `<div class="ph-jrow" style="height: ${cellSizes[r][0].h.toFixed(2)}mm">${cells}</div>`;
     })
     .join('\n');
   return `<div class="ph-rows">${rowsHtml}</div>`;
@@ -256,32 +288,20 @@ function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, 
       </section>`;
     }
     // Every multi-photo template is a justified row stack (see rowStackHtml) — photos
-    // render at their true aspect ratios, never cropped:
+    // render at their true aspect ratios, never cropped. Row splits come from the shared
+    // TEMPLATE_ROW_ARRANGEMENT table (also used by print sizing). Collages render no
+    // captions — dense tiles have no room for per-photo text (CAPTION_LESS_TEMPLATES;
+    // the AI design pass is told the same).
     case 'two-vertical':
-      // Side-by-side pair sharing one height.
-      return rowStackPage(page, images, [2], box, true);
     case 'three-column':
-      // Three side by side in one row — only sensible when all three are portrait.
-      return rowStackPage(page, images, [3], box, true);
     case 'two-horizontal':
-      // Two stacked full-width rows.
-      return rowStackPage(page, images, [1, 1], box, true);
     case 'three-mixed':
-      // One dominant photo across the top + a justified pair below it.
-      return rowStackPage(page, images, [1, 2], box, true);
     case 'four-mixed':
-      // One dominant photo across the top + a justified trio below it.
-      return rowStackPage(page, images, [1, 3], box, true);
+      return rowStackPage(page, images, TEMPLATE_ROW_ARRANGEMENT[page.template]!, box, true);
     case 'collage-4':
-      // 2×2 mosaic as two justified rows. No captions — 4 small tiles have no room for
-      // per-photo text (the AI design pass is told the same — see CAPTION_LESS_TEMPLATES).
-      return rowStackPage(page, images, [2, 2], box, false);
     case 'collage-5':
-      // Two justified rows of 2 + 3 — same caption reasoning as collage-4.
-      return rowStackPage(page, images, [2, 3], box, false);
     case 'collage-6':
-      // Two justified rows of 3 — the densest page the vocabulary allows.
-      return rowStackPage(page, images, [3, 3], box, false);
+      return rowStackPage(page, images, TEMPLATE_ROW_ARRANGEMENT[page.template]!, box, false);
     case 'divider': {
       // The auto-layouter never emits a `divider` page (it opens sections with a hero
       // photo instead — see `lib/photo-book-autolayout.ts`), but the template exists for

@@ -29,6 +29,7 @@ import {
   referencedPhotoAssetIds,
   type LoadedPhotoBook,
   type PhotoBookPhotoRef,
+  type PhotoDimsById,
   type PrintTargetSizeMm,
 } from '@/lib/photo-book-content';
 import { embeddedFontFaceCss } from '@/lib/photo-book-fonts';
@@ -270,11 +271,18 @@ async function renderPhotoBookVariant(
   // Source selection mirrors the story path's reasoning (`renderVariant` above): the
   // preview only ever needs a small, flat-budget image, so it prefers the thumbnail and
   // never touches the (possibly huge) original; print wants the best available source for
-  // the slot's quality tier (`photoAssetRenditionNeeds` — 'display' for full-bleed/framed/
-  // divider slots, 'thumb' for grids, per docs/PHOTO_BOOK_PLAN.md §8), falling back down
-  // the chain on a decode failure (e.g. HEIC) rather than dropping the photo.
-  const renditionNeeds = photoAssetRenditionNeeds(plan);
-  const printTargets = variant === 'print' ? photoAssetPrintTargetSizeMm(plan, trim) : null;
+  // the slot's quality tier (`photoAssetRenditionNeeds` — width-aware since the justified
+  // row stacks: any slot wider than the ~1600px display rendition serves at 300 dpi
+  // prints from the original), falling back down the chain on a decode failure (e.g.
+  // HEIC) rather than dropping the photo. Both the tier and the per-slot pixel budget
+  // replay the renderer's exact row math via the photos' real dimensions.
+  const dims: PhotoDimsById = new Map(
+    loaded.photos
+      .filter((p): p is typeof p & { width: number; height: number } => !!p.width && !!p.height)
+      .map((p) => [p.assetId, { width: p.width, height: p.height }]),
+  );
+  const renditionNeeds = photoAssetRenditionNeeds(plan, trim, dims);
+  const printTargets = variant === 'print' ? photoAssetPrintTargetSizeMm(plan, trim, dims) : null;
 
   const srcCache = new Map<string, string>();
   async function embed(photo: PhotoBookPhotoRef): Promise<PhotoLayoutImage | null> {

@@ -138,7 +138,19 @@ async function photoBookPreview(bookId: string, chronicleName: string): Promise<
 
   const byId = new Map(loaded.photos.map((p) => [p.assetId, p]));
   const needed = referencedPhotoAssetIds(plan);
-  const renditionNeeds = photoAssetRenditionNeeds(plan);
+  // Width-aware tiers (slot geometry from the photos' real dimensions): a slot that
+  // spans most of the page width presigns the ~1600px display rendition instead of the
+  // 640px thumbnail, so the live preview isn't visibly soft on dominant photos.
+  const dims = new Map(
+    loaded.photos
+      .filter((p): p is typeof p & { width: number; height: number } => !!p.width && !!p.height)
+      .map((p) => [p.assetId, { width: p.width, height: p.height }]),
+  );
+  const renditionNeeds = photoAssetRenditionNeeds(
+    plan,
+    TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'],
+    dims,
+  );
 
   async function resolveImage(photo: PhotoBookPhotoRef, level: 'display' | 'thumb'): Promise<PhotoLayoutImage | null> {
     if (!photo.width || !photo.height) return null;

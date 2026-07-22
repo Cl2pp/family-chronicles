@@ -11,6 +11,7 @@ import {
 } from '@/lib/photo-book-plan';
 import { buildPhotoBookAutoLayout, resolveUsableHeroId, type AutoLayoutPhoto } from '@/lib/photo-book-autolayout';
 import { repairPhotoBookPlan } from '@/lib/photo-book-repair';
+import { photoSlotPrintWidthsMm, type PhotoDimsById } from '@/lib/photo-book-print-sizing';
 import { parsePhotoGrouping } from '@/lib/photo-book-grouping';
 import { parseStoredPhotoAnalysis, type PhotoAnalysis } from '@/lib/photo-analysis';
 
@@ -335,17 +336,34 @@ export function referencedPhotoAssetIds(plan: PhotoBookPlan): Set<string> {
   return ids;
 }
 
-/** Which single-photo templates render full-page — these want the ~1600px "display"
- *  rendition (docs/PHOTO_BOOK_PLAN.md §8); every other placement (multi-photo grids,
- *  the small back-cover photos) is fine at the 640px thumbnail. */
+/** Which single-photo templates render full-page — the fallback tier when the caller
+ *  can't supply slot geometry (see `photoAssetRenditionNeeds`): these want the ~1600px
+ *  "display" rendition (docs/PHOTO_BOOK_PLAN.md §8); everything else falls back to the
+ *  640px thumbnail tier. */
 const DISPLAY_QUALITY_TEMPLATES = new Set(['full-bleed', 'full-framed', 'divider']);
 
-/** For every photo the plan places, whether the preview should presign its `display`
- *  rendition (falling back to the thumbnail/original) or the smaller thumbnail. A photo
- *  placed in more than one role (unusual — `checkPhotoBookPlanConsistency` normally
- *  forbids reusing a photo, but the cover hero always gets display quality regardless of
- *  where else a bug might reference it) resolves to `'display'` if ANY placement wants it. */
-export function photoAssetRenditionNeeds(plan: PhotoBookPlan): Map<string, 'display' | 'thumb'> {
+/** The widest slot (mm) the ~1600px display rendition can serve at 300 dpi
+ *  (1600 / 300 × 25.4 ≈ 135). A slot wider than this must print from the original —
+ *  since the justified row stacks, a `three-mixed`/`four-mixed` dominant or a
+ *  `two-horizontal` row spans the full content width (~180mm on the 21×28 format), and
+ *  a landscape sharing a row with a portrait can exceed this too. */
+const DISPLAY_RENDITION_MAX_SLOT_MM = 135;
+
+/** For every photo the plan places, its quality tier: `'display'` slots want the
+ *  ~1600px display rendition on screen and the ORIGINAL for print; `'thumb'` slots are
+ *  fine with the 640px thumbnail on screen and the display rendition for print.
+ *
+ *  When `trim` + `dims` are provided, the tier is computed from the slot's ACTUAL
+ *  rendered width (`photoSlotPrintWidthsMm` — the renderer's own row math): anything
+ *  wider than `DISPLAY_RENDITION_MAX_SLOT_MM` is `'display'`. Without them (legacy
+ *  callers), the per-template fallback applies. A photo placed in more than one role
+ *  resolves to `'display'` if ANY placement wants it; the cover hero is always
+ *  `'display'`. */
+export function photoAssetRenditionNeeds(
+  plan: PhotoBookPlan,
+  trim?: { w: number; h: number },
+  dims?: PhotoDimsById,
+): Map<string, 'display' | 'thumb'> {
   const needs = new Map<string, 'display' | 'thumb'>();
   function want(id: string, level: 'display' | 'thumb') {
     if (needs.get(id) === 'display') return;
@@ -353,10 +371,22 @@ export function photoAssetRenditionNeeds(plan: PhotoBookPlan): Map<string, 'disp
   }
   if (plan.cover.heroAssetId) want(plan.cover.heroAssetId, 'display');
   for (const id of plan.cover.backAssetIds ?? []) want(id, 'thumb');
+
+  const slotWidths = trim && dims ? photoSlotPrintWidthsMm(plan, trim, dims) : null;
   for (const section of plan.sections) {
     for (const page of section.pages) {
-      const level = DISPLAY_QUALITY_TEMPLATES.has(page.template) ? 'display' : 'thumb';
-      for (const id of page.assetIds) want(id, level);
+      for (const id of page.assetIds) {
+        const width = slotWidths?.get(id);
+        const level =
+          width != null
+            ? width > DISPLAY_RENDITION_MAX_SLOT_MM
+              ? 'display'
+              : 'thumb'
+            : DISPLAY_QUALITY_TEMPLATES.has(page.template)
+              ? 'display'
+              : 'thumb';
+        want(id, level);
+      }
     }
   }
   return needs;
@@ -397,4 +427,10 @@ export async function backfillPhotoBookDimensionsFromOriginals(
 // etc.) pull in `@/db`/`@/lib/s3` at module scope, which would drag a database/env
 // dependency into what should be a plain, vitest-without-a-database unit test. Re-exported
 // here anyway so existing callers of this module don't need a second import.
-export { countPhotoBookPages, photoAssetPrintTargetSizeMm, type PrintTargetSizeMm } from '@/lib/photo-book-print-sizing';
+export {
+  countPhotoBookPages,
+  photoAssetPrintTargetSizeMm,
+  photoSlotPrintWidthsMm,
+  type PhotoDimsById,
+  type PrintTargetSizeMm,
+} from '@/lib/photo-book-print-sizing';

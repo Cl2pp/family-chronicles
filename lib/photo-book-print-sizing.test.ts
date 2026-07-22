@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PHOTO_BOOK_BLEED_MM, PHOTO_BOOK_CONTENT_MARGIN_MM } from './photo-book-layout';
-import { countPhotoBookPages, photoAssetPrintTargetSizeMm } from './photo-book-print-sizing';
+import { countPhotoBookPages, photoAssetPrintTargetSizeMm, photoSlotPrintWidthsMm } from './photo-book-print-sizing';
 import type { PhotoBookPlan } from './photo-book-plan';
 
 /** Pure-function tests for the print-embedding size calculation and page-count estimate —
@@ -78,10 +78,67 @@ describe('photoAssetPrintTargetSizeMm', () => {
     expect(sizes.get('a1')).toEqual({ w: contentW, h: contentH });
   });
 
-  it('sizes a two-horizontal photo to full content width, half content height', () => {
+  it('without dimensions, budgets every row-stack slot at the whole content box (errs large)', () => {
     const sizes = photoAssetPrintTargetSizeMm(basePlan(), TRIM);
-    expect(sizes.get('a2')).toEqual({ w: contentW, h: contentH / 2 });
-    expect(sizes.get('a3')).toEqual({ w: contentW, h: contentH / 2 });
+    expect(sizes.get('a2')).toEqual({ w: contentW, h: contentH });
+    expect(sizes.get('a3')).toEqual({ w: contentW, h: contentH });
+  });
+
+  it('with dimensions, replays the renderer row math exactly (two-horizontal landscapes)', () => {
+    const dims = new Map([
+      ['a1', { width: 1600, height: 1067 }],
+      ['a2', { width: 4000, height: 3000 }],
+      ['a3', { width: 4000, height: 3000 }],
+    ]);
+    const sizes = photoAssetPrintTargetSizeMm(basePlan(), TRIM, dims);
+    // Two full-width rows of one 4:3 landscape each: natural height = contentW / (4/3)
+    // per row; the stack overflows contentH, so both rows scale to fit exactly.
+    const natural = contentW / (4 / 3);
+    const scale = (contentH - 4) / (natural * 2);
+    expect(sizes.get('a2')!.h).toBeCloseTo(natural * scale, 1);
+    expect(sizes.get('a2')!.w).toBeCloseTo((4 / 3) * natural * scale, 1);
+  });
+
+  it('a landscape sharing a justified row with a portrait gets its true (wide) share', () => {
+    // The case fixed by the shared row math: fixed per-template fractions budgeted a
+    // collage-4 slot at contentW/2, but a 3:2 landscape beside a 2:3 portrait renders
+    // ~68% of the row width — the embed must match or the print goes soft.
+    const plan = basePlan({
+      sections: [
+        {
+          title: 'Mixed',
+          pages: [{ template: 'collage-4', assetIds: ['l1', 'p1', 'l2', 'p2'] }],
+        },
+      ],
+    });
+    const dims = new Map([
+      ['l1', { width: 3000, height: 2000 }],
+      ['p1', { width: 2000, height: 3000 }],
+      ['l2', { width: 3000, height: 2000 }],
+      ['p2', { width: 2000, height: 3000 }],
+    ]);
+    const sizes = photoAssetPrintTargetSizeMm(plan, TRIM, dims);
+    const rowH = (contentW - 4) / (1.5 + 2 / 3);
+    expect(sizes.get('l1')!.w).toBeCloseTo(1.5 * rowH, 1);
+    expect(sizes.get('l1')!.w).toBeGreaterThan(contentW / 2 + 20);
+    expect(sizes.get('p1')!.w).toBeCloseTo((2 / 3) * rowH, 1);
+  });
+
+  it('photoSlotPrintWidthsMm reports the dominant slot of a three-mixed at full content width', () => {
+    const plan = basePlan({
+      sections: [
+        { title: 'S', pages: [{ template: 'three-mixed', assetIds: ['l1', 'p1', 'p2'] }] },
+      ],
+    });
+    const dims = new Map([
+      ['l1', { width: 3000, height: 2000 }],
+      ['p1', { width: 2000, height: 3000 }],
+      ['p2', { width: 2000, height: 3000 }],
+    ]);
+    const widths = photoSlotPrintWidthsMm(plan, TRIM, dims);
+    // The dominant row may scale down to fit the stack, but must stay far wider than
+    // the old contentW*2/3 budget — this is what forces the original-quality source.
+    expect(widths.get('l1')!).toBeGreaterThan(135);
   });
 
   it('sizes back-cover photos to the fixed 40x50mm frame', () => {
@@ -99,13 +156,16 @@ describe('photoAssetPrintTargetSizeMm', () => {
     expect(sizes.get('a4')).toEqual({ w: contentW, h: contentH });
   });
 
-  it('gives every photo in a collage-4 an equal quarter of the content box', () => {
+  it('gives four equal squares in a collage-4 an equal quarter-ish share (exact row math)', () => {
     const plan = basePlan({
       sections: [{ title: 'S', pages: [{ template: 'collage-4', assetIds: ['c1', 'c2', 'c3', 'c4'] }] }],
     });
-    const sizes = photoAssetPrintTargetSizeMm(plan, TRIM);
+    const dims = new Map(['c1', 'c2', 'c3', 'c4'].map((id) => [id, { width: 1200, height: 1200 }]));
+    const sizes = photoAssetPrintTargetSizeMm(plan, TRIM, dims);
+    // 2+2 rows of squares: each cell (contentW - gap) / 2 wide and equally tall.
     for (const id of ['c1', 'c2', 'c3', 'c4']) {
-      expect(sizes.get(id)).toEqual({ w: contentW / 2, h: contentH / 2 });
+      expect(sizes.get(id)!.w).toBeCloseTo((contentW - 4) / 2, 1);
+      expect(sizes.get(id)!.h).toBeCloseTo((contentW - 4) / 2, 1);
     }
   });
 
