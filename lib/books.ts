@@ -1247,6 +1247,9 @@ export async function updatePhotoBookSettings(input: {
   userId: string;
   title?: string;
   subtitle?: string | null;
+  /** Printed on the title page — only meaningful for a book with chapters, which is
+   *  why the unified builder shows the field only then (PR D). */
+  dedication?: string | null;
   format?: BookFormat;
   coverType?: BookCoverType;
   photoGrouping?: PhotoBookGrouping;
@@ -1283,6 +1286,7 @@ export async function updatePhotoBookSettings(input: {
   };
   if (input.title !== undefined) set.title = nextTitle;
   if (input.subtitle !== undefined) set.subtitle = nextSubtitle;
+  if (input.dedication !== undefined) set.dedication = input.dedication?.trim() || null;
   if (input.format !== undefined) set.format = input.format;
   if (input.coverType !== undefined) set.coverType = input.coverType;
   // Deliberately does NOT flip `layoutStale`: that would make the next page load rebuild
@@ -1920,6 +1924,63 @@ export async function setBookStories(input: {
       if (still.length === 0) set.coverAssetId = null;
     }
     await tx.update(books).set(set).where(eq(books.id, input.bookId));
+  });
+  await enqueueMirrorAnalysis(freshMirrors);
+  return { ok: true };
+}
+
+
+/**
+ * Toggles one attached story's text/photos flags (unified builder, PR D). The photo
+ * toggle is not just a display flag — it flips that story's mirrored `book_photos` rows
+ * between excluded and available (`syncStoryPhotoMirrors`), so the layout, the tray and
+ * the analysis pipeline all agree. Turning both off is refused: a chapter contributing
+ * neither text nor photos should be detached instead, which `setBookStories` does.
+ */
+export async function setBookStoryFlags(input: {
+  bookId: string;
+  userId: string;
+  storyId: string;
+  includeText?: boolean;
+  includePhotos?: boolean;
+}): Promise<Result> {
+  const gate = await editableBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+  const hidden = hiddenChaptersError(gate.book);
+  if (hidden) return hidden;
+
+  const [current] = await db
+    .select({ includeText: bookStories.includeText, includePhotos: bookStories.includePhotos })
+    .from(bookStories)
+    .where(and(eq(bookStories.bookId, input.bookId), eq(bookStories.storyId, input.storyId)))
+    .limit(1);
+  if (!current) return err('That story is not in this book.');
+
+  const includeText = input.includeText ?? current.includeText;
+  const includePhotos = input.includePhotos ?? current.includePhotos;
+  if (!includeText && !includePhotos) {
+    return err('A chapter needs its text or its photos — remove it from the book instead.');
+  }
+
+  let freshMirrors: Array<{ assetId: string; s3Key: string }> = [];
+  await db.transaction(async (tx) => {
+    await tx
+      .update(bookStories)
+      .set({ includeText, includePhotos })
+      .where(and(eq(bookStories.bookId, input.bookId), eq(bookStories.storyId, input.storyId)));
+    const rows = await tx
+      .select({
+        storyId: bookStories.storyId,
+        position: bookStories.position,
+        includePhotos: bookStories.includePhotos,
+      })
+      .from(bookStories)
+      .where(eq(bookStories.bookId, input.bookId));
+    freshMirrors = await syncStoryPhotoMirrors(tx, input.bookId, rows);
+    await tx
+      .update(books)
+      .set({ layoutStale: true, updatedAt: new Date(), ...invalidatePhotoBookPrint(gate.book.status) })
+      .where(eq(books.id, input.bookId));
   });
   await enqueueMirrorAnalysis(freshMirrors);
   return { ok: true };

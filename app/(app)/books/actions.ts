@@ -20,6 +20,7 @@ import {
   requestPreview,
   resetBookLayout,
   convertBookToUnifiedLayout,
+  setBookStoryFlags,
   setBookStories,
   setPhotoBookStyle,
   setPhotoExcluded,
@@ -213,6 +214,7 @@ export async function updatePhotoBookSettingsAction(input: {
   bookId: string;
   title?: string;
   subtitle?: string | null;
+  dedication?: string | null;
   format?: BookFormat;
   coverType?: BookCoverType;
   photoGrouping?: PhotoBookGrouping;
@@ -283,6 +285,19 @@ export async function resetBookLayoutAction(input: {
 }): Promise<{ error?: string }> {
   const user = await requireUser();
   const result = await resetBookLayout({ ...input, userId: user.id });
+  revalidatePath(`/books/${input.bookId}`);
+  return result.ok ? {} : { error: result.error };
+}
+
+/** Toggle one chapter's text/photos contribution (the builder's "Inhalte" step). */
+export async function setBookStoryFlagsAction(input: {
+  bookId: string;
+  storyId: string;
+  includeText?: boolean;
+  includePhotos?: boolean;
+}): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await setBookStoryFlags({ ...input, userId: user.id });
   revalidatePath(`/books/${input.bookId}`);
   return result.ok ? {} : { error: result.error };
 }

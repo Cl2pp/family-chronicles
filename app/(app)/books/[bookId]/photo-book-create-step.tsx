@@ -68,6 +68,7 @@ const TRIM_ASPECT: Record<BookFormat, number> = {
 type SettingsPatch = {
   title?: string;
   subtitle?: string | null;
+  dedication?: string | null;
   format?: BookFormat;
   coverType?: BookCoverType;
 };
@@ -107,8 +108,10 @@ function PhotoBookConfigPanel({
   // builder's settings card (`book-builder.tsx`'s `title`/`subtitle` state).
   const [title, setTitle] = useState(book.title);
   const [subtitle, setSubtitle] = useState(book.subtitle ?? '');
+  const [dedication, setDedication] = useState(book.dedication ?? '');
 
   const disabled = locked || pending;
+  const hasChapters = book.chapterCount > 0;
 
   // "By place" needs EXIF GPS and "by topic" needs a vision score; a photo set that mostly
   // lacks either would silently collapse into one meaningless chapter (photos stripped of
@@ -147,6 +150,20 @@ function PhotoBookConfigPanel({
           subtitle !== (book.subtitle ?? '') && onUpdateSettings({ subtitle: subtitle || null })
         }
       />
+      {/* A dedication sits on the title page, which only a book with chapters prints —
+          hidden for a pure photo book so its panel stays as short as it was. */}
+      {hasChapters && (
+        <TextInput
+          label={t.books.builder.dedication}
+          description={t.books.builder.dedicationHint}
+          value={dedication}
+          disabled={disabled}
+          onChange={(e) => setDedication(e.currentTarget.value)}
+          onBlur={() =>
+            dedication !== (book.dedication ?? '') && onUpdateSettings({ dedication: dedication || null })
+          }
+        />
+      )}
       {/* How the book is organised. This is the most consequential choice on the panel —
           the same photos become a timeline, a book of occasions, or a book of places — so
           it sits above the visual settings, with each option's effect spelled out rather
@@ -157,7 +174,9 @@ function PhotoBookConfigPanel({
           {tc.grouping}
         </Text>
         <Text fz={12} c="dimmed" mb={8}>
-          {tc.groupingIntro}
+          {/* With chapters present, each story is already its own section — the grouping
+              only decides how the UPLOADED photos are clustered after them. */}
+          {hasChapters ? tc.groupingIntroWithChapters : tc.groupingIntro}
         </Text>
         <Stack gap={6}>
           {PHOTO_BOOK_GROUPINGS.map((option) => (

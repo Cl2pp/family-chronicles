@@ -24,3 +24,23 @@ describe('canAccessPhotoBookStep', () => {
     expect(canAccessPhotoBookStep(2, true, new Date())).toBe(true);
   });
 });
+
+describe('canAccessPhotoBookStep — content gate (unified builder)', () => {
+  it('blocks step 2 for an empty book even though analysis is vacuously complete', () => {
+    // Zero photos means `analysisComplete` is trivially true; without the content check
+    // a brand-new book would walk straight into "Create book" with nothing to lay out.
+    expect(canAccessPhotoBookStep(1, true, null, false)).toBe(false);
+  });
+
+  it('allows step 2 for a text-only book (stories attached, no photos)', () => {
+    expect(canAccessPhotoBookStep(1, true, null, true)).toBe(true);
+  });
+
+  it('still blocks step 2 while photos are analyzing, content or not', () => {
+    expect(canAccessPhotoBookStep(1, false, null, true)).toBe(false);
+  });
+
+  it('defaults to has-content so existing callers are unaffected', () => {
+    expect(canAccessPhotoBookStep(1, true, null)).toBe(true);
+  });
+});

@@ -16,8 +16,14 @@ export function canAccessPhotoBookStep(
   index: number,
   analysisComplete: boolean,
   generatedAt: string | Date | null,
+  /** Whether step 1 has produced anything to lay out: at least one attached story or
+   *  one photo (unified builder, PR D). A book can now legitimately hold zero photos —
+   *  a text-only memoir — so "analysis complete" alone (vacuously true with no photos)
+   *  can no longer stand in for "has content". Optional so existing callers/tests keep
+   *  their meaning; omitted = treat as having content. */
+  hasContent: boolean = true,
 ): boolean {
-  if (index >= 1 && !analysisComplete) return false;
+  if (index >= 1 && (!analysisComplete || !hasContent)) return false;
   if (index >= 2 && generatedAt == null) return false;
   return true;
 }
