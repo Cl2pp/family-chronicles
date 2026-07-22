@@ -786,6 +786,8 @@ export const de: Dictionary = {
             topic: (scored: number, total: number) =>
               `Erst ${scored} von ${total} Fotos wurden analysiert. Ohne Analyse lassen sich Fotos nicht nach Thema gruppieren.`,
           },
+          groupingConfirmTitle: 'Passt das zu diesen Fotos?',
+          groupingConfirmAnyway: 'Trotzdem so aufbauen',
           groupingNeedsRedesign:
             'Gespeichert. Weil du das Layout von Hand bearbeitet hast, wird das Buch nicht automatisch neu gestaltet — nutze dafür „Mein Buch gestalten“.',
           coverType: 'Einband',

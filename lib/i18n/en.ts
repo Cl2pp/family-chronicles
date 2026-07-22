@@ -767,6 +767,8 @@ export const en = {
             topic: (scored: number, total: number) =>
               `Only ${scored} of ${total} photos have been analysed so far. Without analysis, photos can't be grouped by topic.`,
           },
+          groupingConfirmTitle: 'Does this suit these photos?',
+          groupingConfirmAnyway: 'Organise it this way anyway',
           groupingNeedsRedesign:
             "Saved. Because you've edited this layout by hand, the book won't be redesigned automatically — use \u201cDesign my book\u201d when you're ready.",
           coverType: 'Cover',

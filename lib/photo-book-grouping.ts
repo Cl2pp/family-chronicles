@@ -38,6 +38,54 @@ export function parsePhotoGrouping(value: unknown): PhotoBookGrouping {
     : DEFAULT_PHOTO_BOOK_GROUPING;
 }
 
+/** Below this share of photos carrying what a grouping needs, the clustering collapses into
+ *  one meaningless chapter and the builder says so before committing to it. */
+export const MIN_GROUPING_COVERAGE = 0.5;
+
+/** The per-photo facts a grouping needs — `book_photos.gps_lat` for by-place, a vision
+ *  score for by-topic. Matches the builder's `PhotoBookPhotoView` so it can be passed
+ *  straight in. */
+export interface GroupingCoveragePhoto {
+  excluded: boolean;
+  hasLocation: boolean;
+  hasAnalysis: boolean;
+}
+
+export interface GroupingCoverage {
+  /** Photos that carry what this grouping clusters on. */
+  supported: number;
+  /** Photos available to the layout at all (i.e. not excluded). */
+  total: number;
+  /** False when too few photos carry it for the grouping to produce real chapters. */
+  sufficient: boolean;
+}
+
+/**
+ * How well a photo set can actually support a grouping.
+ *
+ * "By place" needs EXIF GPS and "by topic" needs a vision score; a set that mostly lacks
+ * either collapses into a single trailing chapter of unplaceable photos. That is not
+ * hypothetical — the first real book we looked at had GPS on exactly none of its 36 photos
+ * (messaging apps strip it, scans and screenshots never had it). Chronological needs
+ * nothing, so it is always sufficient.
+ *
+ * Shared by the config panel (which shows the caveat for the chosen grouping) and the
+ * builder (which asks before switching to one the photos can't carry — a switch on an
+ * already-generated book spends a whole design pass).
+ */
+export function groupingCoverage(
+  photos: GroupingCoveragePhoto[],
+  grouping: PhotoBookGrouping,
+): GroupingCoverage {
+  const usable = photos.filter((p) => !p.excluded);
+  const total = usable.length;
+  if (grouping === 'chronological' || total === 0) {
+    return { supported: total, total, sufficient: true };
+  }
+  const supported = usable.filter((p) => (grouping === 'location' ? p.hasLocation : p.hasAnalysis)).length;
+  return { supported, total, sufficient: supported >= total * MIN_GROUPING_COVERAGE };
+}
+
 /**
  * The instruction handed to the design pass. Deliberately concrete about the two separate
  * decisions a grouping affects — how sections are FORMED, and how photos are ORDERED within
