@@ -2,7 +2,7 @@ import sharp, { type Sharp } from 'sharp';
 import decodeHeic from 'heic-decode';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { assets } from '@/db/schema';
+import { assets, bookPhotos } from '@/db/schema';
 import { buildKey, getObjectBuffer, putObjectBuffer } from '@/lib/s3';
 
 /**
@@ -56,6 +56,7 @@ const HEIC_TYPES = new Set(['image/heic', 'image/heif']);
 export async function generateThumbnail(s3Key: string): Promise<'done' | 'skipped'> {
   const [asset] = await db
     .select({
+      id: assets.id,
       kind: assets.kind,
       thumbS3Key: assets.thumbS3Key,
       displayS3Key: assets.displayS3Key,
@@ -68,7 +69,20 @@ export async function generateThumbnail(s3Key: string): Promise<'done' | 'skippe
   if (!asset || asset.kind !== 'photo') return 'skipped';
 
   const needsThumb = !asset.thumbS3Key;
-  const needsDisplay = asset.bookId != null && !asset.displayS3Key;
+  // The ~1600px display rendition exists for photos that render large on book pages.
+  // "In a book" used to mean book-owned (`asset.bookId`), but since story photos mirror
+  // into `book_photos` (unified-book plan, PR A) a story-owned asset can be in a book
+  // too — without a display rendition it would print soft on full-width slots.
+  const inAnyBook =
+    asset.bookId != null ||
+    (
+      await db
+        .select({ id: bookPhotos.id })
+        .from(bookPhotos)
+        .where(eq(bookPhotos.assetId, asset.id))
+        .limit(1)
+    ).length > 0;
+  const needsDisplay = inAnyBook && !asset.displayS3Key;
   if (!needsThumb && !needsDisplay) return 'skipped';
 
   const original = await getObjectBuffer(s3Key);

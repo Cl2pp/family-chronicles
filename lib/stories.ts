@@ -24,6 +24,7 @@ import {
 import { eventDateToParts, partsToEventDate } from '@/lib/dates';
 import { deleteObject, presignGet } from '@/lib/s3';
 import { enqueueThumbnail } from '@/lib/queue';
+import { mirrorStoryPhotosIntoBooks } from '@/lib/books';
 
 export type DatePrecision = 'day' | 'month' | 'year' | 'circa';
 export type InputType = 'text' | 'voice' | 'chat';
@@ -219,6 +220,9 @@ export async function addStoryPhotoContribution(
       .onConflictDoNothing();
   });
   await enqueuePhotoThumbnails(items);
+  // Photos added to a story AFTER it was put in a book still belong in that book —
+  // mirror them so they reach the shared analysis + layout pipeline.
+  await mirrorStoryPhotosIntoBooks(storyId);
 }
 
 /** Queue thumbnail generation for freshly linked photo assets. */
@@ -292,6 +296,7 @@ export async function claimChatAssetsForStory(
     return rows;
   });
   await enqueuePhotoThumbnails(claimed);
+  if (claimed.length > 0) await mirrorStoryPhotosIntoBooks(storyId);
 }
 
 export async function listAssets(storyId: string) {

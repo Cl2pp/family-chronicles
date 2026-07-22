@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, lt, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   assets,
@@ -498,6 +498,7 @@ export async function createBook(input: {
     return err('This chronicle has no ready stories yet — a book needs at least one.');
   }
 
+  let freshMirrors: Array<{ assetId: string; s3Key: string }> = [];
   const bookId = await db.transaction(async (tx) => {
     const [created] = await tx
       .insert(books)
@@ -510,9 +511,276 @@ export async function createBook(input: {
     await tx
       .insert(bookStories)
       .values(storyIds.map((storyId, position) => ({ bookId: created.id, storyId, position })));
+    freshMirrors = await syncStoryPhotoMirrors(
+      tx,
+      created.id,
+      storyIds.map((storyId, position) => ({ storyId, position, includePhotos: true })),
+    );
     return created.id;
   });
+  await enqueueMirrorAnalysis(freshMirrors);
   return { ok: true, value: { bookId } };
+}
+
+/** The slice of a drizzle transaction the mirror sync needs — also satisfied by `db`
+ *  itself, so callers outside a transaction can pass that. */
+type DbLike = Pick<typeof db, 'select' | 'insert' | 'update' | 'delete'>;
+
+/**
+ * Keeps `book_photos` mirror rows (unified-book plan, PR A) in sync with a book's
+ * attached stories: every photo asset of an attached story gets one `book_photos` row
+ * with `story_id` provenance, so story-sourced photos flow through the same
+ * analysis + layout pipeline as uploads; detaching a story removes its mirrors.
+ *
+ * Semantics:
+ * - Insert is idempotent (`ON CONFLICT (book_id, asset_id) DO NOTHING` via the
+ *   `book_photos_book_asset_uq` index) — a retried call never double-adds.
+ * - New mirror rows copy `takenAt`/GPS/`phash`/`blurScore`/`analysis`/`analysisStatus`
+ *   from any already-settled `book_photos` row for the same asset (the same story in
+ *   another book, or a re-attach) — the metadata is asset-intrinsic, so the analysis
+ *   pipeline never pays for the same photo twice. Rows with no donor stay `pending`;
+ *   `ensureBookPhotoAnalysis` enqueues their jobs lazily when a builder needs them.
+ * - A story attached with `includePhotos: false` mirrors as `excluded = true` with
+ *   reason `'story-setting'`; flipping the toggle updates existing mirrors, always
+ *   respecting an explicit per-photo `userDecision` (the user's own include/exclude
+ *   choice outranks the story-level toggle in both directions).
+ * - Positions append after whatever the book already holds, ordered by
+ *   (chapter position, asset creation) — deliberately NOT capped by
+ *   `MAX_PHOTOS_PER_BOOK`: attaching a story was never photo-capped, and silently
+ *   dropping some of a chapter's photos would be worse than a large tray.
+ */
+async function syncStoryPhotoMirrors(
+  tx: DbLike,
+  bookId: string,
+  storyRows: Array<{ storyId: string; position: number; includePhotos: boolean }>,
+): Promise<Array<{ assetId: string; s3Key: string }>> {
+  const attachedIds = storyRows.map((s) => s.storyId);
+  const needsAnalysis: Array<{ assetId: string; s3Key: string }> = [];
+
+  // Mirrors of stories that are no longer attached leave with their story.
+  await tx
+    .delete(bookPhotos)
+    .where(
+      and(
+        eq(bookPhotos.bookId, bookId),
+        isNotNull(bookPhotos.storyId),
+        ...(attachedIds.length > 0 ? [notInArray(bookPhotos.storyId, attachedIds)] : []),
+      ),
+    );
+  if (attachedIds.length === 0) return [];
+
+  const storyPhotos = await tx
+    .select({ id: assets.id, s3Key: assets.s3Key, storyId: assets.storyId, createdAt: assets.createdAt })
+    .from(assets)
+    .where(and(inArray(assets.storyId, attachedIds), eq(assets.kind, 'photo')));
+
+  const existing = await tx
+    .select({
+      assetId: bookPhotos.assetId,
+      storyId: bookPhotos.storyId,
+      excluded: bookPhotos.excluded,
+      position: bookPhotos.position,
+    })
+    .from(bookPhotos)
+    .where(eq(bookPhotos.bookId, bookId));
+  const existingIds = new Set(existing.map((e) => e.assetId));
+
+  const byStory = new Map(storyRows.map((s) => [s.storyId, s]));
+  const fresh = storyPhotos
+    .filter((p) => !existingIds.has(p.id))
+    .sort((a, b) => {
+      const pa = byStory.get(a.storyId!)?.position ?? 0;
+      const pb = byStory.get(b.storyId!)?.position ?? 0;
+      return pa - pb || a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id);
+    });
+
+  if (fresh.length > 0) {
+    // Analysis reuse: one settled donor row per asset, from any book. `updatedAt`
+    // ordering makes the pick deterministic-enough; any settled row's values are
+    // asset-intrinsic and interchangeable.
+    // Only 'done' donors: copying a 'failed' status would make a transient failure in
+    // one book permanent in every book the photo is later mirrored into (nothing ever
+    // re-enqueues a 'failed' row). A failed-elsewhere photo starts 'pending' here
+    // instead, so `ensureBookPhotoAnalysis` gives it a fresh attempt.
+    const donors = await tx
+      .select()
+      .from(bookPhotos)
+      .where(
+        and(
+          inArray(bookPhotos.assetId, fresh.map((p) => p.id)),
+          eq(bookPhotos.analysisStatus, 'done'),
+        ),
+      )
+      .orderBy(desc(bookPhotos.updatedAt));
+    const donorByAsset = new Map<string, (typeof donors)[number]>();
+    for (const d of donors) if (!donorByAsset.has(d.assetId)) donorByAsset.set(d.assetId, d);
+
+    // max(position) + 1, not a row COUNT: detaching a story deletes its mirrors and
+    // leaves gaps, so a count would hand out positions that collide with rows already
+    // there. Position is ordering-only (no unique constraint), but colliding values make
+    // the tray and the layouter's fallback sort nondeterministic.
+    const startPosition = existing.reduce((max, row) => Math.max(max, row.position + 1), 0);
+    await tx
+      .insert(bookPhotos)
+      .values(
+        fresh.map((p, i) => {
+          const story = byStory.get(p.storyId!)!;
+          const donor = donorByAsset.get(p.id);
+          return {
+            bookId,
+            assetId: p.id,
+            storyId: p.storyId,
+            position: startPosition + i,
+            excluded: !story.includePhotos,
+            excludedReason: story.includePhotos ? null : 'story-setting',
+            takenAt: donor?.takenAt ?? null,
+            gpsLat: donor?.gpsLat ?? null,
+            gpsLng: donor?.gpsLng ?? null,
+            phash: donor?.phash ?? null,
+            blurScore: donor?.blurScore ?? null,
+            analysis: donor?.analysis ?? null,
+            analysisStatus: donor?.analysisStatus ?? ('pending' as const),
+          };
+        }),
+      )
+      .onConflictDoNothing();
+    // Rows that got a settled donor are already analyzed; the rest need the pipeline.
+    // Reported to the caller so it can enqueue AFTER the transaction commits — the
+    // lazy healer's age cutoff deliberately ignores brand-new rows, so without this a
+    // freshly attached story's photos would sit unanalyzed for ten minutes.
+    needsAnalysis.push(
+      ...fresh.filter((p) => !donorByAsset.has(p.id)).map((p) => ({ assetId: p.id, s3Key: p.s3Key })),
+    );
+  }
+
+  // Reconcile the story-level photo toggle on rows that already existed. The user's own
+  // per-photo decision always wins: a force-included photo never gets story-excluded,
+  // and re-enabling a story's photos never resurrects a force-excluded one.
+  for (const story of storyRows) {
+    if (story.includePhotos) {
+      await tx
+        .update(bookPhotos)
+        .set({ excluded: false, excludedReason: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(bookPhotos.bookId, bookId),
+            eq(bookPhotos.storyId, story.storyId),
+            eq(bookPhotos.excludedReason, 'story-setting'),
+            sql`${bookPhotos.userDecision} IS DISTINCT FROM 'exclude'`,
+          ),
+        );
+    } else {
+      await tx
+        .update(bookPhotos)
+        .set({ excluded: true, excludedReason: 'story-setting', updatedAt: new Date() })
+        .where(
+          and(
+            eq(bookPhotos.bookId, bookId),
+            eq(bookPhotos.storyId, story.storyId),
+            eq(bookPhotos.excluded, false),
+            sql`${bookPhotos.userDecision} IS DISTINCT FROM 'include'`,
+          ),
+        );
+    }
+  }
+
+  return needsAnalysis;
+}
+
+/** Enqueues the analysis pipeline for freshly inserted mirror rows — called by every
+ *  caller of `syncStoryPhotoMirrors` AFTER its transaction commits, so a job can never
+ *  race ahead of the rows it is about to read. */
+async function enqueueMirrorAnalysis(fresh: Array<{ assetId: string; s3Key: string }>): Promise<void> {
+  if (fresh.length === 0) return;
+  for (const row of fresh) {
+    await enqueueThumbnail({ s3Key: row.s3Key });
+    await enqueuePhotoMeta({ assetId: row.assetId });
+  }
+  await enqueuePendingPhotoVisionBatches(fresh.map((f) => f.assetId));
+}
+
+/**
+ * Mirrors a story's photos into every book that story is already attached to — the
+ * "photos added AFTER the story was attached" path. Without it the mirror set would be
+ * frozen at attach time: a photo contributed to a story later would never reach
+ * `book_photos`, so it would get no display rendition, no analysis, and (once the
+ * unified loader lands) would silently vanish from the book its story is in.
+ *
+ * Called by the story-photo write paths in `lib/stories.ts`. Idempotent: the insert
+ * skips assets already mirrored.
+ */
+export async function mirrorStoryPhotosIntoBooks(storyId: string): Promise<void> {
+  const targets = await db
+    .select({ bookId: bookStories.bookId })
+    .from(bookStories)
+    .where(eq(bookStories.storyId, storyId));
+
+  for (const { bookId } of targets) {
+    const rows = await db
+      .select({
+        storyId: bookStories.storyId,
+        position: bookStories.position,
+        includePhotos: bookStories.includePhotos,
+      })
+      .from(bookStories)
+      .where(eq(bookStories.bookId, bookId));
+    const fresh = await db.transaction((tx) => syncStoryPhotoMirrors(tx, bookId, rows));
+    await enqueueMirrorAnalysis(fresh);
+    if (fresh.length > 0) {
+      // New photos can change sectioning/pacing/cover pick — same staleness flag
+      // `addBookPhotos` sets for an upload.
+      await db.update(books).set({ layoutStale: true, updatedAt: new Date() }).where(eq(books.id, bookId));
+    }
+  }
+}
+
+/** How long an unsettled photo must have sat untouched before `ensureBookPhotoAnalysis`
+ *  re-enqueues its jobs — long enough that a normally-progressing pipeline (upload →
+ *  photo-meta → photo-vision, each bumping `updatedAt`) is never double-enqueued, short
+ *  enough that a book whose jobs were lost (worker restart, backfilled mirror rows from
+ *  the PR A migration) heals within one builder visit. */
+const ANALYSIS_HEAL_MIN_AGE_MS = 10 * 60 * 1000;
+
+/**
+ * Lazily heals a book whose photos never got (or lost) their analysis jobs: enqueues
+ * `thumbnail` + `photo-meta` + vision batches for every UNSETTLED row (`pending`, or
+ * `analyzing` left stranded by a worker that died mid-job — nothing else ever clears
+ * that state) older than `ANALYSIS_HEAL_MIN_AGE_MS`. Needed because the PR A migration
+ * backfills mirror rows for existing story books but cannot enqueue pg-boss jobs itself
+ * — the first builder visit does it instead. Also catches uploads whose enqueue was lost
+ * to a crash.
+ *
+ * The claim is one atomic `UPDATE ... RETURNING`: two concurrent page loads would
+ * otherwise both read the same stale rows before either bumped `updatedAt`, and each
+ * would enqueue its own vision batch — duplicate model spend for the same photos. With
+ * the bump inside the statement, exactly one caller sees each row.
+ */
+export async function ensureBookPhotoAnalysis(bookId: string): Promise<void> {
+  const cutoff = new Date(Date.now() - ANALYSIS_HEAL_MIN_AGE_MS);
+  const claimed = await db
+    .update(bookPhotos)
+    .set({ updatedAt: new Date() })
+    .where(
+      and(
+        eq(bookPhotos.bookId, bookId),
+        inArray(bookPhotos.analysisStatus, ['pending', 'analyzing']),
+        lt(bookPhotos.updatedAt, cutoff),
+      ),
+    )
+    .returning({ assetId: bookPhotos.assetId });
+  if (claimed.length === 0) return;
+
+  const assetIds = claimed.map((c) => c.assetId);
+  const keys = await db
+    .select({ id: assets.id, s3Key: assets.s3Key })
+    .from(assets)
+    .where(inArray(assets.id, assetIds));
+
+  for (const row of keys) {
+    await enqueueThumbnail({ s3Key: row.s3Key });
+    await enqueuePhotoMeta({ assetId: row.id });
+  }
+  await enqueuePendingPhotoVisionBatches(assetIds);
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -1561,6 +1829,14 @@ export async function setBookStories(input: {
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
+  // Photo books have no chapters. This gate was never needed while attaching a story
+  // only touched `book_stories` (which nothing in the photo pipeline reads), but a
+  // story now mirrors its photos into `book_photos` — so without it, attaching stories
+  // to a photo book would inject photos into its grid, count them against the upload
+  // cap, and race `addBookPhotos` for positions.
+  if (gate.book.kind === 'photo') {
+    return err('This is a photo book — it is built from uploaded photos, not from stories.');
+  }
   // A viewer with hidden chapters only sees part of the chapter list — a full
   // replace from their view would silently drop the chapters they can't see.
   // Owners always see everything, so this never blocks them.
@@ -1577,11 +1853,31 @@ export async function setBookStories(input: {
   const usable = await ensureUsableBookStories(gate.book.chronicleId, unique, gate.ctx);
   if (!usable.ok) return usable;
 
+  let freshMirrors: Array<{ assetId: string; s3Key: string }> = [];
   await db.transaction(async (tx) => {
+    // Preserve each retained story's include flags across the replace — a plain
+    // delete+reinsert silently reset `includePhotos` (and would reset `includeText`)
+    // back to their defaults on every reorder.
+    const previous = await tx
+      .select({
+        storyId: bookStories.storyId,
+        includePhotos: bookStories.includePhotos,
+        includeText: bookStories.includeText,
+      })
+      .from(bookStories)
+      .where(eq(bookStories.bookId, input.bookId));
+    const flagsByStory = new Map(previous.map((p) => [p.storyId, p]));
+
     await tx.delete(bookStories).where(eq(bookStories.bookId, input.bookId));
-    await tx
-      .insert(bookStories)
-      .values(unique.map((storyId, position) => ({ bookId: input.bookId, storyId, position })));
+    const rows = unique.map((storyId, position) => ({
+      bookId: input.bookId,
+      storyId,
+      position,
+      includePhotos: flagsByStory.get(storyId)?.includePhotos ?? true,
+      includeText: flagsByStory.get(storyId)?.includeText ?? true,
+    }));
+    await tx.insert(bookStories).values(rows);
+    freshMirrors = await syncStoryPhotoMirrors(tx, input.bookId, rows);
     // Cover may have belonged to a story that just left the book.
     const cover = gate.book.coverAssetId;
     const set: Partial<typeof books.$inferInsert> = { ...invalidatePreview() };
@@ -1595,6 +1891,7 @@ export async function setBookStories(input: {
     }
     await tx.update(books).set(set).where(eq(books.id, input.bookId));
   });
+  await enqueueMirrorAnalysis(freshMirrors);
   return { ok: true };
 }
 

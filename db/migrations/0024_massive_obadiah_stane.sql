@@ -1,0 +1,1 @@
+CREATE INDEX "book_photos_asset_idx" ON "book_photos" USING btree ("asset_id");
