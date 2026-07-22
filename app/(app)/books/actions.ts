@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { requireUser } from '@/lib/session';
+import { isLegacyStoryPlan } from '@/lib/book-plan-kind';
 import { resolveActiveChronicle } from '@/lib/chronicles';
 import {
   addBookPhotos,
@@ -18,6 +19,7 @@ import {
   requestPhotoBookAiDesign,
   requestPreview,
   resetBookLayout,
+  convertBookToUnifiedLayout,
   setBookStories,
   setPhotoBookStyle,
   setPhotoExcluded,
@@ -285,6 +287,16 @@ export async function resetBookLayoutAction(input: {
   return result.ok ? {} : { error: result.error };
 }
 
+/** Convert a legacy story book to the unified layout engine — see
+ *  `convertBookToUnifiedLayout`. The book keeps its content and settings; its typography
+ *  and page layout are rebuilt, which is why the UI confirms first. */
+export async function convertBookToUnifiedLayoutAction(bookId: string): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await convertBookToUnifiedLayout({ bookId, userId: user.id });
+  revalidatePath(`/books/${bookId}`);
+  return result.ok ? {} : { error: result.error };
+}
+
 /** Permanently delete a book (stories/photos untouched). The client redirects to /books. */
 export async function deleteBookAction(bookId: string): Promise<{ error?: string }> {
   const user = await requireUser();
@@ -376,7 +388,9 @@ async function runPhotoBookChatTurn(input: {
   const message = input.message.trim();
   if (!message) return { error: tc.error };
   const book = await getBookForUser(input.bookId, user.id);
-  if (!book || book.kind !== 'photo') return { error: tc.error };
+  // Engine gate, not a kind gate — this chat belongs to the unified builder, which now
+  // serves every book except one still on a legacy story-book plan.
+  if (!book || isLegacyStoryPlan(book.layoutPlan)) return { error: tc.error };
   if (book.status === 'ordered') return { error: t.books.builder.orderedNote };
 
   // The photo book chat never creates or switches chronicles (no such tools in its

@@ -259,7 +259,7 @@ export function PhotoBookBuilder({
    *  and wait for it, so a book with a stale plan (photos added/excluded, a chat edit)
    *  never hands back an outdated PDF. */
   function downloadPdf() {
-    if (isBookPrintFresh('photo', book.status, book.layoutStale)) {
+    if (isBookPrintFresh('unified', book.status, book.layoutStale)) {
       triggerDownload();
       return;
     }

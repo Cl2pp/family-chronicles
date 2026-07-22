@@ -1,8 +1,8 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
-import { assets, bookPhotos, books } from '@/db/schema';
+import { assets, bookPhotos, books, bookStories, stories } from '@/db/schema';
 import { getObjectBuffer } from '@/lib/s3';
-import { orientedDimensions } from '@/lib/book-content';
+import { eventLabel, orientedDimensions, paragraphs } from '@/lib/book-content';
 import {
   checkPhotoBookPlanConsistency,
   isTextItem,
@@ -35,6 +35,10 @@ export interface PhotoBookPhotoRef {
   width: number | null;
   height: number | null;
   position: number;
+  /** Provenance (`book_photos.story_id`) — the story this photo came from, or `null` for
+   *  a photo uploaded straight into the book. Drives which chapter section it lands in
+   *  and, in the preview route, whose story-access decides who may see it. */
+  storyId: string | null;
   excluded: boolean;
   excludedReason: string | null;
   /** The user's own explicit include/exclude choice (`book_photos.user_decision`) —
@@ -53,6 +57,25 @@ export interface PhotoBookPhotoRef {
   analysis: PhotoAnalysis | null;
 }
 
+/** One story chapter of a unified book (`book_stories` ⋈ `stories`) — the TEXT side of
+ *  the content, alongside `photos`. Only chapters with `include_text` reach the layout
+ *  as text; a chapter with text off still contributes its photos (which mirror into
+ *  `book_photos` like any other photo — see `syncStoryPhotoMirrors` in `lib/books.ts`). */
+export interface BookChapterRef {
+  storyId: string;
+  title: string;
+  /** Formatted event label ("1962", "Juni 2025") for the section's `dateLabel`. */
+  eventLabel: string | null;
+  eventDate: Date | null;
+  /** The memoir prose the book prints — `bodyStyled` when the AI pass has run, else the
+   *  original submission. */
+  body: string;
+  paragraphs: string[];
+  includeText: boolean;
+  includePhotos: boolean;
+  position: number;
+}
+
 export interface LoadedPhotoBook {
   row: typeof books.$inferSelect;
   /** EVERY photo in the book, excluded or not — the builder's tray needs the excluded
@@ -60,12 +83,31 @@ export interface LoadedPhotoBook {
    *  apart from "not in this book at all". Plan resolution below filters this down to
    *  the available subset before handing it to the auto-layouter. */
   photos: PhotoBookPhotoRef[];
+  /** The book's story chapters in reading order — empty for a book built purely from
+   *  uploads, which is what every photo book was before the unification. */
+  chapters: BookChapterRef[];
+}
+
+/**
+ * Every chapter that contributes TEXT, in reading order — the shape the plan schema's
+ * consistency check, the repair pass and the auto-layouter all take as `stories`.
+ */
+export function textChapters(
+  loaded: LoadedPhotoBook,
+): Array<{ storyId: string; paragraphCount: number; title: string }> {
+  return loaded.chapters
+    .filter((c) => c.includeText && c.paragraphs.length > 0)
+    .map((c) => ({ storyId: c.storyId, paragraphCount: c.paragraphs.length, title: c.title }));
+}
+
+/** Paragraphs by storyId, for `renderPhotoBookHtml`'s `storyParagraphs` input. */
+export function storyParagraphMap(loaded: LoadedPhotoBook): Map<string, string[]> {
+  return new Map(loaded.chapters.map((c) => [c.storyId, c.paragraphs]));
 }
 
 export async function loadPhotoBook(bookId: string): Promise<LoadedPhotoBook> {
   const [row] = await db.select().from(books).where(eq(books.id, bookId)).limit(1);
   if (!row) throw new Error(`Book ${bookId} not found`);
-  if (row.kind !== 'photo') throw new Error(`Book ${bookId} is not a photo book`);
 
   const rows = await db
     .select({
@@ -77,6 +119,7 @@ export async function loadPhotoBook(bookId: string): Promise<LoadedPhotoBook> {
       width: assets.width,
       height: assets.height,
       position: bookPhotos.position,
+      storyId: bookPhotos.storyId,
       excluded: bookPhotos.excluded,
       excludedReason: bookPhotos.excludedReason,
       userDecision: bookPhotos.userDecision,
@@ -92,6 +135,23 @@ export async function loadPhotoBook(bookId: string): Promise<LoadedPhotoBook> {
     .where(eq(bookPhotos.bookId, bookId))
     .orderBy(asc(bookPhotos.position));
 
+  const chapterRows = await db
+    .select({
+      storyId: bookStories.storyId,
+      position: bookStories.position,
+      includeText: bookStories.includeText,
+      includePhotos: bookStories.includePhotos,
+      title: stories.title,
+      bodyStyled: stories.bodyStyled,
+      bodyOriginal: stories.bodyOriginal,
+      eventDate: stories.eventDate,
+      eventDatePrecision: stories.eventDatePrecision,
+    })
+    .from(bookStories)
+    .innerJoin(stories, eq(bookStories.storyId, stories.id))
+    .where(eq(bookStories.bookId, bookId))
+    .orderBy(asc(bookStories.position));
+
   return {
     row,
     photos: rows.map((r) => ({
@@ -99,6 +159,20 @@ export async function loadPhotoBook(bookId: string): Promise<LoadedPhotoBook> {
       userDecision: normalizeUserDecision(r.userDecision),
       analysis: parseStoredPhotoAnalysis(r.analysis),
     })),
+    chapters: chapterRows.map((c) => {
+      const body = c.bodyStyled ?? c.bodyOriginal ?? '';
+      return {
+        storyId: c.storyId,
+        title: c.title,
+        eventLabel: eventLabel(c.eventDate, c.eventDatePrecision),
+        eventDate: c.eventDate,
+        body,
+        paragraphs: paragraphs(body),
+        includeText: c.includeText,
+        includePhotos: c.includePhotos,
+        position: c.position,
+      };
+    }),
   };
 }
 
@@ -177,16 +251,20 @@ async function repairAndPersistPhotoPlan(
     (p): p is PhotoBookPhotoRef & { width: number; height: number } =>
       !p.excluded && p.width != null && p.height != null,
   );
-  if (available.length === 0) return null;
+  // A book can legitimately have no photos at all now (text-only chapters) — only bail
+  // when there is nothing to lay out in either medium.
+  if (available.length === 0 && textChapters(loaded).length === 0) return null;
 
   const { plan, changes } = repairPhotoBookPlan(stored.plan, {
     photos: available.map((p) => ({ assetId: p.assetId, width: p.width, height: p.height, analysis: p.analysis })),
     mustInclude: available.filter((p) => p.userDecision === 'include').map((p) => p.assetId),
+    stories: textChapters(loaded),
   });
 
   const content: PhotoPlanContent = {
     availableAssetIds: loaded.photos.filter((p) => !p.excluded).map((p) => p.assetId),
     allAssetIds: loaded.photos.map((p) => p.assetId),
+    stories: textChapters(loaded),
   };
   const revalidated = validatePhotoBookPlan(plan);
   const problems = revalidated.ok ? checkPhotoBookPlanConsistency(revalidated.plan, content) : [revalidated.error];
@@ -241,6 +319,12 @@ async function repairAndPersistPhotoPlan(
 export async function buildAndPersistPhotoAutoPlan(
   bookId: string,
   loaded: LoadedPhotoBook,
+  options: {
+    /** Style to build with when the stored plan can't supply one — used by the
+     *  legacy-to-unified conversion, which clears the old plan and hands the carried-over
+     *  suite across explicitly. */
+    style?: PhotoBookPlan['style'];
+  } = {},
 ): Promise<PhotoBookPlan> {
   const { row } = loaded;
 
@@ -259,6 +343,7 @@ export async function buildAndPersistPhotoAutoPlan(
       blurScore: p.blurScore,
       analysis: p.analysis,
       userDecision: p.userDecision,
+      storyId: p.storyId,
     }));
 
   const existing = row.layoutPlan ? validatePhotoBookPlan(row.layoutPlan) : null;
@@ -278,10 +363,17 @@ export async function buildAndPersistPhotoAutoPlan(
     title: row.title,
     subtitle: row.subtitle,
     coverAssetId,
-    existingStyle: existingPlan?.style,
+    existingStyle: existingPlan?.style ?? options.style,
     existingHeroAssetId,
     grouping: parsePhotoGrouping(row.photoGrouping),
     photos: autoLayoutPhotos,
+    chapters: loaded.chapters.map((c) => ({
+      storyId: c.storyId,
+      title: c.title,
+      eventLabel: c.eventLabel,
+      paragraphCount: c.paragraphs.length,
+      includeText: c.includeText,
+    })),
   });
 
   if (culled.length > 0) {
@@ -303,6 +395,7 @@ export async function buildAndPersistPhotoAutoPlan(
   const content: PhotoPlanContent = {
     availableAssetIds: available.map((p) => p.assetId).filter((id) => !culledIds.has(id)),
     allAssetIds: loaded.photos.map((p) => p.assetId),
+    stories: textChapters(loaded),
   };
 
   const validated = validatePhotoBookPlan(built);

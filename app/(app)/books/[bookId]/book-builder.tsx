@@ -42,6 +42,7 @@ import { useI18n } from '@/lib/i18n/client';
 import type { LayoutTheme, CoverStyle } from '@/lib/book-layout-plan';
 import type { LayoutOp } from '@/lib/books';
 import {
+  convertBookToUnifiedLayoutAction,
   deleteBookAction,
   requestAiDesignAction,
   setBookStoriesAction,
@@ -107,6 +108,8 @@ export function BookBuilder({
   const { t } = useI18n();
   const tb = t.books.builder;
   const [pending, startTransition] = useTransition();
+  const [converting, startConverting] = useTransition();
+  const [confirmConvert, setConfirmConvert] = useState(false);
   const router = useRouter();
 
   const locked = book.status === 'ordered';
@@ -230,6 +233,59 @@ export function BookBuilder({
 
   return (
     <Stack gap="md">
+      {/* The unified layout engine replaced this builder for every new book; existing
+          books keep their exact current look until their owner opts in here (see
+          `convertBookToUnifiedLayout`). Once no book in production still answers
+          "legacy", this banner and the whole old stack can be deleted. */}
+      <Alert color="blue" variant="light" title={tb.upgrade.title}>
+        <Stack gap={6}>
+          <Text fz={13}>{tb.upgrade.body}</Text>
+          <Text fz={12} c="dimmed">
+            {tb.upgrade.caveat}
+          </Text>
+          <Group>
+            <Button
+              size="compact-sm"
+              loading={converting}
+              disabled={locked || converting}
+              onClick={() => setConfirmConvert(true)}
+            >
+              {converting ? tb.upgrade.working : tb.upgrade.cta}
+            </Button>
+          </Group>
+        </Stack>
+      </Alert>
+      <Modal
+        opened={confirmConvert}
+        onClose={() => setConfirmConvert(false)}
+        title={tb.upgrade.confirmTitle}
+        centered
+      >
+        <Stack gap="sm">
+          <Text fz={14}>{tb.upgrade.caveat}</Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setConfirmConvert(false)}>
+              {tb.upgrade.cancel}
+            </Button>
+            <Button
+              loading={converting}
+              onClick={() => {
+                setConfirmConvert(false);
+                startConverting(async () => {
+                  const result = await convertBookToUnifiedLayoutAction(book.id);
+                  if (result.error) {
+                    notifications.show({ color: 'red', message: result.error || tb.upgrade.failed });
+                    return;
+                  }
+                  router.refresh();
+                });
+              }}
+            >
+              {tb.upgrade.confirm}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
       <Group justify="space-between" wrap="wrap">
         <Group gap="sm">
           <Anchor component={Link} href="/books" fz={13} c="dimmed">

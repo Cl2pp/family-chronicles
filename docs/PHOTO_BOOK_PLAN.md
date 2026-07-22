@@ -287,6 +287,20 @@ down (photos are never cropped — only `full-bleed` crops, slightly, by design)
 photo pages share one constant page frame (`PHOTO_BOOK_CONTENT_MARGIN_MM`); only the
 covers and section dividers bleed edge-to-edge.
 
+**Unified-book engine (PR C):** every book now renders through this stack. The fork is
+the SHAPE OF THE STORED PLAN, not `books.kind` — `bookEngineFor` (`lib/book-plan-kind.ts`)
+routes a book still holding an old `LayoutPlan` to the retired story renderer so existing
+memoir books keep their exact look, and everything else (including a book with no plan
+yet) to this one. Conversion is an explicit, confirmed user action
+(`convertBookToUnifiedLayout`): it clears the legacy plan, carries the theme across to the
+same-named style suite, and lets the auto-layouter rebuild. The loader
+(`loadPhotoBook`) now returns `chapters` alongside `photos`; the auto-layouter turns each
+chapter into one section carrying its `storyId`, its paragraphs as interleaved text runs,
+and its own photos (`book_photos.story_id` provenance), with uploads clustering into
+sections after them. Per-viewer story access applies to chapter text AND to
+story-sourced photos; uploads stay visible to every member. The legacy stack is deleted
+once no production book answers `'legacy'`.
+
 **Unified-book text (PR B of the unification plan):** `section.pages` may also hold
 `{ template: 'text', from, to }` flow items — inclusive paragraph ranges of the
 section's `storyId` (a `book_stories` chapter with `include_text`). Text is NOT a fixed

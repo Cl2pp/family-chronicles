@@ -5,7 +5,12 @@ import { chronicles } from '@/db/schema';
 import { env } from '@/lib/env';
 import { openrouter, OPENROUTER_ROUTING } from '@/lib/ai/client';
 import { encodePhotoForVision } from '@/lib/vision-image';
-import { loadPhotoBook, type LoadedPhotoBook, type PhotoBookPhotoRef } from '@/lib/photo-book-content';
+import {
+  loadPhotoBook,
+  textChapters,
+  type LoadedPhotoBook,
+  type PhotoBookPhotoRef,
+} from '@/lib/photo-book-content';
 import { computeCandidateSections, type AutoLayoutPhoto } from '@/lib/photo-book-autolayout';
 import {
   groupingInstruction,
@@ -192,7 +197,13 @@ function schemaText(): string {
   ]
 }
 
-A <page> is: { "template": <one of the templates below>, "assetIds": ["<assetId>", ...], "captions": ["<short caption or null>", ...] }
+A section may also carry "storyId": "<storyId>" — required for, and only for, the story
+chapters listed further down.
+
+A <page> is either a photo page or a run of that chapter's story text:
+
+  { "template": <one of the templates below>, "assetIds": ["<assetId>", ...], "captions": ["<short caption or null>", ...] }
+  { "template": "text", "from": <int>, "to": <int> }   // paragraphs of this section's story, 0-based, INCLUSIVE both ends
 "captions" is optional; when present it must have exactly one entry per assetId (use null for a photo you don't want a caption on).
 
 Page templates (assetIds count must match exactly):
@@ -203,6 +214,9 @@ const HARD_RULES = `Hard rules — a plan that breaks any of these will be disca
 - Only ever reference an assetId from the "Available photos" list below. Never invent one.
 - No assetId may appear more than once anywhere in the whole plan — not as the cover hero, not in cover.backAssetIds, not on two different pages. In particular: if a photo is the cover hero, it must NOT also appear on any section page.
 - Every section must have at least one page.
+- Every story chapter listed below MUST appear as exactly ONE section carrying its exact "storyId", in the order given. Never split a chapter across sections, never merge two chapters, never invent a storyId.
+- Within a chapter's section, the "text" blocks must cover EVERY paragraph index from 0 to (count - 1) exactly once, in ascending order — no gaps, no overlaps, no duplicates. Two "text" blocks must never sit directly next to each other (merge them instead).
+- "text" blocks are only allowed in a section that has a "storyId".
 - NEVER output an empty page: never use the "divider" template and never output a page with zero photos. Every section automatically gets its own full-page title divider — an extra one from you prints as a completely BLANK page in the finished book.
 - A page's "assetIds" length must exactly match its template's photo count (see the template list).
 - If "captions" is present on a page, it must have exactly as many entries as "assetIds".
@@ -251,6 +265,7 @@ Design goals — this is where your judgment (and the ability to actually see th
 - NAME sections from what's actually in them ("Am Strand", "Omas Geburtstag") rather than a generic date range — put the date range in "dateLabel" instead if you want to keep it visible.
 - Follow the organisation the reader chose (stated at the top) when deciding what belongs in a section and in what order the sections run. Everything below is about how each section then LOOKS.
 - Pick the cover hero: prefer a photo whose analysis marks it "coverCandidate", and among those the highest "aestheticScore" — a warm, clear, well-composed photo of people, not a blurry or eyes-closed one. The cover's title/subtitle text is fixed by the user's own settings and not yours to change — spend your judgment on the hero pick instead.
+- PLACE PHOTOS WHERE THE TEXT TALKS ABOUT THEM. In a story chapter, break the prose 1-3 times and put that chapter's photo pages at those breaks, next to the paragraphs describing what they show — not dumped at the end. A chapter usually reads best opening with its text (the divider page already announced it) and building to a strong photo page.
 - LESS IS MORE. Professional photo books put 1-3 photos on most pages and never more than 6; a dense mosaic page is the exception that makes the strong single-photo pages land, not the norm. When in doubt, give a photo more room, not less.
 - SHOW PHOTOS WHOLE. The layout never crops (except "full-bleed"'s slight fit-to-page) — your job is to pick shape combinations that fill each page pleasantly (see the shape rules above). Pair and group photos whose orientations complement each other: a landscape over two portraits, two portraits side by side, mixed rows. White space around a well-shaped arrangement is a design feature; a photo squashed into a thin strip is not.
 - ONE DOMINANT PHOTO PER PAGE-GROUP. On multi-photo pages prefer the "*-mixed" templates, which give the best photo of the moment clear visual priority; two or three equally-sized photos are fine, but five equal tiles on every page reads as a contact sheet.
@@ -325,6 +340,32 @@ async function buildMessages(
     },
     { type: 'text', text: `Available photos (${available.length}):\n${available.map((p) => photoTableLine(p, clusterIndex.get(p.assetId)!)).join('\n')}` },
   ];
+
+  // Story chapters (unified-book plan): each is one section carrying its own prose. The
+  // model needs the paragraphs themselves to decide WHERE its photos interleave.
+  const chapters = loaded.chapters.filter((c) => c.includeText && c.paragraphs.length > 0);
+  if (chapters.length > 0) {
+    userParts.push({
+      type: 'text',
+      text:
+        `This book has ${chapters.length} story chapter${chapters.length === 1 ? '' : 's'}. ` +
+        'Each one MUST become exactly one section carrying that storyId, in the order given, ' +
+        'with its paragraphs covered by "text" blocks and its photos placed among them.',
+    });
+    for (const chapter of chapters) {
+      const photosOfChapter = available.filter((p) => p.storyId === chapter.storyId);
+      const lines = [
+        `### Chapter — storyId: ${chapter.storyId}`,
+        `Title: ${chapter.title}`,
+        `Date label: ${chapter.eventLabel ?? 'unknown'}`,
+        `Its photos: ${photosOfChapter.length > 0 ? photosOfChapter.map((p) => p.assetId).join(', ') : 'none'}`,
+        '',
+        `Paragraphs (${chapter.paragraphs.length}):`,
+        ...chapter.paragraphs.map((text, i) => `  [${i}] (${text.trim().split(/\s+/).length} words) ${text}`),
+      ];
+      userParts.push({ type: 'text', text: lines.join('\n') });
+    }
+  }
 
   for (const photo of available) {
     if (!visionIds.has(photo.assetId)) continue;
@@ -418,10 +459,12 @@ function acceptPlan(
   // below overrides it with the stored plan's style regardless (the user's own choice wins).
   const stored = loaded.row.layoutPlan ? validatePhotoBookPlan(loaded.row.layoutPlan) : null;
 
+  const stories = textChapters(loaded);
   const coerced = coercePhotoBookPlan(raw, {
     photos: available,
     fallbackTitle: loaded.row.title,
     fallbackStyle: stored?.ok ? stored.plan.style : 'classic',
+    stories,
   });
   if (!coerced) {
     console.error(`[photo-book-ai-layout] ${label} for ${bookId}: reply had no usable plan structure`);
@@ -431,6 +474,7 @@ function acceptPlan(
   const repaired = repairPhotoBookPlan(coerced.plan, {
     photos: available,
     mustInclude: available.filter((p) => p.userDecision === 'include').map((p) => p.assetId),
+    stories,
   });
   const fixes = [...coerced.changes, ...repaired.changes];
   if (fixes.length > 0) {
@@ -452,6 +496,7 @@ function acceptPlan(
   const content: PhotoPlanContent = {
     availableAssetIds: loaded.photos.filter((p) => !p.excluded).map((p) => p.assetId),
     allAssetIds: loaded.photos.map((p) => p.assetId),
+    stories,
   };
   const validated = validatePhotoBookPlan(plan);
   if (!validated.ok) {

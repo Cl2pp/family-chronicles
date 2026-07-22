@@ -15,6 +15,7 @@ import {
 } from '@/lib/books';
 import { loadStoryAccessContext } from '@/lib/story-access';
 import { isBookPrintFresh } from '@/lib/book-print-status';
+import { bookEngineFor, isLegacyStoryPlan } from '@/lib/book-plan-kind';
 import { isDesignInFlight, parseDesignStage } from '@/lib/photo-book-design-stage';
 import { quoteBookPrice, formatSummaryLabel } from '@/lib/gelato';
 import { env } from '@/lib/env';
@@ -35,7 +36,10 @@ export default async function BookBuilderPage({
   const book = await getBookForUser(bookId, user.id, access);
   if (!book) notFound();
 
-  if (book.kind === 'photo') {
+  // Engine fork (`lib/book-plan-kind.ts`): a book still holding a stored story-book plan
+  // keeps the old builder and its exact current look until its owner converts it; every
+  // other book — including a brand-new story-entry book — uses the unified builder.
+  if (!isLegacyStoryPlan(book.layoutPlan)) {
     // Lazy healer: enqueues analysis jobs for any photo whose pipeline never ran or got
     // lost (e.g. mirror rows the PR A migration backfilled, or an enqueue lost to a
     // crash). No-op on a healthy book.
@@ -64,7 +68,7 @@ export default async function BookBuilderPage({
     // builder page doesn't have to redirect there just to price the book. Mirrors that
     // route's own `fresh`/`pageCount`/`quote` logic exactly (see its comments for why
     // `layoutStale` matters for photo books specifically).
-    const fresh = isBookPrintFresh('photo', book.status, book.layoutStale);
+    const fresh = isBookPrintFresh('unified', book.status, book.layoutStale);
     const pageCount = fresh && book.pageCount != null ? book.pageCount : await estimatePageCount(book);
     const quote = fresh
       ? await quoteBookPrice({ format: book.format, coverType: book.coverType, pageCount })
@@ -74,6 +78,7 @@ export default async function BookBuilderPage({
       id: book.id,
       title: book.title,
       kind: book.kind,
+      engine: bookEngineFor(book.layoutPlan),
       format: book.format,
       formatLabel: formatSummaryLabel(book.format, book.coverType),
       pageCount,

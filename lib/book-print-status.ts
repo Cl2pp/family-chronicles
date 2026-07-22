@@ -1,4 +1,4 @@
-import type { BookKind, BookStatus } from './books';
+import type { BookStatus } from './books';
 
 /**
  * Whether a book's stored print PDF (`previewS3Key`/`printS3Key`) can be trusted to
@@ -27,8 +27,15 @@ import type { BookKind, BookStatus } from './books';
  * `status: 'preview_ready'` unconditionally — leaving `layoutStale: true` on an
  * otherwise-"ready"-looking book until the next render clears it.
  */
-export function isBookPrintFresh(kind: BookKind, status: BookStatus, layoutStale: boolean): boolean {
+export function isBookPrintFresh(
+  engine: 'legacy' | 'unified',
+  status: BookStatus,
+  layoutStale: boolean,
+): boolean {
   if (status === 'ordered') return true;
   if (status !== 'preview_ready') return false;
-  return kind !== 'photo' || !layoutStale;
+  // `layoutStale` is only maintained by the unified pipeline; the legacy story path
+  // relies on `invalidatePreview()` alone. Keyed on the ENGINE, not `books.kind` —
+  // a story-entry book on the unified engine must honour its stale flag too.
+  return engine === 'legacy' || !layoutStale;
 }
