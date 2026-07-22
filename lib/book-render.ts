@@ -7,18 +7,7 @@ import { db } from '@/db';
 import { books, chronicles } from '@/db/schema';
 import { getObjectBuffer, putObjectBuffer } from '@/lib/s3';
 import { MIN_PAGES, MAX_PAGES } from '@/lib/gelato';
-import { renderBookHtml, type LayoutChapterContent, type LayoutImage } from '@/lib/book-layout';
-import type { LayoutPlan } from '@/lib/book-layout-plan';
-import {
-  TRIM,
-  backfillDimensionsFromOriginals,
-  loadBook,
-  loadOrBuildPlan,
-  paragraphs,
-  referencedAssetIds,
-  type LoadedBook,
-  type PhotoRef,
-} from '@/lib/book-content';
+import { TRIM } from '@/lib/book-content';
 import { renderPhotoBookHtml, type PhotoLayoutImage } from '@/lib/photo-book-layout';
 import {
   backfillPhotoBookDimensionsFromOriginals,
@@ -35,7 +24,6 @@ import {
 } from '@/lib/photo-book-content';
 import { embeddedFontFaceCss } from '@/lib/photo-book-fonts';
 import type { PhotoBookPlan } from '@/lib/photo-book-plan';
-import { isLegacyStoryPlan } from '@/lib/book-plan-kind';
 
 /**
  * The worker side of book rendering: load content, build/refresh the layout plan,
@@ -104,146 +92,20 @@ async function htmlToPdf(browser: Browser, html: string): Promise<Buffer> {
   }
 }
 
-async function renderVariant(
-  browser: Browser,
-  loaded: LoadedBook,
-  plan: LayoutPlan,
-  variant: 'preview' | 'print',
-): Promise<Buffer> {
-  // Embed only photos the plan references, at the variant's resolution. Failures
-  // skip the photo, not the book.
-  //
-  // Source selection: the preview targets 640px — exactly the thumbnail size — so
-  // it reads the WebP thumbnail when one exists and skips downloading camera
-  // originals. Print wants the original, but falls back to the thumbnail when the
-  // original can't be decoded (e.g. HEIC, which sharp's prebuilt libvips can't
-  // read) — a 640-1600px photo in print beats a missing one.
-  const srcCache = new Map<string, string>();
-  async function embed(photo: PhotoRef): Promise<LayoutImage | null> {
-    if (!photo.width || !photo.height) return null;
-    let src = srcCache.get(photo.s3Key);
-    if (!src) {
-      const sources =
-        variant === 'preview'
-          ? [photo.thumbS3Key ?? photo.s3Key]
-          : [photo.s3Key, ...(photo.thumbS3Key ? [photo.thumbS3Key] : [])];
-      let lastError: unknown;
-      for (const key of sources) {
-        try {
-          src = await photoDataUri(await getObjectBuffer(key), variant);
-          break;
-        } catch (e) {
-          lastError = e;
-          if (key !== sources[sources.length - 1]) {
-            console.warn(`[book-render] ${key} failed, trying thumbnail:`, e);
-          }
-        }
-      }
-      if (!src) {
-        console.error(`[book-render] skipping photo ${photo.s3Key}:`, lastError);
-        return null;
-      }
-      srcCache.set(photo.s3Key, src);
-    }
-    return { assetId: photo.id, src, caption: photo.caption, width: photo.width, height: photo.height };
-  }
-
-  const needed = referencedAssetIds(plan);
-  const resolved = new Map<string, LayoutImage>();
-  for (const id of needed) {
-    const photo = loaded.allPhotosById.get(id);
-    if (!photo) continue;
-    const img = await embed(photo);
-    if (img) resolved.set(id, img);
-  }
-
-  const chapters: LayoutChapterContent[] = loaded.chapters.map((c) => ({
-    storyId: c.storyId,
-    title: c.title,
-    eventLabel: c.eventLabel,
-    paragraphs: paragraphs(c.body),
-    images: c.photoAssets.map((p) => resolved.get(p.id)).filter((i): i is LayoutImage => !!i),
-  }));
-
-  const coverImage =
-    plan.cover.heroAssetId != null ? (resolved.get(plan.cover.heroAssetId) ?? null) : null;
-
-  const html = renderBookHtml({
-    variant,
-    title: loaded.row.title,
-    subtitle: loaded.row.subtitle,
-    dedication: loaded.row.dedication,
-    chronicleName: loaded.chronicleName,
-    trim: TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'],
-    plan,
-    chapters,
-    coverImage,
-    createdLabel: new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long' }),
-    watermarkText: 'VORSCHAU · PREVIEW',
-  });
-
-  return htmlToPdf(browser, html);
-}
-
-/** The `render-book` job: render, pad, store, and flip the book's status.
- *
- *  Branches on which ENGINE the book belongs to (`lib/book-plan-kind.ts`), NOT on
- *  `books.kind`: since the unification every book renders through the photo-book
- *  renderer, except one that still holds a stored story-book plan — those keep the old
- *  path (and their exact current look) until their owner regenerates them. The legacy
- *  path below is byte-for-byte what it always was; the two share only
- *  `htmlToPdf`/`padPdf`. */
+/** The `render-book` job: render, pad, store, and flip the book's status. One path for
+ *  every book since the legacy story engine was retired — kept as a named export so the
+ *  worker's queue registration reads by intent rather than by implementation. */
 export async function renderBook(bookId: string): Promise<void> {
-  const [row] = await db
-    .select({ layoutPlan: books.layoutPlan })
-    .from(books)
-    .where(eq(books.id, bookId))
-    .limit(1);
-  if (!row) throw new Error(`Book ${bookId} not found`);
-  if (!isLegacyStoryPlan(row.layoutPlan)) {
-    await renderPhotoBook(bookId);
-    return;
-  }
-
-  const loaded = await loadBook(bookId);
-  await backfillDimensionsFromOriginals(loaded.allPhotosById);
-  const plan = await loadOrBuildPlan(bookId, loaded);
-
-  const { preview, print } = await withChromium(`render story book ${bookId}`, async (browser) => ({
-    preview: await renderVariant(browser, loaded, plan, 'preview'),
-    print: await renderVariant(browser, loaded, plan, 'print'),
-  }));
-
-  const printPadded = await padPdf(print);
-  const previewPadded = await padPdf(preview);
-
-  const previewKey = `books/${bookId}/preview.pdf`;
-  const printKey = `books/${bookId}/print.pdf`;
-  await putObjectBuffer(previewKey, previewPadded.padded, 'application/pdf');
-  await putObjectBuffer(printKey, printPadded.padded, 'application/pdf');
-
-  await db
-    .update(books)
-    .set({
-      status: 'preview_ready',
-      errorMessage: null,
-      pageCount: printPadded.pageCount,
-      previewS3Key: previewKey,
-      printS3Key: printKey,
-      updatedAt: new Date(),
-    })
-    .where(eq(books.id, bookId));
+  await renderPhotoBook(bookId);
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Photo books (docs/PHOTO_BOOK_PLAN.md PR5): the same two-PDF, pad-and-store shape as
- * the story path above, but content loading (`loadPhotoBook`/`loadOrBuildPhotoPlan`),
- * HTML generation (`renderPhotoBookHtml`), and image-embedding resolution are all
- * photo-book-specific. Nothing here touches a story book's row, tables, or code path.
+ * The renderer: load the book's content and plan, embed its photos at the right
+ * resolution for the variant, print two PDFs, pad to Gelato's page rules, store both.
  * ────────────────────────────────────────────────────────────────────────── */
 
-// The photo book's low-res preview PDF reuses the story path's `photoDataUri(..,
-// 'preview')` unchanged — same flat 640px budget (`PHOTO_WIDTH.preview`) regardless of
+// The low-res preview PDF uses `photoDataUri(.., 'preview')` — a flat 640px budget
+// (`PHOTO_WIDTH.preview`) regardless of
 // slot, which is exactly right for a proof: no per-slot precision needed, and a flat
 // budget bounds memory trivially no matter how many photos the book has.
 

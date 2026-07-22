@@ -33,8 +33,6 @@ export interface OrderBook {
   id: string;
   title: string;
   kind: BookKind;
-  /** Which layout engine renders this book (`lib/book-plan-kind.ts`). */
-  engine: 'legacy' | 'unified';
   format: BookFormat;
   formatLabel: string;
   pageCount: number;
@@ -111,7 +109,7 @@ export function OrderView({
   // falls into the same "preparing" UI below as any other not-yet-rendered state, and
   // reuses the same `preparePrintProof`/`renderPreviewAction` trigger and the `rendering`
   // status poll above.
-  const preparing = !isBookPrintFresh(book.engine, book.status, book.layoutStale);
+  const preparing = !isBookPrintFresh(book.status, book.layoutStale);
   const priced = quote?.priced ?? false;
   const priceLine = priced && quote?.total != null ? eur(quote.total) : to.priceOnRequest;
 

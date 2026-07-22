@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { isLegacyStoryPlan } from '@/lib/book-plan-kind';
 import { getBookForUser, getPhotoBookSummary, requestPhotoBookAiDesign, updatePhotoBookLayout } from '@/lib/books';
 import { PHOTO_BOOK_STYLES, PHOTO_PAGE_TEMPLATES } from '@/lib/photo-book-plan';
 import type { PhotoLayoutOp } from '@/lib/photo-book-ops';
@@ -145,11 +144,7 @@ export const updateBookLayoutTool = defineTool<{ bookId: string; ops: PhotoLayou
   }),
   async execute(args, ctx) {
     const book = await getBookForUser(args.bookId, ctx.userId);
-    // Engine gate, not a kind gate — these tools drive the unified builder's chat,
-    // which serves every book except one still on a legacy story-book plan.
-    if (!book || isLegacyStoryPlan(book.layoutPlan)) {
-      return { ok: false, error: 'This book still uses the old layout — switch it to the new layout first.' };
-    }
+    if (!book) return { ok: false, error: 'Book not found.' };
     const result = await updatePhotoBookLayout({ bookId: args.bookId, userId: ctx.userId, ops: args.ops });
     if (!result.ok) return { ok: false, error: result.error };
     return {
@@ -179,11 +174,7 @@ export const redesignBookTool = defineTool<{ bookId: string; overwriteEdits?: bo
   }),
   async execute(args, ctx) {
     const book = await getBookForUser(args.bookId, ctx.userId);
-    // Engine gate, not a kind gate — these tools drive the unified builder's chat,
-    // which serves every book except one still on a legacy story-book plan.
-    if (!book || isLegacyStoryPlan(book.layoutPlan)) {
-      return { ok: false, error: 'This book still uses the old layout — switch it to the new layout first.' };
-    }
+    if (!book) return { ok: false, error: 'Book not found.' };
     const result = await requestPhotoBookAiDesign({
       bookId: args.bookId,
       userId: ctx.userId,

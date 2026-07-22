@@ -4,7 +4,6 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { requireUser } from '@/lib/session';
-import { isLegacyStoryPlan } from '@/lib/book-plan-kind';
 import { resolveActiveChronicle } from '@/lib/chronicles';
 import {
   addBookPhotos,
@@ -15,22 +14,17 @@ import {
   getBookForUser,
   listBookPhotos,
   regeneratePhotoBookLayout,
-  requestAiDesign,
   requestPhotoBookAiDesign,
   requestPreview,
-  resetBookLayout,
-  convertBookToUnifiedLayout,
   setBookStoryFlags,
   setBookStories,
   setPhotoBookStyle,
   setPhotoExcluded,
   updateBook,
-  updateBookLayout,
   updatePhotoBookSettings,
   type AddBookPhotoInput,
   type UpdatePhotoBookSettingsOutcome,
   type BookPhotoItem,
-  type LayoutOp,
 } from '@/lib/books';
 import type { PhotoBookStyle } from '@/lib/photo-book-plan';
 import type { PhotoBookGrouping } from '@/lib/photo-book-grouping';
@@ -256,38 +250,8 @@ export async function renderPreviewAction(bookId: string): Promise<{ error?: str
   return result.ok ? {} : { error: result.error };
 }
 
-export async function requestAiDesignAction(input: {
-  bookId: string;
-  overwriteEdits?: boolean;
-}): Promise<{ error?: string }> {
-  const user = await requireUser();
-  const result = await requestAiDesign({ ...input, userId: user.id });
-  revalidatePath(`/books/${input.bookId}`);
-  if (result.ok) {
-    captureServerEvent(user.id, 'book_ai_design_requested', { book_id: input.bookId });
-  }
-  return result.ok ? {} : { error: result.error };
-}
 
-export async function updateBookLayoutAction(input: {
-  bookId: string;
-  ops: LayoutOp[];
-}): Promise<{ error?: string }> {
-  const user = await requireUser();
-  const result = await updateBookLayout({ ...input, userId: user.id });
-  revalidatePath(`/books/${input.bookId}`);
-  return result.ok ? {} : { error: result.error };
-}
 
-export async function resetBookLayoutAction(input: {
-  bookId: string;
-  overwriteEdits?: boolean;
-}): Promise<{ error?: string }> {
-  const user = await requireUser();
-  const result = await resetBookLayout({ ...input, userId: user.id });
-  revalidatePath(`/books/${input.bookId}`);
-  return result.ok ? {} : { error: result.error };
-}
 
 /** Toggle one chapter's text/photos contribution (the builder's "Inhalte" step). */
 export async function setBookStoryFlagsAction(input: {
@@ -302,15 +266,6 @@ export async function setBookStoryFlagsAction(input: {
   return result.ok ? {} : { error: result.error };
 }
 
-/** Convert a legacy story book to the unified layout engine — see
- *  `convertBookToUnifiedLayout`. The book keeps its content and settings; its typography
- *  and page layout are rebuilt, which is why the UI confirms first. */
-export async function convertBookToUnifiedLayoutAction(bookId: string): Promise<{ error?: string }> {
-  const user = await requireUser();
-  const result = await convertBookToUnifiedLayout({ bookId, userId: user.id });
-  revalidatePath(`/books/${bookId}`);
-  return result.ok ? {} : { error: result.error };
-}
 
 /** Permanently delete a book (stories/photos untouched). The client redirects to /books. */
 export async function deleteBookAction(bookId: string): Promise<{ error?: string }> {
@@ -403,9 +358,7 @@ async function runPhotoBookChatTurn(input: {
   const message = input.message.trim();
   if (!message) return { error: tc.error };
   const book = await getBookForUser(input.bookId, user.id);
-  // Engine gate, not a kind gate — this chat belongs to the unified builder, which now
-  // serves every book except one still on a legacy story-book plan.
-  if (!book || isLegacyStoryPlan(book.layoutPlan)) return { error: tc.error };
+  if (!book) return { error: tc.error };
   if (book.status === 'ordered') return { error: t.books.builder.orderedNote };
 
   // The photo book chat never creates or switches chronicles (no such tools in its

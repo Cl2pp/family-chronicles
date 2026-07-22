@@ -176,6 +176,13 @@
       "when": 1784733306622,
       "tag": "0024_massive_obadiah_stane",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1784733307622,
+      "tag": "0025_retire_legacy_layouts",
+      "breakpoints": true
     }
   ]
 }

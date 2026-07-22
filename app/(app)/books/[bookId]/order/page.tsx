@@ -3,7 +3,6 @@ import { Box } from '@mantine/core';
 import { requireUser } from '@/lib/session';
 import { estimatePageCount, getBookForUser, listBookPhotos } from '@/lib/books';
 import { isBookPrintFresh } from '@/lib/book-print-status';
-import { bookEngineFor } from '@/lib/book-plan-kind';
 import { quoteBookPrice, formatSummaryLabel } from '@/lib/gelato';
 import { env } from '@/lib/env';
 import { OrderView } from './order-view';
@@ -35,7 +34,7 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
   // downgrade `status` back to `draft` on any content change, so this is exactly the old
   // `book.pageCount ?? estimate` / `status === 'preview_ready' || status === 'ordered'`
   // behavior for `kind === 'story'`.
-  const fresh = isBookPrintFresh(bookEngineFor(book.layoutPlan), book.status, book.layoutStale);
+  const fresh = isBookPrintFresh(book.status, book.layoutStale);
   const pageCount = fresh && book.pageCount != null ? book.pageCount : await estimatePageCount(book);
   const quote =
     !accessBlocked && fresh
@@ -57,7 +56,6 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
           id: book.id,
           title: book.title,
     kind: book.kind,
-    engine: bookEngineFor(book.layoutPlan),
           format: book.format,
           formatLabel: formatSummaryLabel(book.format, book.coverType),
           pageCount,
