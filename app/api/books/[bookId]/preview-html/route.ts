@@ -13,6 +13,7 @@ import {
   type PhotoBookPhotoRef,
 } from '@/lib/photo-book-content';
 import { screenFontFaceCss } from '@/lib/photo-book-fonts';
+import { validatePhotoBookPlan } from '@/lib/photo-book-plan';
 
 /**
  * The live builder preview: the same layout plan the worker prints to PDF,
@@ -57,7 +58,12 @@ export async function GET(
  */
 async function bookPreview(bookId: string, book: BookDetail): Promise<NextResponse> {
   const loaded = await loadPhotoBook(bookId);
-  const plan = await loadOrBuildPhotoPlan(bookId, loaded);
+  // An ordered book is locked: resolving its plan may REBUILD and persist one, which a
+  // plain read must never do to a book whose printed copy is already on its way. Render
+  // whatever is stored; if there is nothing stored, there is nothing to show.
+  const stored = book.status === 'ordered' ? validatePhotoBookPlan(loaded.row.layoutPlan) : null;
+  if (stored && !stored.ok) return new NextResponse('No preview for this book', { status: 404 });
+  const plan = stored?.ok ? stored.plan : await loadOrBuildPhotoPlan(bookId, loaded);
 
   // The caller already loaded this — `getBookForUser` computes the viewer's story-access
   // context, which is the expensive part of this route; re-fetching it here would double

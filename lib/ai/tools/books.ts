@@ -99,11 +99,10 @@ export const listBooksTool = defineTool({
 export const getBookTool = defineTool({
   name: 'get_book',
   description:
-    'Read one book in full: settings (incl. theme, cover style, cover hero photo) plus the ' +
-    'ordered chapter list (each with storyId, title, year, photo count, and every photo the ' +
-    'current layout actually places — assetId, caption, and placement). Always call this before ' +
-    'changing a book, and specifically before calling update_book_layout, since that\'s how you ' +
-    'find the assetIds to address.',
+    'Read one book: its settings (title, subtitle, dedication, format, status, page count) and ' +
+    'its ordered chapter list — each with storyId, title, year, photo count, and whether that ' +
+    'chapter contributes its text and/or its photos. Call this before changing a book. The ' +
+    'laid-out result (sections, pages, photo assetIds) is a separate read, get_book_layout.',
   schema: z.object({
     book: z.string().min(1).describe('The book title (or id) to read.'),
   }),

@@ -24,7 +24,7 @@ import {
 import { eventDateToParts, partsToEventDate } from '@/lib/dates';
 import { deleteObject, presignGet } from '@/lib/s3';
 import { enqueueThumbnail } from '@/lib/queue';
-import { mirrorStoryPhotosIntoBooks } from '@/lib/books';
+import { invalidateBooksForStory, mirrorStoryPhotosIntoBooks } from '@/lib/books';
 
 export type DatePrecision = 'day' | 'month' | 'year' | 'circa';
 export type InputType = 'text' | 'voice' | 'chat';
@@ -653,6 +653,9 @@ export async function applyStoryEdit(input: {
       });
     }
   });
+  // The edited prose is printed content in every book holding this story — any rendered
+  // PDF of those books is now out of date.
+  await invalidateBooksForStory(input.storyId);
   return { ok: true };
 }
 

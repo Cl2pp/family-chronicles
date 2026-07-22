@@ -277,63 +277,10 @@ export async function deleteBookAction(bookId: string): Promise<{ error?: string
   return {};
 }
 
-/** One prior turn of the builder's book chat (client-held; the chat is per-visit). */
-export interface BookChatTurn {
-  role: 'user' | 'assistant';
-  content: string;
-}
 
 /** Turns beyond this are dropped from the front — the chat is a working session on one
  *  book, not an archive, and every turn rides along to the model on every send. */
-const MAX_BOOK_CHAT_TURNS = 24;
 
-/**
- * The builder's embedded chat: run the book-scoped agent over the (client-held)
- * conversation plus the new message. Tools mutate the book directly; the page
- * revalidation bumps `previewVersion`, so the caller's `router.refresh()` re-keys the
- * live preview iframe with the changes already applied.
- */
-export async function bookChatAction(input: {
-  bookId: string;
-  history: BookChatTurn[];
-  message: string;
-}): Promise<{ reply?: string; receipts?: Receipt[]; error?: string }> {
-  const user = await requireUser();
-  const { t } = await getI18n();
-  const message = input.message.trim();
-  if (!message) return { error: t.books.builder.chat.error };
-  const book = await getBookForUser(input.bookId, user.id);
-  if (!book) return { error: t.books.builder.chat.error };
-  if (book.status === 'ordered') return { error: t.books.builder.orderedNote };
-
-  // The book chat never creates or switches chronicles (no such tools in its set), so
-  // the context is pinned to the book's chronicle and setActiveChronicle is a no-op.
-  const ctx: ToolContext = {
-    userId: user.id,
-    userName: user.name,
-    conversationId: null,
-    activeChronicleId: book.chronicleId,
-    activeChronicleName: book.chronicleName,
-    setActiveChronicle() {},
-  };
-
-  const history: ChatTurn[] = [
-    ...input.history
-      .filter((turn) => (turn.role === 'user' || turn.role === 'assistant') && typeof turn.content === 'string')
-      .slice(-MAX_BOOK_CHAT_TURNS)
-      .map((turn) => ({ role: turn.role, content: turn.content })),
-    { role: 'user' as const, content: message },
-  ];
-
-  try {
-    const result = await runBookAgent(history, ctx, { id: book.id, title: book.title });
-    revalidatePath(`/books/${input.bookId}`);
-    return { reply: result.reply, receipts: result.receipts };
-  } catch (err) {
-    console.error(`Book chat failed for book ${input.bookId}:`, err);
-    return { error: t.books.builder.chat.error };
-  }
-}
 
 /** One prior turn of the photo-book builder's chat (client-held; same per-visit contract
  *  as `BookChatTurn` — nothing is persisted, the book itself is the durable state). */

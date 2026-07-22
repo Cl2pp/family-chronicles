@@ -1714,6 +1714,32 @@ export async function updatePhotoBookLayout(input: {
   });
 }
 
+/**
+ * Marks every book containing this story as needing a fresh print render — its prose is
+ * printed content, so an edit to it makes any rendered PDF wrong. Deliberately does NOT
+ * set `layoutStale`: the layout still matches the book's structure, only the words
+ * changed, and flagging the plan stale would make an AI-designed book fall back to a
+ * repair pass it doesn't need. Best-effort; never fails the caller's own write.
+ */
+export async function invalidateBooksForStory(storyId: string): Promise<void> {
+  try {
+    await db
+      .update(books)
+      .set({ status: 'draft', updatedAt: new Date() })
+      .where(
+        and(
+          eq(books.status, 'preview_ready'),
+          inArray(
+            books.id,
+            db.select({ id: bookStories.bookId }).from(bookStories).where(eq(bookStories.storyId, storyId)),
+          ),
+        ),
+      );
+  } catch (e) {
+    console.error(`[books] could not invalidate books for story ${storyId}:`, e);
+  }
+}
+
 /** Guard shared by every mutation: member, contributor, and the book not locked.
  *  Also hands back the acting user's story-access context so mutations that need
  *  per-story checks don't load it a second time. */

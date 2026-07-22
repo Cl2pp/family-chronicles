@@ -7,8 +7,8 @@ import { defineTool } from './types';
 /**
  * Photo-book tools — the agent-facing wrapper over lib/books.ts's photo-book functions
  * (docs/PHOTO_BOOK_PLAN.md §9), mirroring lib/ai/tools/books.ts's story-book tools one
- * for one: `get_photo_book` ~ `get_book`, `update_photo_book_layout` ~ `update_book_layout`,
- * `redesign_photo_book` ~ `design_book_layout`. Registered ONLY in the photo-book agent's
+ * for one: `get_book_layout` ~ `get_book`, `update_book_layout` ~ `update_book_layout`,
+ * `redesign_book` ~ `design_book_layout`. Registered ONLY in the photo-book agent's
  * own toolset (`photoBookTools` in lib/ai/tools/index.ts) — NOT part of the shared `tools`
  * catalog the general chat agent or the story-book chat use, so a story-book conversation
  * can never see (or call) these, and vice versa.
@@ -28,7 +28,7 @@ export const getBookLayoutTool = defineTool<{ bookId: string }>({
     'so you know which photo is blurry, has closed eyes, or shows what — this is how you ' +
     'find the right assetId for a request like "the blurry ones" or "the one with Oma". Also ' +
     'lists excluded photos (with why) and available-but-unplaced ones. Always call this ' +
-    'before update_photo_book_layout, since every op needs ids/indices from here.',
+    'before update_book_layout, since every op needs ids/indices from here.',
   schema: z.object({ bookId: z.string().min(1) }),
   async execute(args, ctx) {
     const result = await getPhotoBookSummary(args.bookId, ctx.userId);
@@ -39,12 +39,12 @@ export const getBookLayoutTool = defineTool<{ bookId: string }>({
 
 /** Mirrors `PhotoLayoutOp` (lib/photo-book-ops.ts) as a zod-discriminated union, one tool
  *  with an op discriminator — same shape as the story book's `layoutOpSchema`. Section/page
- *  addressing is by INDEX (sectionIndex/pageIndex), exactly as get_photo_book reports them;
+ *  addressing is by INDEX (sectionIndex/pageIndex), exactly as get_book_layout reports them;
  *  those indices stay stable across a batch EXCEPT after merge_sections, which removes a
  *  section and shifts every later section index down by one — `updatePhotoBookLayout`
  *  (lib/books.ts) enforces this by rejecting the whole batch if any op after a
  *  merge_sections addresses a section/page by index (see merge_sections's own
- *  `.describe()` below), so always call get_photo_book again for fresh indices before
+ *  `.describe()` below), so always call get_book_layout again for fresh indices before
  *  issuing further indexed ops. */
 const photoLayoutOpSchema = z.discriminatedUnion('op', [
   z.object({
@@ -53,7 +53,7 @@ const photoLayoutOpSchema = z.discriminatedUnion('op', [
   }),
   z.object({
     op: z.literal('set_cover'),
-    heroAssetId: z.string().min(1).describe('assetId of the photo to use as the cover (must be available, from get_photo_book).'),
+    heroAssetId: z.string().min(1).describe('assetId of the photo to use as the cover (must be available, from get_book_layout).'),
   }),
   z.object({
     op: z.literal('set_cover_title'),
@@ -62,14 +62,14 @@ const photoLayoutOpSchema = z.discriminatedUnion('op', [
   }),
   z.object({
     op: z.literal('set_section_title'),
-    sectionIndex: z.int().nonnegative().describe('sectionIndex from get_photo_book.'),
+    sectionIndex: z.int().nonnegative().describe('sectionIndex from get_book_layout.'),
     title: z.string().min(1).describe('The new section title, e.g. "Sommer in Italien".'),
     dateLabel: z.string().nullish().describe('An optional date-range label shown under the title.'),
   }),
   z.object({
     op: z.literal('set_page_template'),
     sectionIndex: z.int().nonnegative(),
-    pageIndex: z.int().nonnegative().describe('pageIndex within that section, from get_photo_book.'),
+    pageIndex: z.int().nonnegative().describe('pageIndex within that section, from get_book_layout.'),
     template: z
       .enum(PHOTO_PAGE_TEMPLATES)
       .describe(
@@ -80,8 +80,8 @@ const photoLayoutOpSchema = z.discriminatedUnion('op', [
   }),
   z.object({
     op: z.literal('move_photo'),
-    assetId: z.string().min(1).describe('assetId of the photo to move (must be available, from get_photo_book).'),
-    toSectionIndex: z.int().nonnegative().describe('Destination sectionIndex, from get_photo_book.'),
+    assetId: z.string().min(1).describe('assetId of the photo to move (must be available, from get_book_layout).'),
+    toSectionIndex: z.int().nonnegative().describe('Destination sectionIndex, from get_book_layout.'),
     toPageIndex: z
       .int()
       .nonnegative()
@@ -95,11 +95,11 @@ const photoLayoutOpSchema = z.discriminatedUnion('op', [
   }),
   z.object({
     op: z.literal('exclude_photo'),
-    assetId: z.string().min(1).describe('assetId to exclude from the book (from get_photo_book). Removed from wherever it currently sits.'),
+    assetId: z.string().min(1).describe('assetId to exclude from the book (from get_book_layout). Removed from wherever it currently sits.'),
   }),
   z.object({
     op: z.literal('include_photo'),
-    assetId: z.string().min(1).describe('assetId to bring back into the book (from get_photo_book\'s excludedPhotos). Does not place it anywhere — follow with move_photo/set_cover if it should appear on a page.'),
+    assetId: z.string().min(1).describe('assetId to bring back into the book (from get_book_layout\'s excludedPhotos). Does not place it anywhere — follow with move_photo/set_cover if it should appear on a page.'),
   }),
   z.object({
     op: z.literal('move_section'),
@@ -115,7 +115,7 @@ const photoLayoutOpSchema = z.discriminatedUnion('op', [
       'be the last op in the batch (or the only one) — never followed by another op that ' +
       'addresses a section or page by index (set_section_title, set_page_template, ' +
       'move_photo, move_section, set_caption, or another merge_sections); such a batch is ' +
-      'rejected outright. Call get_photo_book again afterward to get fresh indices before ' +
+      'rejected outright. Call get_book_layout again afterward to get fresh indices before ' +
       'any further indexed op.',
   ),
   z.object({
@@ -132,7 +132,7 @@ export const updateBookLayoutTool = defineTool<{ bookId: string; ops: PhotoLayou
   description:
     'Make targeted edits to the photo book\'s layout: change the style, the cover photo or ' +
     'title, a section\'s title, a page\'s template, move or swap photos, exclude/include a ' +
-    'photo, reorder or merge sections, or set a photo\'s caption. Call get_photo_book first — ' +
+    'photo, reorder or merge sections, or set a photo\'s caption. Call get_book_layout first — ' +
     'every op needs an assetId and/or a sectionIndex/pageIndex from there. You can pass ' +
     'several ops in one call; they apply in order, and the WHOLE batch is rejected (nothing ' +
     'changes) if any op — or the result as a whole — would leave the layout invalid, e.g. ' +
