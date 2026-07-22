@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, lt, notInArray, sql } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   assets,
@@ -510,9 +510,199 @@ export async function createBook(input: {
     await tx
       .insert(bookStories)
       .values(storyIds.map((storyId, position) => ({ bookId: created.id, storyId, position })));
+    await syncStoryPhotoMirrors(
+      tx,
+      created.id,
+      storyIds.map((storyId, position) => ({ storyId, position, includePhotos: true })),
+    );
     return created.id;
   });
   return { ok: true, value: { bookId } };
+}
+
+/** The slice of a drizzle transaction the mirror sync needs — also satisfied by `db`
+ *  itself, so callers outside a transaction can pass that. */
+type DbLike = Pick<typeof db, 'select' | 'insert' | 'update' | 'delete'>;
+
+/**
+ * Keeps `book_photos` mirror rows (unified-book plan, PR A) in sync with a book's
+ * attached stories: every photo asset of an attached story gets one `book_photos` row
+ * with `story_id` provenance, so story-sourced photos flow through the same
+ * analysis + layout pipeline as uploads; detaching a story removes its mirrors.
+ *
+ * Semantics:
+ * - Insert is idempotent (`ON CONFLICT (book_id, asset_id) DO NOTHING` via the
+ *   `book_photos_book_asset_uq` index) — a retried call never double-adds.
+ * - New mirror rows copy `takenAt`/GPS/`phash`/`blurScore`/`analysis`/`analysisStatus`
+ *   from any already-settled `book_photos` row for the same asset (the same story in
+ *   another book, or a re-attach) — the metadata is asset-intrinsic, so the analysis
+ *   pipeline never pays for the same photo twice. Rows with no donor stay `pending`;
+ *   `ensureBookPhotoAnalysis` enqueues their jobs lazily when a builder needs them.
+ * - A story attached with `includePhotos: false` mirrors as `excluded = true` with
+ *   reason `'story-setting'`; flipping the toggle updates existing mirrors, always
+ *   respecting an explicit per-photo `userDecision` (the user's own include/exclude
+ *   choice outranks the story-level toggle in both directions).
+ * - Positions append after whatever the book already holds, ordered by
+ *   (chapter position, asset creation) — deliberately NOT capped by
+ *   `MAX_PHOTOS_PER_BOOK`: attaching a story was never photo-capped, and silently
+ *   dropping some of a chapter's photos would be worse than a large tray.
+ */
+async function syncStoryPhotoMirrors(
+  tx: DbLike,
+  bookId: string,
+  storyRows: Array<{ storyId: string; position: number; includePhotos: boolean }>,
+): Promise<void> {
+  const attachedIds = storyRows.map((s) => s.storyId);
+
+  // Mirrors of stories that are no longer attached leave with their story.
+  await tx
+    .delete(bookPhotos)
+    .where(
+      and(
+        eq(bookPhotos.bookId, bookId),
+        isNotNull(bookPhotos.storyId),
+        ...(attachedIds.length > 0 ? [notInArray(bookPhotos.storyId, attachedIds)] : []),
+      ),
+    );
+  if (attachedIds.length === 0) return;
+
+  const storyPhotos = await tx
+    .select({ id: assets.id, storyId: assets.storyId, createdAt: assets.createdAt })
+    .from(assets)
+    .where(and(inArray(assets.storyId, attachedIds), eq(assets.kind, 'photo')));
+
+  const existing = await tx
+    .select({ assetId: bookPhotos.assetId, storyId: bookPhotos.storyId, excluded: bookPhotos.excluded })
+    .from(bookPhotos)
+    .where(eq(bookPhotos.bookId, bookId));
+  const existingIds = new Set(existing.map((e) => e.assetId));
+
+  const byStory = new Map(storyRows.map((s) => [s.storyId, s]));
+  const fresh = storyPhotos
+    .filter((p) => !existingIds.has(p.id))
+    .sort((a, b) => {
+      const pa = byStory.get(a.storyId!)?.position ?? 0;
+      const pb = byStory.get(b.storyId!)?.position ?? 0;
+      return pa - pb || a.createdAt.getTime() - b.createdAt.getTime() || a.id.localeCompare(b.id);
+    });
+
+  if (fresh.length > 0) {
+    // Analysis reuse: one settled donor row per asset, from any book. `updatedAt`
+    // ordering makes the pick deterministic-enough; any settled row's values are
+    // asset-intrinsic and interchangeable.
+    const donors = await tx
+      .select()
+      .from(bookPhotos)
+      .where(
+        and(
+          inArray(bookPhotos.assetId, fresh.map((p) => p.id)),
+          inArray(bookPhotos.analysisStatus, ['done', 'failed']),
+        ),
+      )
+      .orderBy(desc(bookPhotos.updatedAt));
+    const donorByAsset = new Map<string, (typeof donors)[number]>();
+    for (const d of donors) if (!donorByAsset.has(d.assetId)) donorByAsset.set(d.assetId, d);
+
+    const startPosition = existing.length;
+    await tx
+      .insert(bookPhotos)
+      .values(
+        fresh.map((p, i) => {
+          const story = byStory.get(p.storyId!)!;
+          const donor = donorByAsset.get(p.id);
+          return {
+            bookId,
+            assetId: p.id,
+            storyId: p.storyId,
+            position: startPosition + i,
+            excluded: !story.includePhotos,
+            excludedReason: story.includePhotos ? null : 'story-setting',
+            takenAt: donor?.takenAt ?? null,
+            gpsLat: donor?.gpsLat ?? null,
+            gpsLng: donor?.gpsLng ?? null,
+            phash: donor?.phash ?? null,
+            blurScore: donor?.blurScore ?? null,
+            analysis: donor?.analysis ?? null,
+            analysisStatus: donor?.analysisStatus ?? ('pending' as const),
+          };
+        }),
+      )
+      .onConflictDoNothing();
+  }
+
+  // Reconcile the story-level photo toggle on rows that already existed. The user's own
+  // per-photo decision always wins: a force-included photo never gets story-excluded,
+  // and re-enabling a story's photos never resurrects a force-excluded one.
+  for (const story of storyRows) {
+    if (story.includePhotos) {
+      await tx
+        .update(bookPhotos)
+        .set({ excluded: false, excludedReason: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(bookPhotos.bookId, bookId),
+            eq(bookPhotos.storyId, story.storyId),
+            eq(bookPhotos.excludedReason, 'story-setting'),
+            sql`${bookPhotos.userDecision} IS DISTINCT FROM 'exclude'`,
+          ),
+        );
+    } else {
+      await tx
+        .update(bookPhotos)
+        .set({ excluded: true, excludedReason: 'story-setting', updatedAt: new Date() })
+        .where(
+          and(
+            eq(bookPhotos.bookId, bookId),
+            eq(bookPhotos.storyId, story.storyId),
+            eq(bookPhotos.excluded, false),
+            sql`${bookPhotos.userDecision} IS DISTINCT FROM 'include'`,
+          ),
+        );
+    }
+  }
+}
+
+/** How long a `pending` photo must have sat untouched before `ensureBookPhotoAnalysis`
+ *  re-enqueues its jobs — long enough that a normally-progressing pipeline (upload →
+ *  photo-meta → photo-vision, each bumping `updatedAt`) is never double-enqueued, short
+ *  enough that a book whose jobs were lost (worker restart, backfilled mirror rows from
+ *  the PR A migration) heals within one builder visit. */
+const ANALYSIS_HEAL_MIN_AGE_MS = 10 * 60 * 1000;
+
+/**
+ * Lazily heals a book whose photos never got (or lost) their analysis jobs: enqueues
+ * `thumbnail` + `photo-meta` + vision batches for every `pending` row older than
+ * `ANALYSIS_HEAL_MIN_AGE_MS`. Needed because the PR A migration backfills mirror rows
+ * for existing story books but cannot enqueue pg-boss jobs itself — the first builder
+ * visit does it instead. Also catches uploads whose enqueue was lost to a crash.
+ * Idempotent per window: touching `updatedAt` up front keeps repeated page loads from
+ * re-enqueueing inside the window, and both jobs are themselves no-ops on settled rows.
+ */
+export async function ensureBookPhotoAnalysis(bookId: string): Promise<void> {
+  const cutoff = new Date(Date.now() - ANALYSIS_HEAL_MIN_AGE_MS);
+  const stale = await db
+    .select({ assetId: bookPhotos.assetId, s3Key: assets.s3Key })
+    .from(bookPhotos)
+    .innerJoin(assets, eq(bookPhotos.assetId, assets.id))
+    .where(
+      and(
+        eq(bookPhotos.bookId, bookId),
+        eq(bookPhotos.analysisStatus, 'pending'),
+        lt(bookPhotos.updatedAt, cutoff),
+      ),
+    );
+  if (stale.length === 0) return;
+
+  await db
+    .update(bookPhotos)
+    .set({ updatedAt: new Date() })
+    .where(and(eq(bookPhotos.bookId, bookId), inArray(bookPhotos.assetId, stale.map((s) => s.assetId))));
+
+  for (const row of stale) {
+    await enqueueThumbnail({ s3Key: row.s3Key });
+    await enqueuePhotoMeta({ assetId: row.assetId });
+  }
+  await enqueuePendingPhotoVisionBatches(stale.map((s) => s.assetId));
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -1578,10 +1768,29 @@ export async function setBookStories(input: {
   if (!usable.ok) return usable;
 
   await db.transaction(async (tx) => {
+    // Preserve each retained story's include flags across the replace — a plain
+    // delete+reinsert silently reset `includePhotos` (and would reset `includeText`)
+    // back to their defaults on every reorder.
+    const previous = await tx
+      .select({
+        storyId: bookStories.storyId,
+        includePhotos: bookStories.includePhotos,
+        includeText: bookStories.includeText,
+      })
+      .from(bookStories)
+      .where(eq(bookStories.bookId, input.bookId));
+    const flagsByStory = new Map(previous.map((p) => [p.storyId, p]));
+
     await tx.delete(bookStories).where(eq(bookStories.bookId, input.bookId));
-    await tx
-      .insert(bookStories)
-      .values(unique.map((storyId, position) => ({ bookId: input.bookId, storyId, position })));
+    const rows = unique.map((storyId, position) => ({
+      bookId: input.bookId,
+      storyId,
+      position,
+      includePhotos: flagsByStory.get(storyId)?.includePhotos ?? true,
+      includeText: flagsByStory.get(storyId)?.includeText ?? true,
+    }));
+    await tx.insert(bookStories).values(rows);
+    await syncStoryPhotoMirrors(tx, input.bookId, rows);
     // Cover may have belonged to a story that just left the book.
     const cover = gate.book.coverAssetId;
     const set: Partial<typeof books.$inferInsert> = { ...invalidatePreview() };

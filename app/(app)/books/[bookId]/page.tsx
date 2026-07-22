@@ -5,6 +5,7 @@ import { db } from '@/db';
 import { assets } from '@/db/schema';
 import { requireUser } from '@/lib/session';
 import {
+  ensureBookPhotoAnalysis,
   estimatePageCount,
   getBookForUser,
   getBookLayoutSummary,
@@ -35,6 +36,10 @@ export default async function BookBuilderPage({
   if (!book) notFound();
 
   if (book.kind === 'photo') {
+    // Lazy healer: enqueues analysis jobs for any photo whose pipeline never ran or got
+    // lost (e.g. mirror rows the PR A migration backfilled, or an enqueue lost to a
+    // crash). No-op on a healthy book.
+    await ensureBookPhotoAnalysis(bookId);
     const [photosResult, styleResult] = await Promise.all([
       listBookPhotos(bookId, user.id),
       getPhotoBookStyle(bookId, user.id),

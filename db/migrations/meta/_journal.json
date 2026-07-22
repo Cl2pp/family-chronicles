@@ -162,6 +162,13 @@
       "when": 1784647246678,
       "tag": "0022_solid_tarantula",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1784730276635,
+      "tag": "0023_lame_kabuki",
+      "breakpoints": true
     }
   ]
 }

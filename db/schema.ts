@@ -544,6 +544,13 @@ export const bookStories = pgTable(
       .references(() => stories.id, { onDelete: 'cascade' }),
     position: integer('position').notNull(),
     includePhotos: boolean('include_photos').notNull().default(true),
+    /** Whether this story's TEXT is part of the book (unified-book plan, PR A) — the
+     *  counterpart of `includePhotos`. The pair gives each attached story four states:
+     *  full chapter / text-only / photos-only (both off = detach it instead). Default
+     *  true preserves every existing story book unchanged. Read by the unified layout
+     *  pipeline from PR C onward; stored (and preserved across `setBookStories`
+     *  replaces) from PR A. */
+    includeText: boolean('include_text').notNull().default(true),
   },
   (t) => [
     uniqueIndex('book_stories_uq').on(t.bookId, t.storyId),
@@ -605,6 +612,14 @@ export const bookPhotos = pgTable(
     assetId: uuid('asset_id')
       .notNull()
       .references(() => assets.id, { onDelete: 'cascade' }),
+    /** Provenance (unified-book plan, PR A): set when this row MIRRORS a photo of an
+     *  attached story (`book_stories`), so every photo — uploaded or story-sourced —
+     *  flows through the one analysis + layout pipeline. `null` = uploaded directly
+     *  into the book. Mirror rows are inserted/removed by `registerBookPhotos`/
+     *  `syncStoryPhotoMirrors` (`lib/books.ts`) as stories are attached/detached; the
+     *  cascade is belt-and-braces (deleting a story already cascades its assets, which
+     *  cascades these rows via `asset_id`). */
+    storyId: uuid('story_id').references(() => stories.id, { onDelete: 'cascade' }),
     /** Upload order — the fallback sort when EXIF has no capture time. */
     position: integer('position').notNull(),
     /** Excluded from the layout (auto: duplicate/blurry/eyes-closed, or user says so).
@@ -641,5 +656,6 @@ export const bookPhotos = pgTable(
   (t) => [
     uniqueIndex('book_photos_book_asset_uq').on(t.bookId, t.assetId),
     index('book_photos_book_idx').on(t.bookId),
+    index('book_photos_book_story_idx').on(t.bookId, t.storyId),
   ],
 );
