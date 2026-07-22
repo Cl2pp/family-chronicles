@@ -5,6 +5,7 @@ import { IconArrowRight, IconPhoto } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
 import { BulkPhotoUploader } from '@/components/bulk-photo-uploader';
 import { PhotoBookPhotoTile } from './photo-book-photo-tile';
+import { BookStoriesPanel, type BookChapterView, type ChronicleStoryOption } from './book-stories-panel';
 import type { PhotoBookPhotoView } from './photo-book-builder';
 
 /**
@@ -18,6 +19,9 @@ import type { PhotoBookPhotoView } from './photo-book-builder';
 export function PhotoBookUploadStep({
   bookId,
   photos,
+  chapters,
+  chronicleStories,
+  hiddenChapterCount,
   locked,
   pending,
   onToggleExcluded,
@@ -28,6 +32,9 @@ export function PhotoBookUploadStep({
 }: {
   bookId: string;
   photos: PhotoBookPhotoView[];
+  chapters: BookChapterView[];
+  chronicleStories: ChronicleStoryOption[];
+  hiddenChapterCount: number;
   locked: boolean;
   pending: boolean;
   onToggleExcluded: (assetId: string, excluded: boolean) => void;
@@ -40,10 +47,36 @@ export function PhotoBookUploadStep({
   const tp = t.books.builder.photoBook;
   const failedCount = photos.filter((p) => p.metaFailed).length;
 
+  const ts = tp.sources;
+
   return (
     <Stack gap="md">
+      <Text fz={13} c="dimmed">
+        {ts.intro}
+      </Text>
+
+      {/* Stories are a first-class source alongside uploads (unified builder, PR D) —
+          the two entry cards on /books differ only in which of these the user starts
+          with. Hidden entirely for a chronicle with no ready stories, so a pure
+          photo-book flow is exactly as uncluttered as it was. */}
+      {(chapters.length > 0 || chronicleStories.length > 0) && (
+        <BookStoriesPanel
+          bookId={bookId}
+          chapters={chapters}
+          chronicleStories={chronicleStories}
+          hiddenChapterCount={hiddenChapterCount}
+          locked={locked}
+        />
+      )}
+
       {!locked && (
         <Card withBorder radius="md" p="md">
+          <Title order={4} mb={4}>
+            {ts.uploadTitle}
+          </Title>
+          <Text fz={12} c="dimmed" mb="sm">
+            {ts.uploadHint}
+          </Text>
           <BulkPhotoUploader bookId={bookId} />
         </Card>
       )}
@@ -99,7 +132,11 @@ export function PhotoBookUploadStep({
               {tp.waitingForAnalysis}
             </Text>
           )}
-          <Button rightSection={<IconArrowRight size={16} />} disabled={!analysisComplete} onClick={onNext}>
+          <Button
+            rightSection={<IconArrowRight size={16} />}
+            disabled={!analysisComplete || !(photos.length > 0 || chapters.length > 0)}
+            onClick={onNext}
+          >
             {tp.next}
           </Button>
         </Stack>

@@ -39,6 +39,9 @@ export function NewBookButton({ label }: { label: string }) {
       </Button>
       <Modal opened={opened} onClose={() => setOpened(false)} title={label} centered>
         <Stack gap="sm">
+          <Text fz={13} c="dimmed">
+            {t.books.kindIntro}
+          </Text>
           <Card
             withBorder
             radius="md"

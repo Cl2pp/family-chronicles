@@ -36,6 +36,7 @@ import {
 } from '../actions';
 import type { OrderBook } from './order/order-view';
 import { PhotoBookUploadStep } from './photo-book-upload-step';
+import type { BookChapterView, ChronicleStoryOption } from './book-stories-panel';
 import { PhotoBookCreateStep } from './photo-book-create-step';
 import { PhotoBookOrderStep } from './photo-book-order-step';
 
@@ -62,6 +63,10 @@ export interface PhotoBookInfo {
   /** Front cover subtitle (`books.subtitle`) — the config panel's "Untertitel" field.
    *  Unlike story books, this always feeds the photo book's actual printed cover. */
   subtitle: string | null;
+  /** Printed on the title page; only shown/used for a book that has chapters. */
+  dedication: string | null;
+  /** How many story chapters the book holds — drives the chapter-only settings. */
+  chapterCount: number;
   status: 'draft' | 'rendering' | 'preview_ready' | 'render_failed' | 'ordered';
   errorMessage: string | null;
   /** Current style suite (`lib/photo-book-plan.ts`) — resolves/builds the plan
@@ -123,12 +128,18 @@ export interface PhotoBookInfo {
 export function PhotoBookBuilder({
   book,
   photos,
+  chapters,
+  chronicleStories,
+  hiddenChapterCount,
   order,
   quote,
   contactEmail,
 }: {
   book: PhotoBookInfo;
   photos: PhotoBookPhotoView[];
+  chapters: BookChapterView[];
+  chronicleStories: ChronicleStoryOption[];
+  hiddenChapterCount: number;
   order: OrderBook;
   quote: BookQuote | null;
   contactEmail: string;
@@ -157,7 +168,10 @@ export function PhotoBookBuilder({
   const locked = book.status === 'ordered';
   const totalCount = photos.length;
   const settledCount = photos.filter((p) => p.metaSettled).length;
-  const analysisComplete = totalCount > 0 && settledCount >= totalCount;
+  // Vacuously true with no photos — which is now a legitimate state (a text-only book),
+  // so `hasContent` below is what actually gates leaving step 1.
+  const analysisComplete = totalCount === 0 || settledCount >= totalCount;
+  const hasContent = totalCount > 0 || chapters.length > 0;
 
   // Land on the book itself when there is one. The wizard used to always mount at step 1
   // (upload), so coming back to a finished book meant clicking forward to find it again —
@@ -168,7 +182,9 @@ export function PhotoBookBuilder({
   // generated book whose newly-added photos are still being analysed must not open on the
   // create step, or "Design again" would run over photos that have no vision scores yet
   // (and, in by-topic mode, land every one of them in the untagged leftover section).
-  const [step, setStep] = useState(canAccessPhotoBookStep(1, analysisComplete, book.generatedAt) ? 1 : 0);
+  const [step, setStep] = useState(
+    canAccessPhotoBookStep(1, analysisComplete, book.generatedAt, hasContent) ? 1 : 0,
+  );
 
   // Analysis runs server-side (the `photo-meta` and `photo-vision` worker jobs) with no
   // other signal the client can see — poll while photos are still unsettled, same
@@ -468,11 +484,15 @@ export function PhotoBookBuilder({
    *  reason `PhotoBookOrderStep`'s own download button is also gated on `generatedAt`
    *  below, in case that step is ever reached some other way). */
   function goToStep(index: number) {
-    if (!canAccessPhotoBookStep(index, analysisComplete, book.generatedAt)) {
+    if (!canAccessPhotoBookStep(index, analysisComplete, book.generatedAt, hasContent)) {
       // Mirrors `canAccessPhotoBookStep`'s own check order: analysis-incomplete is the
       // more fundamental blocker, so it wins the message even for step 2 (order) when
       // both conditions are unmet.
-      const message = !analysisComplete ? tp.waitingForAnalysis : tp.waitingForGeneration;
+      const message = !hasContent
+        ? tp.sources.needContent
+        : !analysisComplete
+          ? tp.waitingForAnalysis
+          : tp.waitingForGeneration;
       notifications.show({ message, color: 'yellow' });
       return;
     }
@@ -524,6 +544,9 @@ export function PhotoBookBuilder({
           <PhotoBookUploadStep
             bookId={book.id}
             photos={photos}
+            chapters={chapters}
+            chronicleStories={chronicleStories}
+            hiddenChapterCount={hiddenChapterCount}
             locked={locked}
             pending={pending}
             onToggleExcluded={toggleExcluded}

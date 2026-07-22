@@ -434,3 +434,34 @@ describe('flowing story text (unified-book plan)', () => {
     expect(gallery).not.toContain('@bottom-center');
   });
 });
+
+describe('dedication page (unified builder)', () => {
+  const chapterPlan = () =>
+    basePlan({
+      sections: [{ title: 'Kapitel', storyId: 's1', pages: [{ template: 'text', from: 0, to: 0 }] }],
+    });
+  const paragraphs = new Map([['s1', ['Ein Absatz.']]]);
+
+  it('prints the dedication on its own page for a book with chapters', () => {
+    const html = renderPhotoBookHtml(
+      baseInput({ plan: chapterPlan(), storyParagraphs: paragraphs, dedication: 'Für Oma Hilde' }),
+    );
+    expect(html).toContain('class="page pb-dedication"');
+    expect(html).toContain('Für Oma Hilde');
+  });
+
+  it('prints nothing when there is no dedication', () => {
+    const html = renderPhotoBookHtml(baseInput({ plan: chapterPlan(), storyParagraphs: paragraphs }));
+    expect(html).not.toContain('class="page pb-dedication"');
+    expect(renderPhotoBookHtml(baseInput({ plan: chapterPlan(), dedication: '   ' }))).not.toContain(
+      'class="page pb-dedication"',
+    );
+  });
+
+  it('never prints one for a pure photo book, even if the column holds text', () => {
+    // The field is only offered for books with chapters; a photo book has no front
+    // matter to hang it on, and must keep rendering exactly as it did.
+    const html = renderPhotoBookHtml(baseInput({ dedication: 'Für Oma Hilde' }));
+    expect(html).not.toContain('pb-dedication');
+  });
+});

@@ -68,6 +68,7 @@ const TRIM_ASPECT: Record<BookFormat, number> = {
 type SettingsPatch = {
   title?: string;
   subtitle?: string | null;
+  dedication?: string | null;
   format?: BookFormat;
   coverType?: BookCoverType;
 };
@@ -107,8 +108,10 @@ function PhotoBookConfigPanel({
   // builder's settings card (`book-builder.tsx`'s `title`/`subtitle` state).
   const [title, setTitle] = useState(book.title);
   const [subtitle, setSubtitle] = useState(book.subtitle ?? '');
+  const [dedication, setDedication] = useState(book.dedication ?? '');
 
   const disabled = locked || pending;
+  const hasChapters = book.chapterCount > 0;
 
   // "By place" needs EXIF GPS and "by topic" needs a vision score; a photo set that mostly
   // lacks either would silently collapse into one meaningless chapter (photos stripped of
@@ -147,6 +150,20 @@ function PhotoBookConfigPanel({
           subtitle !== (book.subtitle ?? '') && onUpdateSettings({ subtitle: subtitle || null })
         }
       />
+      {/* A dedication sits on the title page, which only a book with chapters prints —
+          hidden for a pure photo book so its panel stays as short as it was. */}
+      {hasChapters && (
+        <TextInput
+          label={t.books.builder.dedication}
+          description={t.books.builder.dedicationHint}
+          value={dedication}
+          disabled={disabled}
+          onChange={(e) => setDedication(e.currentTarget.value)}
+          onBlur={() =>
+            dedication !== (book.dedication ?? '') && onUpdateSettings({ dedication: dedication || null })
+          }
+        />
+      )}
       {/* How the book is organised. This is the most consequential choice on the panel —
           the same photos become a timeline, a book of occasions, or a book of places — so
           it sits above the visual settings, with each option's effect spelled out rather
@@ -157,7 +174,9 @@ function PhotoBookConfigPanel({
           {tc.grouping}
         </Text>
         <Text fz={12} c="dimmed" mb={8}>
-          {tc.groupingIntro}
+          {/* With chapters present, each story is already its own section — the grouping
+              only decides how the UPLOADED photos are clustered after them. */}
+          {hasChapters ? tc.groupingIntroWithChapters : tc.groupingIntro}
         </Text>
         <Stack gap={6}>
           {PHOTO_BOOK_GROUPINGS.map((option) => (
@@ -353,6 +372,9 @@ export function PhotoBookCreateStep({
   const { t } = useI18n();
   const tb = t.books.builder;
   const tp = tb.photoBook;
+  // Content is photos OR story chapters — a text-only book is a real book, and the
+  // generate/design controls must agree with the step gate that let it get here.
+  const hasBookContent = photos.length > 0 || book.chapterCount > 0;
   const theme = useMantineTheme();
   // Desktop gets the full 3-pane layout (chat | preview, tray below); narrower than this
   // the chat pane moves into a Drawer instead of fighting the preview for width. Driven
@@ -453,7 +475,7 @@ export function PhotoBookCreateStep({
                 mt="md"
                 leftSection={<IconSparkles size={16} />}
                 loading={book.designing || designPending}
-                disabled={locked || photos.length === 0}
+                disabled={locked || !hasBookContent}
                 onClick={onCreateBook}
               >
                 {book.designing ? tp.config.creating : tp.config.createBook}
@@ -631,7 +653,7 @@ export function PhotoBookCreateStep({
               size="sm"
               leftSection={<IconSparkles size={16} />}
               loading={book.designing || designPending}
-              disabled={locked || photos.length === 0}
+              disabled={locked || !hasBookContent}
               onClick={onDesignBook}
             >
               {book.designing ? tb.designingBook : tb.designBook}
@@ -643,7 +665,7 @@ export function PhotoBookCreateStep({
               size="sm"
               leftSection={<IconSparkles size={16} />}
               loading={regenerating}
-              disabled={locked || photos.length === 0}
+              disabled={locked || !hasBookContent}
               onClick={onRegenerate}
             >
               {regenerating ? tp.regenerating : tp.regenerate}

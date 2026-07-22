@@ -350,6 +350,7 @@ async function renderPhotoBookVariant(
     images: resolved,
     fontFaceCss: embeddedFontFaceCss(plan.style),
     storyParagraphs: storyParagraphMap(loaded),
+    dedication: loaded.row.dedication,
     createdLabel: new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long' }),
     watermarkText: 'VORSCHAU · PREVIEW',
   });

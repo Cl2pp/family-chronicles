@@ -44,9 +44,11 @@ export default async function BookBuilderPage({
     // lost (e.g. mirror rows the PR A migration backfilled, or an enqueue lost to a
     // crash). No-op on a healthy book.
     await ensureBookPhotoAnalysis(bookId);
-    const [photosResult, styleResult] = await Promise.all([
+    const [photosResult, styleResult, chronicleStories] = await Promise.all([
       listBookPhotos(bookId, user.id),
       getPhotoBookStyle(bookId, user.id),
+      // Story picker options — per-viewer, like the chapter list itself.
+      readyStoriesForChronicle(book.chronicleId, user.id, access),
     ]);
     const rows = photosResult.ok ? photosResult.value.photos : [];
     const photos: PhotoBookPhotoView[] = await Promise.all(
@@ -100,6 +102,8 @@ export default async function BookBuilderPage({
             id: book.id,
             title: book.title,
             subtitle: book.subtitle,
+            dedication: book.dedication,
+            chapterCount: book.chapters.length,
             status: book.status,
             errorMessage: book.errorMessage,
             style: styleResult.ok ? styleResult.value.style : 'classic',
@@ -115,6 +119,20 @@ export default async function BookBuilderPage({
             hasPrint: Boolean(book.printS3Key),
           }}
           photos={photos}
+          chapters={book.chapters.map((c) => ({
+            storyId: c.storyId,
+            title: c.title,
+            year: c.eventDate ? c.eventDate.getUTCFullYear() : null,
+            photoCount: c.photoCount,
+            includeText: c.includeText,
+            includePhotos: c.includePhotos,
+          }))}
+          hiddenChapterCount={book.hiddenChapterCount}
+          chronicleStories={chronicleStories.map((s) => ({
+            id: s.id,
+            title: s.title,
+            year: s.eventDate ? s.eventDate.getUTCFullYear() : null,
+          }))}
           order={order}
           quote={quote}
           contactEmail={env.BOOK_ORDER_CONTACT_EMAIL}
