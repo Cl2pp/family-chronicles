@@ -202,7 +202,7 @@ describe('renderPhotoBookHtml', () => {
     });
 
     it("a content-box (non-bleed) photo page's own padding/size carries the inset for every variant", () => {
-      // The fix relies on `.photo-page:not(.pb-fullbleed):not(.pb-divider-page)` fully
+      // The fix relies on `.photo-page:not(.pb-divider-page)` fully
       // implementing the content-box inset via its own element CSS (a full-sheet
       // width/height plus PADDING, not margin — see that rule's own comment for why
       // padding: Chromium's print/PDF engine truncates an element's own top MARGIN
@@ -220,16 +220,25 @@ describe('renderPhotoBookHtml', () => {
       );
     });
 
-    it('bleed pages (cover front/back, full-bleed, divider) size to the full physical sheet with no CSS margin, for every variant', () => {
+    it('bleed pages (cover front/back, divider) size to the full physical sheet with no CSS margin, for every variant', () => {
       for (const variant of ['screen', 'preview', 'print'] as const) {
         const html = renderPhotoBookHtml(baseInput({ variant }));
         const bleed = variant === 'print' ? PHOTO_BOOK_BLEED_MM : 0;
         const pageW = TRIM.w + bleed * 2;
         const pageH = TRIM.h + bleed * 2;
         expect(html).toContain(`.pb-cover-front, .pb-cover-back {\n    width: ${pageW}mm; height: ${pageH}mm;`);
-        expect(html).toContain(`.pb-fullbleed { width: ${pageW}mm; height: ${pageH}mm;`);
         expect(html).toContain(`.pb-divider-page { width: ${pageW}mm; height: ${pageH}mm;`);
       }
+    });
+
+    it('full-bleed photo pages sit inside the shared content-box frame, not edge to edge', () => {
+      // The book keeps one constant border on every photo page — a full-bleed page is a
+      // .photo-page WITHOUT its own full-sheet rule, so it falls under the shared
+      // `.photo-page:not(.pb-divider-page)` padding rule like every other photo page.
+      const html = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
+      expect(html).not.toContain('.pb-fullbleed {');
+      expect(html).toContain('.pb-fullbleed-inner { position: relative; width: 100%; height: 100%;');
+      expect(html).toContain('.photo-page:not(.pb-divider-page) {');
     });
   });
 
@@ -241,5 +250,84 @@ describe('renderPhotoBookHtml', () => {
     const html = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
     expect(html).toContain('var PAGE_H_PX');
     expect(html).toMatch(/Math\.min\(1, availW \/ PAGE_W_PX, availH \/ PAGE_H_PX\)/);
+  });
+});
+
+/** The justified row stack behind every multi-photo template (see `rowStackHtml` in
+ *  photo-book-layout.ts): photos render at their true aspect ratios — no cropping —
+ *  in rows that share one height, scaled down (never cropped) when the stack would
+ *  overflow the content box. */
+describe('justified row stacks', () => {
+  const contentW = TRIM.w - PHOTO_BOOK_CONTENT_MARGIN_MM.inner - PHOTO_BOOK_CONTENT_MARGIN_MM.outer;
+  const contentH = TRIM.h - PHOTO_BOOK_CONTENT_MARGIN_MM.top - (PHOTO_BOOK_CONTENT_MARGIN_MM.bottom + 1);
+
+  function renderPages(pages: PhotoBookPlan['sections'][number]['pages'], imgs: PhotoLayoutImage[]): string {
+    const plan = basePlan({ sections: [{ title: 'S', pages }] });
+    const images = new Map<string, PhotoLayoutImage>([['hero', image('hero')], ...imgs.map((i) => [i.assetId, i] as const)]);
+    return renderPhotoBookHtml(baseInput({ plan, images }));
+  }
+
+  function parseRows(html: string): { height: number; widths: number[] }[] {
+    // Capture each row's height and, in document order, its cell widths.
+    const rowChunks = html.split('<div class="ph-jrow"').slice(1);
+    return rowChunks.map((chunk) => {
+      const height = Number(/height: ([\d.]+)mm/.exec(chunk)![1]);
+      const widths = [...chunk.matchAll(/<div class="ph-jcell" style="width: ([\d.]+)mm"/g)].map((m) => Number(m[1]));
+      return { height, widths };
+    });
+  }
+
+  it('a two-vertical pair of portraits shares one height and fills the content width uncropped', () => {
+    const html = renderPages(
+      [{ template: 'two-vertical', assetIds: ['p1', 'p2'] }],
+      [image('p1', 800, 1200), image('p2', 800, 1200)],
+    );
+    const [row] = parseRows(html);
+    // Shared height h solves (2/3)h + (2/3)h + gap = contentW.
+    expect(row.height).toBeCloseTo((contentW - 4) / (2 / 3 + 2 / 3), 1);
+    for (const w of row.widths) {
+      // Cell width = aspect × height — the cell has exactly the photo's shape, so
+      // object-fit can never actually crop.
+      expect(w / row.height).toBeCloseTo(800 / 1200, 2);
+    }
+    expect(row.widths.reduce((a, b) => a + b, 0) + 4).toBeCloseTo(contentW, 1);
+  });
+
+  it('a three-mixed stack that would overflow the page scales down instead of cropping', () => {
+    const html = renderPages(
+      [{ template: 'three-mixed', assetIds: ['l1', 'p1', 'p2'] }],
+      [image('l1', 1600, 1200), image('p1', 800, 1200), image('p2', 800, 1200)],
+    );
+    const rows = parseRows(html);
+    expect(rows).toHaveLength(2);
+    const total = rows.reduce((sum, r) => sum + r.height, 0) + 4;
+    // Scaled to exactly the content box height (the unscaled stack would overflow it).
+    expect(total).toBeCloseTo(contentH, 1);
+    // Every cell still has its photo's exact shape.
+    expect(rows[0].widths[0] / rows[0].height).toBeCloseTo(1600 / 1200, 2);
+    expect(rows[1].widths[0] / rows[1].height).toBeCloseTo(800 / 1200, 2);
+  });
+
+  it('four-mixed and collage-6 render as row stacks (1+3 and 3+3)', () => {
+    const html = renderPages(
+      [
+        { template: 'four-mixed', assetIds: ['l1', 'p1', 'p2', 'p3'] },
+        { template: 'collage-6', assetIds: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'] },
+      ],
+      [
+        image('l1', 1600, 1200),
+        image('p1', 800, 1200),
+        image('p2', 800, 1200),
+        image('p3', 800, 1200),
+        image('c1'),
+        image('c2'),
+        image('c3'),
+        image('c4'),
+        image('c5'),
+        image('c6'),
+      ],
+    );
+    const rows = parseRows(html);
+    expect(rows.map((r) => r.widths.length)).toEqual([1, 3, 3, 3]);
   });
 });

@@ -78,13 +78,20 @@ export function photoAssetPrintTargetSizeMm(
   for (const section of plan.sections) {
     for (const page of section.pages) {
       switch (page.template) {
-        case 'full-bleed':
         case 'divider':
           for (const id of page.assetIds) set(id, pageW, pageH);
           break;
+        // `full-bleed` fills the content box (it sits inside the shared page frame like
+        // every other photo page — see `lib/photo-book-layout.ts`), it no longer bleeds
+        // to the physical sheet edge.
+        case 'full-bleed':
         case 'full-framed':
           for (const id of page.assetIds) set(id, contentW, contentH);
           break;
+        // The multi-photo templates are justified row stacks: any photo in a
+        // single-photo row can span the full content width, and a photo in a shared row
+        // gets a proportional share — the estimates below stay deliberately generous
+        // (a row's height depends on its siblings' aspect ratios, unknown here).
         case 'two-horizontal':
           for (const id of page.assetIds) set(id, contentW, contentH / 2);
           break;
@@ -96,19 +103,25 @@ export function photoAssetPrintTargetSizeMm(
           break;
         case 'three-mixed': {
           const [dominant, ...rest] = page.assetIds;
-          if (dominant) set(dominant, (contentW * 2) / 3, contentH);
+          if (dominant) set(dominant, contentW, (contentH * 2) / 3);
+          for (const id of rest) set(id, contentW / 2, contentH / 2);
+          break;
+        }
+        case 'four-mixed': {
+          const [dominant, ...rest] = page.assetIds;
+          if (dominant) set(dominant, contentW, (contentH * 2) / 3);
           for (const id of rest) set(id, contentW / 3, contentH / 2);
           break;
         }
         case 'collage-4':
           for (const id of page.assetIds) set(id, contentW / 2, contentH / 2);
           break;
-        case 'collage-5': {
-          const [dominant, ...rest] = page.assetIds;
-          if (dominant) set(dominant, contentW / 2, contentH);
-          for (const id of rest) set(id, contentW / 4, contentH / 2);
+        case 'collage-5':
+          for (const id of page.assetIds) set(id, contentW / 2, contentH / 2);
           break;
-        }
+        case 'collage-6':
+          for (const id of page.assetIds) set(id, contentW / 2, contentH / 2);
+          break;
       }
     }
   }

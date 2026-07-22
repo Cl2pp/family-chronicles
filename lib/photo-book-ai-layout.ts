@@ -125,26 +125,33 @@ function selectVisionImages(sections: AutoLayoutPhoto[][], cap: number): Set<str
 
 function templateVocabularyText(): string {
   const descriptions: Record<(typeof PHOTO_PAGE_TEMPLATES)[number], string> = {
-    'full-bleed': 'one photo, fills the page edge-to-edge — hero moments',
-    'full-framed': 'one photo, matted with a white frame',
-    'two-horizontal': 'two photos stacked, each full page width',
+    'full-bleed': 'one photo filling the whole page inside the standard frame (slight crop to the page shape) — hero moments',
+    'full-framed': 'one photo, matted with a frame, never cropped',
+    'two-horizontal': 'two photos stacked as two full-width rows',
     'two-vertical': 'two photos side by side in one justified row',
     'three-column': 'three photos side by side in one justified row',
-    'three-mixed': 'one dominant photo across the top + two smaller ones below it',
-    'collage-4': 'four photos, a justified mosaic',
-    'collage-5': 'five photos, a justified mosaic',
-    divider: 'section opener — title/date only, or with one muted photo',
+    'three-mixed': 'one dominant photo across the top + a justified pair below it',
+    'four-mixed': 'one dominant photo across the top + a justified trio below it',
+    'collage-4': 'four photos in two justified rows (2+2)',
+    'collage-5': 'five photos in two justified rows (2+3)',
+    'collage-6': 'six photos in two justified rows (3+3) — the densest page allowed',
+    divider: '(never use this — see the hard rules)',
   };
   // The shape requirement printed here comes from `TEMPLATE_SHAPE_RULES`
   // (`lib/photo-book-lint.ts`) — the SAME table the finished plan is checked against, so
-  // what the model is told can never drift from what it is judged by.
-  return PHOTO_PAGE_TEMPLATES.map((t) => {
-    const { min, max } = PHOTO_PAGE_TEMPLATE_SLOTS[t];
-    const arity = min === max ? `exactly ${min}` : `${min}-${max}`;
-    const rule = TEMPLATE_SHAPE_RULES[t];
-    const shape = rule ? ` — SHAPE: ${rule.why}` : ' — works with any photo shape';
-    return `  "${t}" — ${arity} photo${max === 1 ? '' : 's'} — ${descriptions[t]}${shape}`;
-  }).join('\n');
+  // what the model is told can never drift from what it is judged by. `divider` is
+  // excluded from the vocabulary on purpose: every section already gets its own
+  // automatic title page, and a plan-emitted divider renders as a blank page (see
+  // HARD_RULES) — production books were full of exactly those.
+  return PHOTO_PAGE_TEMPLATES.filter((t) => t !== 'divider')
+    .map((t) => {
+      const { min, max } = PHOTO_PAGE_TEMPLATE_SLOTS[t];
+      const arity = min === max ? `exactly ${min}` : `${min}-${max}`;
+      const rule = TEMPLATE_SHAPE_RULES[t];
+      const shape = rule ? ` — SHAPE: ${rule.why}` : ' — works with any photo shape';
+      return `  "${t}" — ${arity} photo${max === 1 ? '' : 's'} — ${descriptions[t]}${shape}`;
+    })
+    .join('\n');
 }
 
 /**
@@ -155,13 +162,14 @@ function templateVocabularyText(): string {
  * width divided by the sum of the photos' aspect ratios. Three landscapes (≈1.5 each) come
  * out as a 1/4.5-of-the-width strip on a tall page. This paragraph is what stops that.
  */
-const SHAPE_RULES = `Photo shape rules — these are the difference between a book that looks designed and one that looks broken. Every photo's shape (landscape / portrait / square) is given in the photo list below; check it before you put photos on a page together:
+const SHAPE_RULES = `Photo shape rules — these are the difference between a book that looks designed and one that looks broken. Every page renders its photos UNCROPPED at their true shapes, arranged in justified rows that share one height and fill the page width; leftover space frames the arrangement symmetrically. That means a page only looks good when the shapes you combine actually fill it — check every photo's shape (landscape / portrait / square, given in the photo list below) before you put photos on a page together:
 - "three-column" places all three photos in ONE ROW at a shared height. Use it ONLY when all three photos are portrait. A single landscape photo in that row collapses the whole row into a thin horizontal strip with huge empty margins above and below — this is the single most common way this layout goes wrong.
-- Any trio that contains a landscape photo must use "three-mixed" instead, with the LANDSCAPE photo listed FIRST (it becomes the dominant one).
+- Any trio that contains a landscape photo must use "three-mixed" instead, with the LANDSCAPE photo listed FIRST (it becomes the dominant one across the top).
+- "four-mixed" is the same idea for four photos: the FIRST photo spans the full width on top (must be landscape or square), the other three share the row below — the best way to combine one landscape with three portraits.
 - "two-vertical" is the side-by-side row for pairs: right for two portraits, and fine for one portrait + one landscape. Two landscapes side by side become a strip — stack them with "two-horizontal" instead.
-- "two-horizontal" stacks both photos full-width, so both must be landscape (or square). A portrait photo in a full-width stacked cell is letterboxed with dead space either side.
-- "full-bleed" fills the whole page; it suits a photo whose shape roughly matches the page. "full-framed" mats a photo on the page and is safe for any shape.
-- "collage-4"/"collage-5" crop their tiles, so any mix of shapes is fine there.`;
+- "two-horizontal" renders both photos full-width, stacked. Both must be landscape (or square) — a portrait photo rendered full-width is taller than the page and forces everything to shrink.
+- "full-framed" shows one photo matted and completely uncropped — safe for any shape. "full-bleed" fills the whole page area and crops slightly to the page's shape, so use it only for a photo whose shape roughly matches the page (and never when the crop would cut into faces).
+- "collage-4"/"collage-5"/"collage-6" are justified mosaics — any mix of shapes works, but they read best when each row mixes orientations rather than stacking three landscapes.`;
 
 function schemaText(): string {
   return `The layout plan is a single JSON object with this exact shape:
@@ -195,6 +203,7 @@ const HARD_RULES = `Hard rules — a plan that breaks any of these will be disca
 - Only ever reference an assetId from the "Available photos" list below. Never invent one.
 - No assetId may appear more than once anywhere in the whole plan — not as the cover hero, not in cover.backAssetIds, not on two different pages. In particular: if a photo is the cover hero, it must NOT also appear on any section page.
 - Every section must have at least one page.
+- NEVER output an empty page: never use the "divider" template and never output a page with zero photos. Every section automatically gets its own full-page title divider — an extra one from you prints as a completely BLANK page in the finished book.
 - A page's "assetIds" length must exactly match its template's photo count (see the template list).
 - If "captions" is present on a page, it must have exactly as many entries as "assetIds".
 - Any photo marked "[MUST BE INCLUDED — the user manually re-added this photo]" in the photo list below MUST appear somewhere in your plan (as the cover hero, a cover back photo, or on a section page) — never leave one of these out, no matter how weak/blurry/redundant it looks. This is a hard requirement, not a suggestion: a plan missing one of these photos is discarded just like an invalid one.
@@ -242,8 +251,10 @@ Design goals — this is where your judgment (and the ability to actually see th
 - NAME sections from what's actually in them ("Am Strand", "Omas Geburtstag") rather than a generic date range — put the date range in "dateLabel" instead if you want to keep it visible.
 - Follow the organisation the reader chose (stated at the top) when deciding what belongs in a section and in what order the sections run. Everything below is about how each section then LOOKS.
 - Pick the cover hero: prefer a photo whose analysis marks it "coverCandidate", and among those the highest "aestheticScore" — a warm, clear, well-composed photo of people, not a blurry or eyes-closed one. The cover's title/subtitle text is fixed by the user's own settings and not yours to change — spend your judgment on the hero pick instead.
-- FILL THE PAGE, SYMMETRICALLY. Never leave a photo hugging one side of the page with white space beside it; prefer templates that span the full width (two-*, three-*, collage-*) for photos that go together, and reserve "full-bleed"/"full-framed" for photos that deserve to stand alone.
-- Vary the rhythm across sections — don't give every section the identical page pattern. A section opener is usually its own strong single-photo page; some sections can build to another strong single-photo page mid-way; others stay all multi-photo pages. A book that "breathes" differently section to section reads as designed, not generated.
+- LESS IS MORE. Professional photo books put 1-3 photos on most pages and never more than 6; a dense mosaic page is the exception that makes the strong single-photo pages land, not the norm. When in doubt, give a photo more room, not less.
+- SHOW PHOTOS WHOLE. The layout never crops (except "full-bleed"'s slight fit-to-page) — your job is to pick shape combinations that fill each page pleasantly (see the shape rules above). Pair and group photos whose orientations complement each other: a landscape over two portraits, two portraits side by side, mixed rows. White space around a well-shaped arrangement is a design feature; a photo squashed into a thin strip is not.
+- ONE DOMINANT PHOTO PER PAGE-GROUP. On multi-photo pages prefer the "*-mixed" templates, which give the best photo of the moment clear visual priority; two or three equally-sized photos are fine, but five equal tiles on every page reads as a contact sheet.
+- Vary the rhythm across sections — don't give every section the identical page pattern, and alternate density: after a dense multi-photo page, let a strong single-photo page breathe. A section opener is usually its own strong single-photo page; some sections can build to another strong single-photo page mid-way; others stay all multi-photo pages. A book that "breathes" differently section to section reads as designed, not generated.
 - It is fine, and often right, to leave out a weak, redundant, blurry, or eyes-closed-with-no-good-alternative photo entirely — favor photos with a high "aestheticScore" and no eyes-closed flag when you have a choice; you do not have to place every available photo.
 - Optional short captions (one plain sentence, drawn from a photo's "description") are a nice touch on a handful of the most meaningful photos — not required on every photo, and not on dense collages (there's no room).
 - Write every "title", "dateLabel", and caption in ${languageName}.`;
@@ -489,11 +500,11 @@ function toLintPhotos(photos: AutoLayoutPhoto[]): LintPhoto[] {
 const REVIEW_SYSTEM_PROMPT = `You are the same photo-book designer, now reviewing your own finished layout. You are shown: the layout plan you produced, an automated design check listing concrete problems found in it, and SCREENSHOTS OF THE ACTUAL RENDERED PAGES.
 
 Look at the rendered pages. Judge them the way a person flipping through the printed book would:
+- Is any page BLANK or nearly blank? A blank page must never survive review — delete it (a photo-less "divider" page is the usual culprit; every section already gets its real title page automatically).
 - Is any row of photos squashed into a thin strip with big empty margins above and below it? (That is what happens when landscape photos are put in a side-by-side row — the fix is a different template, not a different photo size.)
-- Is any photo letterboxed with dead space beside it?
-- Does a page look lopsided or half-empty?
-- Do several pages in a row look identical, so the book reads as mechanically generated?
-- Is anything important cropped out (a face cut in half by a full-bleed edge)?
+- Does a page look lopsided or half-empty, or has an arrangement shrunk into a small centered block because its photo shapes don't fill the page? Pick a template that suits those shapes instead.
+- Do several pages in a row look identical, so the book reads as mechanically generated? Are there too many equal-tiled mosaic pages where one photo should dominate?
+- Is anything important cropped out (a face cut off by a "full-bleed" page's fit-to-page crop)?
 
 Then output a CORRECTED version of the complete layout plan, in exactly the same JSON format, fixing every problem you can. Keep everything that already works — the section boundaries, the titles, the cover hero, the captions — and change only what needs changing. It is fine to move a photo to a different page, swap a page's template, split or merge pages, or drop a weak photo.
 

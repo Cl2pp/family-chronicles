@@ -714,6 +714,8 @@ export const en = {
         preview: 'Preview',
         previewHint: 'Generated automatically from your photos — pick a style and regenerate any time.',
         style: 'Style',
+        styleIntro:
+          'The style is the book’s whole look: fonts, colors, page background, and how photos are framed. You can switch it any time — your photos and layout stay the same.',
         styleNames: {
           classic: 'Classic',
           modern: 'Modern',
@@ -721,6 +723,14 @@ export const en = {
           heirloom: 'Heirloom',
           bold: 'Bold',
           journal: 'Journal',
+        },
+        styleDescriptions: {
+          classic: 'Timeless and warm: serif type, cream tones, photos with a soft white mat and a fine frame.',
+          modern: 'Clean and current: sans-serif type, white pages, photos edge to edge with no frills.',
+          gallery: 'Like an exhibition catalogue: pure white, lots of space, photos speak for themselves.',
+          heirloom: 'Nostalgic, like an old family album: warm parchment tones, wide mats, ornamental flourishes.',
+          bold: 'Dramatic and striking: black pages, white type — makes colors glow.',
+          journal: 'Playful, like a travel diary: paper look, handwriting-style headings, taped-photo accents.',
         },
         regenerate: 'Regenerate',
         regenerating: 'Generating…',

@@ -270,14 +270,22 @@ vocabulary of story books):
 
 | template | photos | use |
 |---|---|---|
-| `full-bleed` | 1 | hero moments; photo fills the page edge-to-edge |
+| `full-bleed` | 1 | hero moments; photo fills the whole content box (slight fit-to-page crop) inside the shared page frame |
 | `full-framed` | 1 | one photo, matted per the style suite (v1's `photo-page`) |
-| `two-horizontal` | 2 | two landscapes stacked |
-| `two-vertical` | 2 | two portraits side by side |
-| `three-column` | 3 | three portraits as columns |
-| `three-mixed` | 3 | one dominant + two small (v1 `photo-grid` geometry) |
-| `collage-4` / `collage-5` | 4–5 | justified mosaic rows, aspect-ratio aware |
-| `divider` | 0–1 | section opener: title, date, optional muted photo |
+| `two-horizontal` | 2 | two landscapes stacked as full-width rows |
+| `two-vertical` | 2 | two portraits side by side in one justified row |
+| `three-column` | 3 | three portraits in one justified row |
+| `three-mixed` | 3 | one dominant landscape across the top + a justified pair below |
+| `four-mixed` | 4 | one dominant landscape across the top + a justified trio below |
+| `collage-4` / `collage-5` / `collage-6` | 4–6 | justified mosaic rows (2+2 / 2+3 / 3+3), aspect-ratio aware |
+| `divider` | 0–1 | legacy/edit-time only: never emitted by the AI pass (the section's title page is automatic; a photo-less divider renders blank and is swept away before persisting) |
+
+Every multi-photo template renders as a **justified row stack** (`rowStackHtml`,
+`lib/photo-book-layout.ts`): within a row every photo shares one height at its true
+aspect ratio, rows fill the content-box width, and a stack that would overflow scales
+down (photos are never cropped — only `full-bleed` crops, slightly, by design). All
+photo pages share one constant page frame (`PHOTO_BOOK_CONTENT_MARGIN_MM`); only the
+covers and section dividers bleed edge-to-edge.
 
 Validation (`validatePhotoBookPlan` + consistency check against `book_photos`): template
 slot counts match, every referenced asset exists and isn't excluded, no photo appears

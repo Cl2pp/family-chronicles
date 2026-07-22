@@ -115,7 +115,8 @@ export type PhotoLayoutOpResult =
 
 /** Generic single-template pick for a page ending up with N photos after some op — used
  *  by `removePhotoFromPlan`'s shrink and `move_photo`'s "own new page" placement. 0 maps to
- *  `divider` (an empty section-opener is still a meaningful page, never deleted), 1-5 map to
+ *  `divider` (a within-batch placeholder that keeps indices stable; `sweepBlankPages`
+ *  below removes it before anything is persisted — blank pages never ship), 1-5 map to
  *  one representative fixed-arity template each. There's no principled way to guess whether
  *  a shrunk 3-photo page "wants" `three-column` or `three-mixed` — `three-mixed` (one
  *  dominant + two small) degrades more gracefully when the photos aren't matched aspect
@@ -140,7 +141,8 @@ function templateFits(template: PhotoPageTemplate, count: number): boolean {
  *  disappearing, which is what keeps every OTHER op's section/page indices stable within
  *  the same batch (dropping pages/sections would shift every later index, a real footgun
  *  when several ops in one call address earlier-computed indices from a single
- *  `get_photo_book` read). */
+ *  `get_photo_book` read). The batch's caller drops those placeholders again via
+ *  `sweepBlankPages` before persisting — they exist only between ops, never in a book. */
 function shrinkPage(page: PhotoPagePlan, assetId: string): PhotoPagePlan {
   const idx = page.assetIds.indexOf(assetId);
   if (idx === -1) return page;
@@ -405,4 +407,27 @@ export function applyPhotoLayoutOp(
       return { plan: { ...plan, sections } };
     }
   }
+}
+
+/**
+ * Removes blank pages from a plan: `divider` pages that hold no photo render as a
+ * completely empty colored page (the real section-title page is emitted automatically
+ * per section by `lib/photo-book-layout.ts` — a photo-less per-page divider adds nothing
+ * but blankness), and a section whose last page was blank goes with it. Books must never
+ * contain empty pages.
+ *
+ * Runs AFTER a whole op batch has been applied (`updatePhotoBookLayout`,
+ * `lib/books.ts`): during the batch, `shrinkPage` deliberately turns an emptied page
+ * into a photo-less divider instead of deleting it, so later ops in the same batch keep
+ * addressing stable section/page indices — this sweep is what finally drops those
+ * placeholders before the plan is persisted.
+ */
+export function sweepBlankPages(plan: PhotoBookPlan): PhotoBookPlan {
+  const sections = plan.sections
+    .map((section) => ({
+      ...section,
+      pages: section.pages.filter((page) => !(page.template === 'divider' && page.assetIds.length === 0)),
+    }))
+    .filter((section) => section.pages.length > 0);
+  return { ...plan, sections };
 }

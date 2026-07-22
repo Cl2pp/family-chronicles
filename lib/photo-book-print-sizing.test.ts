@@ -73,9 +73,9 @@ describe('photoAssetPrintTargetSizeMm', () => {
     expect(sizes.get('hero')).toEqual({ w: pageW, h: pageH });
   });
 
-  it('sizes a full-bleed photo to the full bleed-inclusive page', () => {
+  it('sizes a full-bleed photo to the content box (it renders inside the shared page frame)', () => {
     const sizes = photoAssetPrintTargetSizeMm(basePlan(), TRIM);
-    expect(sizes.get('a1')).toEqual({ w: pageW, h: pageH });
+    expect(sizes.get('a1')).toEqual({ w: contentW, h: contentH });
   });
 
   it('sizes a two-horizontal photo to full content width, half content height', () => {

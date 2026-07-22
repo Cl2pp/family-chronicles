@@ -371,3 +371,26 @@ describe('findMergeSectionsIndexHazard (the merge_sections batch-index-instabili
     expect(findMergeSectionsIndexHazard(ops)).toBeNull();
   });
 });
+
+describe('sweepBlankPages', () => {
+  it('drops photo-less divider placeholders and any section they leave empty', async () => {
+    const { sweepBlankPages } = await import('./photo-book-ops');
+    const plan = basePlan({
+      sections: [
+        { title: 'Kept', pages: [{ template: 'divider', assetIds: [] }, { template: 'full-framed', assetIds: ['a7'] }] },
+        { title: 'Emptied', pages: [{ template: 'divider', assetIds: [] }] },
+      ],
+    });
+    const swept = sweepBlankPages(plan);
+    expect(swept.sections).toHaveLength(1);
+    expect(swept.sections[0].pages).toEqual([{ template: 'full-framed', assetIds: ['a7'] }]);
+  });
+
+  it('keeps a divider that still has its backdrop photo', async () => {
+    const { sweepBlankPages } = await import('./photo-book-ops');
+    const plan = basePlan({
+      sections: [{ title: 'S', pages: [{ template: 'divider', assetIds: ['a7'] }] }],
+    });
+    expect(sweepBlankPages(plan).sections[0].pages).toHaveLength(1);
+  });
+});
