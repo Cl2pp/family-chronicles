@@ -29,17 +29,14 @@ import { inviteMemberTool } from './members';
 import {
   createBookTool,
   deleteBookTool,
-  designBookLayoutTool,
   getBookTool,
   listBooksTool,
   quoteBookPriceTool,
   renderBookPreviewTool,
-  resetBookLayoutTool,
   setBookStoriesTool,
-  updateBookLayoutTool,
   updateBookTool,
 } from './books';
-import { getPhotoBookTool, redesignPhotoBookTool, updatePhotoBookLayoutTool } from './photo-books';
+import { getBookLayoutTool, redesignBookTool, updateBookLayoutTool } from './photo-books';
 import type { Tool } from './types';
 
 export * from './types';
@@ -73,9 +70,6 @@ export const tools: Tool[] = [
   updateBookTool,
   setBookStoriesTool,
   renderBookPreviewTool,
-  designBookLayoutTool,
-  updateBookLayoutTool,
-  resetBookLayoutTool,
   quoteBookPriceTool,
   deleteBookTool,
   // review-then-save
@@ -86,14 +80,12 @@ export const tools: Tool[] = [
 ];
 
 /**
- * Photo-book tools — deliberately NOT part of `tools` above: they're scoped to the
- * photo-book builder's own embedded chat (`runPhotoBookAgent`) only, never the general
- * chat agent or the story-book chat (`runBookAgent`'s `bookTools`), so neither of those
- * can see or call `update_photo_book_layout`/`redesign_photo_book` on someone's photo
- * book, and the photo-book chat never sees the story-only book tools either
- * (docs/PHOTO_BOOK_PLAN.md PR4).
+ * Layout tools — deliberately NOT part of `tools` above: they are scoped to the book
+ * builder's own embedded chat (`runBookAgent`), which is pinned to ONE book. Keeping
+ * them out of the general chat catalog is what stops that agent from wandering off and
+ * restyling some other book it happened to read about.
  */
-export const photoBookTools: Tool[] = [getPhotoBookTool, updatePhotoBookLayoutTool, redesignPhotoBookTool];
+export const bookLayoutTools: Tool[] = [getBookLayoutTool, updateBookLayoutTool, redesignBookTool];
 
 /** A tool catalog as OpenAI function-tool schemas (parameters derived from each zod
  *  schema). Defaults to the full chat-agent catalog; scoped agents (e.g. the book

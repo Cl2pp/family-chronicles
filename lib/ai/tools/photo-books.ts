@@ -20,8 +20,8 @@ import { defineTool } from './types';
  * title-or-id string to search for.
  */
 
-export const getPhotoBookTool = defineTool<{ bookId: string }>({
-  name: 'get_photo_book',
+export const getBookLayoutTool = defineTool<{ bookId: string }>({
+  name: 'get_book_layout',
   description:
     'Read the photo book in full: style, cover, every section with its pages and photos ' +
     '(assetId, template, caption), plus each photo\'s AI analysis summary (sharpness, ' +
@@ -128,8 +128,8 @@ const photoLayoutOpSchema = z.discriminatedUnion('op', [
   }),
 ]);
 
-export const updatePhotoBookLayoutTool = defineTool<{ bookId: string; ops: PhotoLayoutOp[] }>({
-  name: 'update_photo_book_layout',
+export const updateBookLayoutTool = defineTool<{ bookId: string; ops: PhotoLayoutOp[] }>({
+  name: 'update_book_layout',
   description:
     'Make targeted edits to the photo book\'s layout: change the style, the cover photo or ' +
     'title, a section\'s title, a page\'s template, move or swap photos, exclude/include a ' +
@@ -160,8 +160,8 @@ export const updatePhotoBookLayoutTool = defineTool<{ bookId: string; ops: Photo
   },
 });
 
-export const redesignPhotoBookTool = defineTool<{ bookId: string; overwriteEdits?: boolean | null }>({
-  name: 'redesign_photo_book',
+export const redesignBookTool = defineTool<{ bookId: string; overwriteEdits?: boolean | null }>({
+  name: 'redesign_book',
   description:
     'Queue an AI redesign of the WHOLE photo book: a vision model looks at the actual photos ' +
     'and proposes fresh section boundaries and titles, hero picks, page templates, and ' +

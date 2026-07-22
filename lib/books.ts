@@ -1390,7 +1390,7 @@ export async function regeneratePhotoBookLayout(input: {
 
 /**
  * Queue the photo-book AI design pass (docs/PHOTO_BOOK_PLAN.md §6, producer #2) — the
- * "Design my book" button, and the `redesign_photo_book` agent tool. Mirrors
+ * "Design my book" button, and the `redesign_book` agent tool. Mirrors
  * `requestAiDesign` (the story-book counterpart): sets `design_requested_at` so the
  * builder's poll can show a working state, then enqueues `design-photo-book`, whose
  * worker handler (`handleDesignPhotoBook`, `worker/index.ts`) persists the AI's plan on
@@ -1455,8 +1455,8 @@ export async function requestPhotoBookAiDesign(input: {
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Photo-book chat/agent surface (docs/PHOTO_BOOK_PLAN.md PR4 / §9): a read
- * (`getPhotoBookSummary`, backing the `get_photo_book` agent tool) and a targeted-edit
- * entry point (`updatePhotoBookLayout`, backing `update_photo_book_layout`) — the "all
+ * (`getPhotoBookSummary`, backing the `get_book_layout` agent tool) and a targeted-edit
+ * entry point (`updatePhotoBookLayout`, backing `update_book_layout`) — the "all
  * mutations in lib/books.ts, tools+UI are thin wrappers" rule holds for photo books too.
  * The pure per-op plan transforms live in `lib/photo-book-ops.ts` (kept free of db/env
  * imports so they're unit-testable without a database); this is the impure shell that
@@ -1512,7 +1512,7 @@ export interface PhotoBookSummary {
 }
 
 /**
- * The photo book's full current state for the chat agent (`get_photo_book`): every
+ * The photo book's full current state for the chat agent (`get_book_layout`): every
  * section/page/photo the live plan places, plus each photo's vision-analysis summary —
  * this is what lets "die verschwommenen raus" ("blurry ones out") or "the one with Oma"
  * work, since the model can read `sharpness`/`shortDescription`/`sceneTags` per photo
@@ -1615,7 +1615,7 @@ export async function getPhotoBookSummary(bookId: string, userId: string): Promi
  *  - Every successful call sets `layout_source: 'edited'` unconditionally (including
  *    `set_style`, unlike the story book's `set_theme`/`setPhotoBookStyle`, which never
  *    mark the plan edited) — any chat edit, however small, is treated as a manual edit
- *    from here on, so a later `redesign_photo_book`/regenerate asks for confirmation
+ *    from here on, so a later `redesign_book`/regenerate asks for confirmation
  *    before discarding it.
  *  - The read-modify-write below runs inside a transaction that locks the book row
  *    (`FOR UPDATE`) BEFORE reading the current plan, mirroring `addBookPhotos`'s lock
@@ -1634,7 +1634,7 @@ export async function updatePhotoBookLayout(input: {
   if (input.ops.length === 0) return { ok: true };
 
   // merge_sections shifts every later section index down by one — a model that doesn't
-  // re-fetch get_photo_book in between would silently retarget any following
+  // re-fetch get_book_layout in between would silently retarget any following
   // index-addressed op at the wrong (but still valid) section. Reject the whole batch
   // up front, before any read/write, rather than let it apply a wrong mutation.
   const mergeHazard = findMergeSectionsIndexHazard(input.ops);
