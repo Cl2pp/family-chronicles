@@ -287,6 +287,20 @@ down (photos are never cropped — only `full-bleed` crops, slightly, by design)
 photo pages share one constant page frame (`PHOTO_BOOK_CONTENT_MARGIN_MM`); only the
 covers and section dividers bleed edge-to-edge.
 
+**Unified-book text (PR B of the unification plan):** `section.pages` may also hold
+`{ template: 'text', from, to }` flow items — inclusive paragraph ranges of the
+section's `storyId` (a `book_stories` chapter with `include_text`). Text is NOT a fixed
+sheet: it renders as a `.text-flow` on the document's single named `@page text-flow`
+(real margins + the folio margin box; photo pages stay on the margin-0 default page and
+are numberless by construction) and flows across as many pages as it needs —
+spike-validated in both Chromium print and Paged.js. Consistency rules: exactly one
+section per book story, text only in `storyId` sections, paragraphs 0..n-1 covered
+exactly once in order (`checkPhotoBookPlanConsistency` with `content.stories`;
+`repairTextCoverage` fixes broken coverage mechanically). Suite tokens for body
+typography (size, leading, paragraph gap, drop cap, justify, folio style) live in
+`lib/photo-book-styles.ts`. A TOC page is emitted iff any section carries a `storyId` —
+pure photo books render exactly as before.
+
 Validation (`validatePhotoBookPlan` + consistency check against `book_photos`): template
 slot counts match, every referenced asset exists and isn't excluded, no photo appears
 twice, every section non-empty. Same invalid-plan-falls-back-to-auto contract as v1.

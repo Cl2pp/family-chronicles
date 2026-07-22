@@ -4,7 +4,7 @@ import {
   rowStackCellSizesMm,
   TEMPLATE_ROW_ARRANGEMENT,
 } from '@/lib/photo-book-layout';
-import type { PhotoBookPlan } from '@/lib/photo-book-plan';
+import { isTextItem, type PhotoBookPlan } from '@/lib/photo-book-plan';
 
 /** Pixel dimensions of the photos a plan places, keyed by assetId — lets the sizing
  *  functions below replay the renderer's exact justified-row math instead of guessing
@@ -29,12 +29,34 @@ export type PhotoDimsById = Map<string, { width: number; height: number }>;
  *  path (which pads the ACTUAL rendered PDF to Gelato's rules via `pdf-lib`, not this
  *  count — but both describe "how many pages does this plan lay out to" and should never
  *  drift apart in their reasoning). */
-export function countPhotoBookPages(plan: PhotoBookPlan): number {
+/** Rough flowed-text density for the page-count ESTIMATE below — justified 10.5pt body
+ *  on the 21×28 content box runs ~350 words/page; the real count still comes from the
+ *  rendered PDF (`padPdf`). */
+const WORDS_PER_TEXT_PAGE = 350;
+
+export function countPhotoBookPages(
+  plan: PhotoBookPlan,
+  stories?: Array<{ storyId: string; paragraphWordCounts: number[] }>,
+): number {
+  const wordsByStory = new Map((stories ?? []).map((s) => [s.storyId, s.paragraphWordCounts]));
   const coverPages = 2; // front + back
-  const sectionPages = plan.sections.reduce(
-    (sum, section) => sum + 1 /* divider */ + section.pages.length,
-    0,
-  );
+  let sectionPages = 0;
+  for (const section of plan.sections) {
+    sectionPages += 1; // divider
+    for (const page of section.pages) {
+      if (isTextItem(page)) {
+        // A flowing text run spans as many pages as its words need — estimated, since
+        // only the renderer knows line breaks. Without word data: one page.
+        const counts = section.storyId ? wordsByStory.get(section.storyId) : undefined;
+        const words = counts
+          ? counts.slice(page.from, page.to + 1).reduce((a, b) => a + b, 0)
+          : WORDS_PER_TEXT_PAGE;
+        sectionPages += Math.max(1, Math.ceil(words / WORDS_PER_TEXT_PAGE));
+      } else {
+        sectionPages += 1;
+      }
+    }
+  }
   return coverPages + sectionPages;
 }
 
@@ -88,6 +110,9 @@ export function photoAssetPrintTargetSizeMm(
 
   for (const section of plan.sections) {
     for (const page of section.pages) {
+      // Text runs hold no photos — nothing to size (and with the story plan's floats
+      // retired, no figure ever lives inside a text flow).
+      if (isTextItem(page)) continue;
       const rows = TEMPLATE_ROW_ARRANGEMENT[page.template];
       if (rows) {
         // A justified row stack: replay the renderer's own math (shared helper — the

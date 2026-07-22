@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isTextItem, type PhotoFlowItem, type PhotoPagePlan } from '@/lib/photo-book-plan';
 import {
   checkPhotoBookPlanConsistency,
   photoBookPlanHasContent,
@@ -17,6 +18,13 @@ function planOf(sections: PhotoBookPlan['sections'], cover: Partial<PhotoBookPla
 
 function contentOf(photos: LintPhoto[]) {
   return { availableAssetIds: photos.map((p) => p.assetId), allAssetIds: photos.map((p) => p.assetId) };
+}
+
+/** Narrows a flow item to a photo page — unified-plan `section.pages` may also hold
+ *  text runs; these tests only ever construct/expect photo pages. */
+function photoPage(item: PhotoFlowItem): PhotoPagePlan {
+  if (isTextItem(item)) throw new Error('expected a photo page, got a text run');
+  return item;
 }
 
 describe('templateForGroup', () => {
@@ -57,7 +65,7 @@ describe('repairPhotoBookPlan', () => {
     });
     const { plan: repaired, changes } = repairPhotoBookPlan(plan, { photos });
     expect(changes.join(' ')).toContain('re-fitted');
-    expect(repaired.sections[0].pages[0].assetIds).toEqual(['a', 'b']);
+    expect(photoPage(repaired.sections[0].pages[0]).assetIds).toEqual(['a', 'b']);
     expect(repaired.cover.heroAssetId).toBe('hero');
     expect(checkPhotoBookPlanConsistency(repaired, contentOf(photos))).toEqual([]);
   });
@@ -93,7 +101,7 @@ describe('repairPhotoBookPlan', () => {
       heroAssetId: 'hero',
     });
     const { plan: repaired } = repairPhotoBookPlan(plan, { photos, mustInclude: ['mine'] });
-    const placed = repaired.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const placed = repaired.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(placed).toContain('mine');
     expect(checkPhotoBookPlanConsistency(repaired, contentOf(photos))).toEqual([]);
   });
@@ -111,7 +119,7 @@ describe('repairPhotoBookPlan', () => {
     const plan = planOf([{ title: 'Tag 1', pages: [{ template: 'three-column', assetIds: ['a', 'b', 'c'] }] }]);
     const { plan: repaired } = repairPhotoBookPlan(plan, { photos });
     expect(repaired.cover.heroAssetId).toBe('a');
-    expect(repaired.sections[0].pages[0].assetIds).toEqual(['b', 'c']);
+    expect(photoPage(repaired.sections[0].pages[0]).assetIds).toEqual(['b', 'c']);
     expect(checkPhotoBookPlanConsistency(repaired, contentOf(photos))).toEqual([]);
   });
 
@@ -294,7 +302,7 @@ describe('blank divider pages (the empty-pages bug)', () => {
     expect(result).not.toBeNull();
     const [page] = result!.plan.sections[0].pages;
     expect(page.template).not.toBe('divider');
-    expect(page.assetIds).toEqual(['a']);
+    expect(photoPage(page).assetIds).toEqual(['a']);
   });
 
   it('repair drops a stored photo-less divider page instead of keeping the blank page', () => {
@@ -315,5 +323,108 @@ describe('blank divider pages (the empty-pages bug)', () => {
     expect(repaired.sections[0].pages).toHaveLength(1);
     expect(repaired.sections[0].pages[0].template).toBe('full-framed');
     expect(changes.some((c) => c.includes('blank divider'))).toBe(true);
+  });
+});
+
+describe('repairTextCoverage (unified-book plan)', () => {
+  const stories = [{ storyId: 's1', paragraphCount: 6, title: 'Omas Sommer' }];
+
+  it('leaves intact coverage untouched', () => {
+    const photos = [landscape('hero'), portrait('a')];
+    const plan = planOf(
+      [
+        {
+          title: 'S',
+          storyId: 's1',
+          pages: [
+            { template: 'text', from: 0, to: 2 },
+            { template: 'full-framed', assetIds: ['a'] },
+            { template: 'text', from: 3, to: 5 },
+          ],
+        },
+      ],
+      { heroAssetId: 'hero' },
+    );
+    const { plan: repaired, changes } = repairPhotoBookPlan(plan, { photos, stories });
+    expect(changes).toEqual([]);
+    expect(repaired).toEqual(plan);
+  });
+
+  it('re-covers broken ranges over the existing runs, keeping photo-page positions', () => {
+    const photos = [landscape('hero'), portrait('a')];
+    const plan = planOf(
+      [
+        {
+          title: 'S',
+          storyId: 's1',
+          pages: [
+            { template: 'text', from: 2, to: 2 },
+            { template: 'full-framed', assetIds: ['a'] },
+            { template: 'text', from: 9, to: 12 },
+          ],
+        },
+      ],
+      { heroAssetId: 'hero' },
+    );
+    const { plan: repaired } = repairPhotoBookPlan(plan, { photos, stories });
+    const pages = repaired.sections[0].pages;
+    expect(pages).toHaveLength(3);
+    expect(pages[0]).toEqual({ template: 'text', from: 0, to: 2 });
+    expect(pages[1].template).toBe('full-framed');
+    expect(pages[2]).toEqual({ template: 'text', from: 3, to: 5 });
+    expect(checkPhotoBookPlanConsistency(repaired, {
+      availableAssetIds: ['hero', 'a'],
+      allAssetIds: ['hero', 'a'],
+      stories,
+    })).toEqual([]);
+  });
+
+  it('appends a text-only section for a story the plan left out', () => {
+    const photos = [landscape('hero'), portrait('a')];
+    const plan = planOf([{ title: 'Nur Fotos', pages: [{ template: 'full-framed', assetIds: ['a'] }] }], {
+      heroAssetId: 'hero',
+    });
+    const { plan: repaired, changes } = repairPhotoBookPlan(plan, { photos, stories });
+    const added = repaired.sections.find((s) => s.storyId === 's1');
+    expect(added?.title).toBe('Omas Sommer');
+    expect(added?.pages).toEqual([{ template: 'text', from: 0, to: 5 }]);
+    expect(changes.some((c) => c.includes('added a section for story s1'))).toBe(true);
+  });
+
+  it('strips text from sections naming an unknown story', () => {
+    const photos = [landscape('hero'), portrait('a')];
+    const plan = planOf(
+      [
+        {
+          title: 'S',
+          storyId: 'ghost',
+          pages: [
+            { template: 'text', from: 0, to: 3 },
+            { template: 'full-framed', assetIds: ['a'] },
+          ],
+        },
+      ],
+      { heroAssetId: 'hero' },
+    );
+    const { plan: repaired } = repairPhotoBookPlan(plan, { photos, stories: [] });
+    expect(repaired.sections[0].storyId).toBeUndefined();
+    expect(repaired.sections[0].pages).toHaveLength(1);
+  });
+
+  it('coerce keeps model-emitted text items only in sections that name a story', () => {
+    const photos = [landscape('hero'), portrait('a')];
+    const raw = {
+      style: 'classic',
+      cover: { heroAssetId: 'hero', title: 'Buch' },
+      sections: [
+        { title: 'A', storyId: 's1', pages: [{ template: 'text', from: 0, to: 5 }] },
+        { title: 'B', pages: [{ type: 'text', from: 0, to: 2 }, { template: 'full-framed', assetIds: ['a'] }] },
+      ],
+    };
+    const result = coercePhotoBookPlan(raw, { photos, fallbackTitle: 'Buch', fallbackStyle: 'classic' });
+    expect(result).not.toBeNull();
+    expect(result!.plan.sections[0].pages).toEqual([{ template: 'text', from: 0, to: 5 }]);
+    expect(result!.plan.sections[1].pages).toHaveLength(1);
+    expect(result!.plan.sections[1].pages[0].template).toBe('full-framed');
   });
 });

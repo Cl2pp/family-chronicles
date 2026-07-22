@@ -1,8 +1,10 @@
 import {
+  isTextItem,
   PHOTO_PAGE_TEMPLATE_SLOTS,
   type PhotoBookPlan,
   type PhotoBookStyle,
   type PhotoCoverPlan,
+  type PhotoFlowItem,
   type PhotoPagePlan,
   type PhotoPageTemplate,
 } from './photo-book-plan';
@@ -176,7 +178,7 @@ export function removePhotoFromPlan(plan: PhotoBookPlan, assetId: string): Photo
 
   const sections = plan.sections.map((section) => ({
     ...section,
-    pages: section.pages.map((page) => shrinkPage(page, assetId)),
+    pages: section.pages.map((page) => (isTextItem(page) ? page : shrinkPage(page, assetId))),
   }));
 
   return { ...plan, cover, sections };
@@ -189,6 +191,7 @@ export function removePhotoFromPlan(plan: PhotoBookPlan, assetId: string): Photo
 function findPlacedCaption(plan: PhotoBookPlan, assetId: string): string | null | undefined {
   for (const section of plan.sections) {
     for (const page of section.pages) {
+      if (isTextItem(page)) continue;
       const idx = page.assetIds.indexOf(assetId);
       if (idx !== -1) return page.captions?.[idx] ?? null;
     }
@@ -218,7 +221,8 @@ function swapIdEverywhere(plan: PhotoBookPlan, a: string, b: string): PhotoBookP
 
   const sections = plan.sections.map((section) => ({
     ...section,
-    pages: section.pages.map((page) => {
+    pages: section.pages.map((page): PhotoFlowItem => {
+      if (isTextItem(page)) return page;
       const idxA = page.assetIds.indexOf(a);
       const idxB = page.assetIds.indexOf(b);
       const assetIds = page.assetIds.map(swap);
@@ -302,6 +306,9 @@ export function applyPhotoLayoutOp(
       if (!section) return { error: `No section at index ${op.sectionIndex}.` };
       const page = section.pages[op.pageIndex];
       if (!page) return { error: `No page at index ${op.pageIndex} in section "${section.title}".` };
+      if (isTextItem(page)) {
+        return { error: 'That entry is flowing story text, not a photo page — it has no template to change.' };
+      }
       if (!templateFits(op.template, page.assetIds.length)) {
         const slots = PHOTO_PAGE_TEMPLATE_SLOTS[op.template];
         const expected = slots.min === slots.max ? `${slots.min}` : `${slots.min}-${slots.max}`;
@@ -396,6 +403,9 @@ export function applyPhotoLayoutOp(
       if (!section) return { error: `No section at index ${op.sectionIndex}.` };
       const page = section.pages[op.pageIndex];
       if (!page) return { error: `No page at index ${op.pageIndex} in section "${section.title}".` };
+      if (isTextItem(page)) {
+        return { error: 'That entry is flowing story text, not a photo page — there is no photo to caption.' };
+      }
       const idx = page.assetIds.indexOf(op.assetId);
       if (idx === -1) return { error: 'That photo is not on this page.' };
       const captions = page.captions ? page.captions.slice() : page.assetIds.map(() => null);

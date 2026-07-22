@@ -129,8 +129,15 @@ export interface CulledPhoto {
   reason: 'duplicate' | 'blurry' | 'eyes-closed' | 'low-quality';
 }
 
+/** The auto-layouter never emits text runs — its sections hold photo pages only
+ *  (story-aware layout arrives with the unified loader). Narrowed types keep that
+ *  guarantee visible to callers and tests; both are assignable to their wide
+ *  counterparts (`PhotoSectionPlan`/`PhotoBookPlan`). */
+export type PhotoOnlySectionPlan = Omit<PhotoSectionPlan, 'pages'> & { pages: PhotoPagePlan[] };
+export type PhotoOnlyBookPlan = Omit<PhotoBookPlan, 'sections'> & { sections: PhotoOnlySectionPlan[] };
+
 export interface PhotoBookAutoLayoutResult {
-  plan: PhotoBookPlan;
+  plan: PhotoOnlyBookPlan;
   /** Photos the layouter chose to leave out of the plan, with why — NOT yet persisted;
    *  see the module header. */
   culled: CulledPhoto[];
@@ -924,7 +931,7 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   // opener, producing a duplicate `assetId` that fails `checkPhotoBookPlanConsistency`
   // (mirrors `buildChapterBlocks`'s `pool = pool.filter(...)` in `lib/book-autolayout.ts`,
   // which solves the same problem for story books).
-  const sections: PhotoSectionPlan[] = [];
+  const sections: PhotoOnlySectionPlan[] = [];
   for (const { group, keep } of groupKeeps) {
     const interior = heroAssetId ? keep.filter((p) => p.assetId !== heroAssetId) : keep;
     // Excluding the hero can leave a section with nothing left (e.g. a single-photo
@@ -937,7 +944,7 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
     });
   }
 
-  const plan: PhotoBookPlan = {
+  const plan: PhotoOnlyBookPlan = {
     kind: 'photo',
     style: input.existingStyle ?? 'classic',
     cover: {

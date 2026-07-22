@@ -57,6 +57,7 @@ import {
 } from '@/lib/photo-book-content';
 import {
   checkPhotoBookPlanConsistency,
+  isTextItem,
   validatePhotoBookPlan,
   type PhotoBookPlan,
   type PhotoBookStyle,
@@ -1183,14 +1184,19 @@ export interface PhotoBookAgentPhoto {
 
 export interface PhotoBookAgentPage {
   pageIndex: number;
-  template: PhotoPageTemplate;
+  /** `'text'` marks a flowing story-text run (unified-book plan) — `photos` is then
+   *  empty and `paragraphs` carries the inclusive range. The agent addresses entries by
+   *  `pageIndex` either way; photo ops on a text entry are rejected with a clear error. */
+  template: PhotoPageTemplate | 'text';
   photos: PhotoBookAgentPhoto[];
+  paragraphs?: { from: number; to: number };
 }
 
 export interface PhotoBookAgentSection {
   sectionIndex: number;
   title: string;
   dateLabel?: string;
+  storyId?: string;
   pages: PhotoBookAgentPage[];
 }
 
@@ -1249,11 +1255,17 @@ export async function getPhotoBookSummary(bookId: string, userId: string): Promi
     sectionIndex,
     title: section.title,
     dateLabel: section.dateLabel,
-    pages: section.pages.map((page, pageIndex) => ({
-      pageIndex,
-      template: page.template,
-      photos: page.assetIds.map((id, i) => toAgentPhoto(id, page.captions?.[i] ?? null)),
-    })),
+    ...(section.storyId ? { storyId: section.storyId } : {}),
+    pages: section.pages.map((page, pageIndex): PhotoBookAgentPage => {
+      if (isTextItem(page)) {
+        return { pageIndex, template: 'text', photos: [], paragraphs: { from: page.from, to: page.to } };
+      }
+      return {
+        pageIndex,
+        template: page.template,
+        photos: page.assetIds.map((id, i) => toAgentPhoto(id, page.captions?.[i] ?? null)),
+      };
+    }),
   }));
 
   const referenced = referencedPhotoAssetIds(plan);
