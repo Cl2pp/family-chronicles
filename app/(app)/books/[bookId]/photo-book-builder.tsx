@@ -22,7 +22,7 @@ import { useI18n } from '@/lib/i18n/client';
 import { isBookPrintFresh } from '@/lib/book-print-status';
 import { canAccessPhotoBookStep } from '@/lib/photo-book-step-gate';
 import type { PhotoBookDesignStage } from '@/lib/photo-book-design-stage';
-import type { PhotoBookGrouping } from '@/lib/photo-book-grouping';
+import { groupingCoverage, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
 import type { PhotoBookStyle } from '@/lib/photo-book-plan';
 import type { BookCoverType, BookFormat, BookQuote } from '@/lib/gelato';
 import {
@@ -142,6 +142,8 @@ export function PhotoBookBuilder({
   const [designPending, startDesign] = useTransition();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [designConsentOpen, setDesignConsentOpen] = useState(false);
+  // A grouping the photos can't carry, waiting for the user to confirm the switch.
+  const [groupingConfirm, setGroupingConfirm] = useState<PhotoBookGrouping | null>(null);
   const [regenerateConsentOpen, setRegenerateConsentOpen] = useState(false);
   const [downloadRequesting, startDownloadRequest] = useTransition();
   // True while waiting for a triggered render to finish before the PDF can be downloaded
@@ -349,6 +351,29 @@ export function PhotoBookBuilder({
    */
   function setGrouping(photoGrouping: PhotoBookGrouping) {
     if (photoGrouping === book.photoGrouping) return;
+    // Ask first when the photos can't actually carry this grouping — "by place" with no GPS
+    // produces one meaningless chapter, and on an already-generated book the switch spends
+    // a whole design pass before the user could see that. The config panel only shows the
+    // caveat for the grouping already chosen, so this is where it gets said in time.
+    if (!groupingCoverage(photos, photoGrouping).sufficient) {
+      setGroupingConfirm(photoGrouping);
+      return;
+    }
+    applyGrouping(photoGrouping);
+  }
+
+  /** The caveat for the grouping awaiting confirmation — the same sentence the config panel
+   *  shows once a grouping is chosen, said here BEFORE the switch commits. */
+  const groupingConfirmMessage = (() => {
+    if (!groupingConfirm) return null;
+    const { supported, total } = groupingCoverage(photos, groupingConfirm);
+    return groupingConfirm === 'location'
+      ? tp.config.groupingWarnings.location(supported, total)
+      : tp.config.groupingWarnings.topic(supported, total);
+  })();
+
+  function applyGrouping(photoGrouping: PhotoBookGrouping) {
+    setGroupingConfirm(null);
     startTransition(async () => {
       const result = await updatePhotoBookSettingsAction({ bookId: book.id, photoGrouping });
       if (result.error) {
@@ -579,6 +604,23 @@ export function PhotoBookBuilder({
           </Button>
           <Button color="red" onClick={confirmDesignOverwrite} loading={designPending}>
             {tb.overwriteEditsConfirm}
+          </Button>
+        </Group>
+      </Modal>
+
+      <Modal
+        opened={groupingConfirm != null}
+        onClose={() => setGroupingConfirm(null)}
+        title={tp.config.groupingConfirmTitle}
+        centered
+      >
+        <Text size="sm">{groupingConfirmMessage}</Text>
+        <Group justify="flex-end" mt="lg">
+          <Button variant="default" onClick={() => setGroupingConfirm(null)} disabled={pending}>
+            {t.common.cancel}
+          </Button>
+          <Button onClick={() => groupingConfirm && applyGrouping(groupingConfirm)} loading={pending}>
+            {tp.config.groupingConfirmAnyway}
           </Button>
         </Group>
       </Modal>

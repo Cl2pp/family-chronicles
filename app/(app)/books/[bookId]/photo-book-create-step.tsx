@@ -41,7 +41,11 @@ import {
   PHOTO_BOOK_DESIGN_STAGES,
   type PhotoBookDesignStage,
 } from '@/lib/photo-book-design-stage';
-import { PHOTO_BOOK_GROUPINGS, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
+import {
+  groupingCoverage,
+  PHOTO_BOOK_GROUPINGS,
+  type PhotoBookGrouping,
+} from '@/lib/photo-book-grouping';
 import type { BookCoverType, BookFormat } from '@/lib/gelato';
 import { PhotoBookChat } from './photo-book-chat';
 import { PhotoBookPhotoTile } from './photo-book-photo-tile';
@@ -55,11 +59,6 @@ import type { PhotoBookInfo, PhotoBookPhotoView } from './photo-book-builder';
  *  top-left corner of page one instead of the whole page; `fitPages()` in
  *  `lib/photo-book-layout.ts` does the matching client-side zoom-to-fit inside whatever
  *  height this aspect ratio produces. */
-/** Below this share of photos carrying what a grouping needs (GPS for "by place", a vision
- *  score for "by topic"), the panel warns before the option is picked — the clustering would
- *  collapse into one meaningless chapter. */
-const MIN_GROUPING_COVERAGE = 0.5;
-
 const TRIM_ASPECT: Record<BookFormat, number> = {
   'hardcover-21x28': 210 / 280,
   'hardcover-20x20': 200 / 200,
@@ -115,24 +114,19 @@ function PhotoBookConfigPanel({
   // location by a messaging app, scans, screenshots — the first real book we looked at had
   // GPS on exactly none of its 36 photos). Say so before the user generates a book, not
   // after.
-  const usable = photos.filter((p) => !p.excluded);
-  const withLocation = usable.filter((p) => p.hasLocation).length;
-  const withAnalysis = usable.filter((p) => p.hasAnalysis).length;
-  /** The caveat for one option, or null. Computed PER OPTION rather than for the saved
-   *  grouping, because clicking an option is what commits it — and on an
-   *  already-generated book that immediately spends a full design pass. A warning that
-   *  only appeared afterwards would be telling the user about a mistake they had already
-   *  paid for. */
-  function warningFor(option: PhotoBookGrouping): string | null {
-    if (usable.length === 0) return null;
-    if (option === 'location' && withLocation < usable.length * MIN_GROUPING_COVERAGE) {
-      return tc.groupingWarnings.location(withLocation, usable.length);
-    }
-    if (option === 'topic' && withAnalysis < usable.length * MIN_GROUPING_COVERAGE) {
-      return tc.groupingWarnings.topic(withAnalysis, usable.length);
-    }
-    return null;
-  }
+  // The caveat for the grouping that is actually SELECTED. It was briefly rendered under
+  // every option the photos couldn't support, so the user would learn about the problem
+  // before clicking — but a three-line orange warning permanently parked under an option
+  // nobody had chosen dominated the panel and buried the hint for the option they HAD
+  // chosen. The pre-click protection lives in the builder's `setGrouping` instead, which
+  // asks before switching to a grouping the photos can't carry, so nothing is lost by
+  // scoping this line to the current choice.
+  const coverage = groupingCoverage(photos, book.photoGrouping);
+  const selectedWarning = coverage.sufficient
+    ? null
+    : book.photoGrouping === 'location'
+      ? tc.groupingWarnings.location(coverage.supported, coverage.total)
+      : tc.groupingWarnings.topic(coverage.supported, coverage.total);
 
   return (
     <Stack gap="md">
@@ -165,32 +159,28 @@ function PhotoBookConfigPanel({
           {tc.groupingIntro}
         </Text>
         <Stack gap={6}>
-          {PHOTO_BOOK_GROUPINGS.map((option) => {
-            const warning = warningFor(option);
-            return (
-              <Box key={option}>
-                <Button
-                  fullWidth
-                  size="compact-sm"
-                  variant={option === book.photoGrouping ? 'filled' : 'default'}
-                  disabled={disabled}
-                  justify="flex-start"
-                  onClick={() => option !== book.photoGrouping && onSetGrouping(option)}
-                >
-                  {tc.groupingOptions[option]}
-                </Button>
-                {warning && (
-                  <Text fz={11} c="orange.7" mt={3}>
-                    {warning}
-                  </Text>
-                )}
-              </Box>
-            );
-          })}
+          {PHOTO_BOOK_GROUPINGS.map((option) => (
+            <Button
+              key={option}
+              fullWidth
+              size="compact-sm"
+              variant={option === book.photoGrouping ? 'filled' : 'default'}
+              disabled={disabled}
+              justify="flex-start"
+              onClick={() => option !== book.photoGrouping && onSetGrouping(option)}
+            >
+              {tc.groupingOptions[option]}
+            </Button>
+          ))}
         </Stack>
         <Text fz={11} c="dimmed" mt={6}>
           {tc.groupingHints[book.photoGrouping]}
         </Text>
+        {selectedWarning && (
+          <Text fz={11} c="orange.7" mt={4}>
+            {selectedWarning}
+          </Text>
+        )}
       </Box>
       <Box>
         <Text fz={13} fw={500} mb={6}>
