@@ -184,11 +184,55 @@ describe('renderPhotoBookHtml', () => {
   // `height` and no CSS margin. No variant emits `page: <ident>` or a named `@page` rule
   // anymore.
   describe('unnamed @page bleed mechanism (all variants)', () => {
-    it('no variant ever emits a `page:` declaration or a named `@page` rule', () => {
+    it('a PHOTO-ONLY book emits no named @page rule at all (unchanged from before text support)', () => {
+      // The named-page mechanism only exists for flowing text. A book without chapters
+      // must keep the single-unnamed-@page document it always had — that's what makes
+      // text support dormant for every existing photo book, and it keeps them away from
+      // the documented Chromium/Paged.js named-page bugs entirely.
       for (const variant of ['screen', 'preview', 'print'] as const) {
         const html = renderPhotoBookHtml(baseInput({ variant }));
         expect(html).not.toMatch(/style="page:/);
-        expect(html).not.toMatch(/@page [a-zA-Z][\w-]*\s*\{/); // named @page rule
+        expect(html.match(/@page [a-zA-Z][\w-]*\s*\{/g) ?? []).toEqual([]);
+      }
+    });
+
+    it('a book WITH chapters emits exactly one named @page rule — text-flow', () => {
+      const plan = basePlan({
+        sections: [{ title: 'Kapitel', storyId: 's1', pages: [{ template: 'text', from: 0, to: 0 }] }],
+      });
+      for (const variant of ['screen', 'preview', 'print'] as const) {
+        const html = renderPhotoBookHtml(
+          baseInput({ variant, plan, storyParagraphs: new Map([['s1', ['Ein Absatz.']]]) }),
+        );
+        expect(html.match(/@page [a-zA-Z][\w-]*\s*\{/g) ?? []).toEqual(['@page text-flow {']);
+      }
+    });
+
+    it('text-page margins are measured from the trim edge in every variant (print adds bleed)', () => {
+      // A different column width would mean different line breaks — and therefore a
+      // print PDF that paginates differently from the proof the reader approved.
+      const plan = basePlan({
+        sections: [{ title: 'Kapitel', storyId: 's1', pages: [{ template: 'text', from: 0, to: 0 }] }],
+      });
+      const input = { plan, storyParagraphs: new Map([['s1', ['Ein Absatz.']]]) };
+      const m = PHOTO_BOOK_CONTENT_MARGIN_MM;
+      expect(renderPhotoBookHtml(baseInput({ ...input, variant: 'screen' }))).toContain(
+        `margin: ${m.top}mm ${m.inner}mm ${m.bottom + 2}mm;`,
+      );
+      expect(renderPhotoBookHtml(baseInput({ ...input, variant: 'print' }))).toContain(
+        `margin: ${m.top + PHOTO_BOOK_BLEED_MM}mm ${m.inner + PHOTO_BOOK_BLEED_MM}mm ${m.bottom + PHOTO_BOOK_BLEED_MM + 2}mm;`,
+      );
+    });
+
+    it('a photo-only book never propagates a page background (no restyle of existing books)', () => {
+      // `background-clip: content-box` leaves the frame strip around every photo page
+      // showing the page canvas; propagating --pb-page-bg would recolor it (black for
+      // the `bold` suite) on books whose proofs are already approved.
+      for (const style of PHOTO_BOOK_STYLES) {
+        const html = renderPhotoBookHtml(
+          baseInput({ plan: basePlan({ style }), fontFaceCss: screenFontFaceCss(style) }),
+        );
+        expect(html).not.toMatch(/color: var\(--pb-color-text\);\s*\n\s*background: var\(--pb-page-bg\);/);
       }
     });
 
@@ -329,5 +373,64 @@ describe('justified row stacks', () => {
     );
     const rows = parseRows(html);
     expect(rows.map((r) => r.widths.length)).toEqual([1, 3, 3, 3]);
+  });
+});
+
+describe('flowing story text (unified-book plan)', () => {
+  const textPlan = (): PhotoBookPlan =>
+    basePlan({
+      sections: [
+        {
+          title: 'Omas Sommer',
+          storyId: 's1',
+          pages: [
+            { template: 'text', from: 0, to: 1 },
+            { template: 'full-framed', assetIds: ['a4'] },
+            { template: 'text', from: 2, to: 2 },
+          ],
+        },
+      ],
+    });
+  const paragraphs = new Map([['s1', ['Erster Absatz.', 'Zweiter Absatz.', 'Dritter Absatz.']]]);
+
+  it('renders text items as .text-flow divs on the named page, drop cap on the first', () => {
+    const html = renderPhotoBookHtml(baseInput({ plan: textPlan(), storyParagraphs: paragraphs }));
+    expect(html).toContain('@page text-flow {');
+    expect(html).toContain('.text-flow { page: text-flow; }');
+    const flows = html.match(/<div class="text-flow[^"]*">/g) ?? [];
+    expect(flows).toEqual(['<div class="text-flow first-of-section">', '<div class="text-flow">']);
+    expect(html).toContain('<p>Erster Absatz.</p>');
+    expect(html).toContain('<p>Dritter Absatz.</p>');
+  });
+
+  it('emits a TOC only for books with story chapters', () => {
+    const withText = renderPhotoBookHtml(baseInput({ plan: textPlan(), storyParagraphs: paragraphs }));
+    const photoOnly = renderPhotoBookHtml(baseInput());
+    expect(withText).toContain('class="page pb-toc"');
+    expect(withText).toContain('Omas Sommer');
+    expect(photoOnly).not.toContain('class="page pb-toc"');
+  });
+
+  it('renders nothing for text items when no paragraphs were provided (dormant-safe)', () => {
+    const html = renderPhotoBookHtml(baseInput({ plan: textPlan() }));
+    expect(html).not.toContain('class="text-flow');
+  });
+
+  it('sets the document language for hyphenation', () => {
+    expect(renderPhotoBookHtml(baseInput())).toContain('<html lang="de">');
+    expect(renderPhotoBookHtml(baseInput({ language: 'en' }))).toContain('<html lang="en">');
+  });
+
+  it('page numbers live only in the text page margin box, per suite', () => {
+    const classic = renderPhotoBookHtml(baseInput({ plan: textPlan(), storyParagraphs: paragraphs }));
+    expect(classic).toContain('@bottom-center { content: counter(page);');
+    const gallery = renderPhotoBookHtml(
+      baseInput({
+        plan: { ...textPlan(), style: 'gallery' },
+        storyParagraphs: paragraphs,
+        fontFaceCss: screenFontFaceCss('gallery'),
+      }),
+    );
+    expect(gallery).not.toContain('@bottom-center');
   });
 });

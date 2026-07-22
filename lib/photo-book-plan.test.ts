@@ -163,3 +163,106 @@ describe('checkPhotoBookPlanConsistency', () => {
     expect(problems.some((p) => p.includes('no pages'))).toBe(true);
   });
 });
+
+describe('text flow items (unified-book plan)', () => {
+  const base = {
+    kind: 'photo' as const,
+    style: 'classic' as const,
+    cover: { heroAssetId: 'hero', title: 'Buch' },
+  };
+  const content = (stories?: Array<{ storyId: string; paragraphCount: number }>) => ({
+    availableAssetIds: ['hero', 'a', 'b'],
+    allAssetIds: ['hero', 'a', 'b'],
+    ...(stories ? { stories } : {}),
+  });
+
+  it('validates a plan with storyId sections and text items', () => {
+    const result = validatePhotoBookPlan({
+      ...base,
+      sections: [
+        {
+          title: 'Oma erzählt',
+          storyId: 's1',
+          pages: [
+            { template: 'text', from: 0, to: 2 },
+            { template: 'full-framed', assetIds: ['a'] },
+            { template: 'text', from: 3, to: 5 },
+          ],
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('enforces gap-free in-order coverage when stories are provided', () => {
+    const plan = {
+      ...base,
+      sections: [
+        {
+          title: 'S',
+          storyId: 's1',
+          pages: [
+            { template: 'text' as const, from: 0, to: 2 },
+            { template: 'text' as const, from: 4, to: 5 }, // gap at 3
+          ],
+        },
+      ],
+    };
+    const validated = validatePhotoBookPlan(plan);
+    expect(validated.ok).toBe(true);
+    if (!validated.ok) return;
+    const problems = checkPhotoBookPlanConsistency(validated.plan, content([{ storyId: 's1', paragraphCount: 6 }]));
+    expect(problems.some((p) => p.includes('gap/overlap'))).toBe(true);
+  });
+
+  it('flags a missing section per story, a split story, and text without a storyId', () => {
+    const plan = validatePhotoBookPlan({
+      ...base,
+      sections: [
+        { title: 'A', storyId: 's1', pages: [{ template: 'text', from: 0, to: 1 }] },
+        { title: 'B', storyId: 's1', pages: [{ template: 'text', from: 0, to: 1 }] },
+        { title: 'C', pages: [{ template: 'text', from: 0, to: 0 }] },
+      ],
+    });
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    const problems = checkPhotoBookPlanConsistency(
+      plan.plan,
+      content([
+        { storyId: 's1', paragraphCount: 2 },
+        { storyId: 's2', paragraphCount: 3 },
+      ]),
+    );
+    expect(problems.some((p) => p.includes('missing a section for story s2'))).toBe(true);
+    expect(problems.some((p) => p.includes('split across 2 sections'))).toBe(true);
+    expect(problems.some((p) => p.includes('text block but no storyId'))).toBe(true);
+  });
+
+  it('skips all text rules when the caller provides no stories (pre-unification callers)', () => {
+    const plan = validatePhotoBookPlan({
+      ...base,
+      sections: [{ title: 'S', storyId: 's1', pages: [{ template: 'text', from: 3, to: 1 }] }],
+    });
+    expect(plan.ok).toBe(true);
+    if (!plan.ok) return;
+    expect(checkPhotoBookPlanConsistency(plan.plan, content())).toEqual([]);
+  });
+
+  it('a text-only book needs no cover hero, but a book with photos still does', () => {
+    const textOnly = validatePhotoBookPlan({
+      kind: 'photo',
+      style: 'classic',
+      cover: { title: 'Buch' },
+      sections: [{ title: 'S', storyId: 's1', pages: [{ template: 'text', from: 0, to: 1 }] }],
+    });
+    expect(textOnly.ok).toBe(true);
+    if (!textOnly.ok) return;
+    expect(
+      checkPhotoBookPlanConsistency(textOnly.plan, {
+        availableAssetIds: [],
+        allAssetIds: [],
+        stories: [{ storyId: 's1', paragraphCount: 2 }],
+      }),
+    ).toEqual([]);
+  });
+});

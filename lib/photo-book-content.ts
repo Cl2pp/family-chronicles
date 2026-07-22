@@ -5,6 +5,7 @@ import { getObjectBuffer } from '@/lib/s3';
 import { orientedDimensions } from '@/lib/book-content';
 import {
   checkPhotoBookPlanConsistency,
+  isTextItem,
   validatePhotoBookPlan,
   type PhotoBookPlan,
   type PhotoPlanContent,
@@ -330,6 +331,7 @@ export function referencedPhotoAssetIds(plan: PhotoBookPlan): Set<string> {
   for (const id of plan.cover.backAssetIds ?? []) ids.add(id);
   for (const section of plan.sections) {
     for (const page of section.pages) {
+      if (isTextItem(page)) continue;
       for (const id of page.assetIds) ids.add(id);
     }
   }
@@ -375,6 +377,7 @@ export function photoAssetRenditionNeeds(
   const slotWidths = trim && dims ? photoSlotPrintWidthsMm(plan, trim, dims) : null;
   for (const section of plan.sections) {
     for (const page of section.pages) {
+      if (isTextItem(page)) continue;
       for (const id of page.assetIds) {
         const width = slotWidths?.get(id);
         const level =

@@ -1,6 +1,7 @@
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
 import {
   CAPTION_LESS_TEMPLATES,
+  isTextItem,
   photoOrientation,
   type PhotoBookPlan,
   type PhotoOrientation,
@@ -45,7 +46,9 @@ export type PhotoBookLintCode =
   /** A photo the vision pass rated highly that the plan never places. */
   | 'strong-photo-unplaced'
   /** A photo the vision pass rated poorly that the plan places anyway. */
-  | 'weak-photo-placed';
+  | 'weak-photo-placed'
+  /** Two text runs directly back to back — legal, but they should be one block. */
+  | 'adjacent-text-blocks';
 
 export interface PhotoBookLintFinding {
   code: PhotoBookLintCode;
@@ -182,6 +185,7 @@ function placedAssetIds(plan: PhotoBookPlan): Set<string> {
   for (const id of plan.cover.backAssetIds ?? []) ids.add(id);
   for (const section of plan.sections) {
     for (const page of section.pages) {
+      if (isTextItem(page)) continue;
       for (const id of page.assetIds) ids.add(id);
     }
   }
@@ -208,9 +212,27 @@ export function lintPhotoBookPlan(plan: PhotoBookPlan, photos: LintPhoto[]): Pho
 
     let runTemplate: PhotoPageTemplate | null = null;
     let runLength = 0;
+    let previousWasText = false;
 
     section.pages.forEach((page, pageIndex) => {
       const where = `Section ${sectionIndex} ("${section.title}"), page ${pageIndex}`;
+
+      if (isTextItem(page)) {
+        // A photo/text alternation IS varied rhythm — reset the template-run counter.
+        runTemplate = null;
+        runLength = 0;
+        if (previousWasText) {
+          findings.push({
+            code: 'adjacent-text-blocks',
+            sectionIndex,
+            pageIndex,
+            message: `${where} is a text block directly after another text block — merge them into one (two adjacent runs read identically to one but complicate the plan).`,
+          });
+        }
+        previousWasText = true;
+        return;
+      }
+      previousWasText = false;
 
       // Only `divider` can legally have zero photos (schema-wise) — and photo-less
       // dividers render as a completely BLANK page, because the real section-title page
@@ -311,6 +333,7 @@ export function lintPhotoBookPlan(plan: PhotoBookPlan, photos: LintPhoto[]): Pho
 const CODE_WEIGHT: Record<PhotoBookLintCode, number> = {
   'empty-page': 12,
   'template-orientation': 10,
+  'adjacent-text-blocks': 2,
   'caption-not-rendered': 4,
   'monotonous-pacing': 3,
   'section-too-short': 2,

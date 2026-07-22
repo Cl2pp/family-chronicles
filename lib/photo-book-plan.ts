@@ -126,7 +126,7 @@ function pageVariantSchemaRanged<T extends PhotoPageTemplate>(template: T) {
   });
 }
 
-export const pagePlanSchema = z.discriminatedUnion('template', [
+const PHOTO_PAGE_VARIANTS = [
   pageVariantSchema('full-bleed'),
   pageVariantSchema('full-framed'),
   pageVariantSchema('two-horizontal'),
@@ -138,19 +138,56 @@ export const pagePlanSchema = z.discriminatedUnion('template', [
   pageVariantSchema('collage-5'),
   pageVariantSchema('collage-6'),
   pageVariantSchemaRanged('divider'),
-]);
+] as const;
+
+export const pagePlanSchema = z.discriminatedUnion('template', [...PHOTO_PAGE_VARIANTS]);
 export type PhotoPagePlan = z.infer<typeof pagePlanSchema>;
+
+/**
+ * A run of the owning section's story paragraphs (unified-book plan, PR B) — 0-based
+ * indices, INCLUSIVE on both ends, the same range shape the retired story plan's
+ * `paragraphs` blocks used. Unlike a photo page this is NOT a fixed sheet: the renderer
+ * flows it across as many print pages as the text needs (`.text-flow`,
+ * `lib/photo-book-layout.ts`). Only legal in a section that carries a `storyId`.
+ */
+export const textBlockPlanSchema = z.object({
+  template: z.literal('text'),
+  from: z.int().nonnegative(),
+  to: z.int().nonnegative(),
+});
+export type TextBlockPlan = z.infer<typeof textBlockPlanSchema>;
+
+/** One entry of `section.pages`: a fixed photo page, or a flowing text run. Kept under
+ *  the `pages`/`template` keys the photo-only schema always used, so every stored plan
+ *  keeps validating and every `switch (page.template)` in the pipeline had to learn the
+ *  `'text'` case at compile time. */
+export const flowItemSchema = z.discriminatedUnion('template', [...PHOTO_PAGE_VARIANTS, textBlockPlanSchema]);
+export type PhotoFlowItem = z.infer<typeof flowItemSchema>;
+
+export function isTextItem(item: PhotoFlowItem): item is TextBlockPlan {
+  return item.template === 'text';
+}
+
+/** The section's fixed photo pages, text runs filtered out — for consumers that only
+ *  ever meant photo pages (pacing, print sizing, proof selection). */
+export function photoPagesOf(section: PhotoSectionPlan): PhotoPagePlan[] {
+  return section.pages.filter((p): p is PhotoPagePlan => !isTextItem(p));
+}
 
 const sectionPlanSchema = z.object({
   /** "Sommer in Italien" (AI, later PR) or a date-range fallback like "Juni 2025"
    *  (auto-layouter) — always non-empty, never blank white space in the TOC/divider. */
   title: z.string().min(1),
   dateLabel: z.string().optional(),
+  /** When set, this section is a story chapter (unified-book plan): its `text` items
+   *  slice that story's paragraphs, and the consistency check enforces exactly one
+   *  section per book story with gap-free coverage. Absent for pure photo sections. */
+  storyId: z.string().optional(),
   /** No `.min(1)` here on purpose — mirrors `chapterPlanSchema.blocks` (also
    *  unconstrained) in `lib/book-layout-plan.ts`: whether a section is allowed to be
    *  empty is a CONTENT question ("did culling remove every photo in it"), so it's
    *  `checkPhotoBookPlanConsistency`'s job, not the schema's. */
-  pages: z.array(pagePlanSchema),
+  pages: z.array(flowItemSchema),
 });
 export type PhotoSectionPlan = z.infer<typeof sectionPlanSchema>;
 
@@ -206,6 +243,12 @@ export interface PhotoPlanContent {
    *  that's excluded right now" read differently from "references a photo that was
    *  deleted / never belonged to this book". */
   allAssetIds: string[];
+  /** The book's story chapters with TEXT included (`book_stories` where `include_text`),
+   *  in order, with CURRENT paragraph counts — mirrors `PlanContent.chapters` of the
+   *  retired story plan. When provided, the consistency check enforces the text rules
+   *  (one section per story, gap-free in-order paragraph coverage). Optional so pure
+   *  photo books — and pre-unification callers — change nothing. */
+  stories?: Array<{ storyId: string; paragraphCount: number }>;
 }
 
 /**
@@ -237,21 +280,38 @@ export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: Phot
   if (plan.cover.heroAssetId) reference(plan.cover.heroAssetId, 'Cover');
   for (const id of plan.cover.backAssetIds ?? []) reference(id, 'Cover back');
 
-  // A book with actual content (any section with at least one page) must have a cover
-  // hero — a printed photo book can't have a blank front cover. An empty book (no
-  // sections, or sections with no pages left after culling/exclusion) is still legal
-  // without one, same as a freshly created photo book with zero uploaded photos.
-  const hasContent = plan.sections.some((section) => section.pages.length > 0);
-  if (hasContent && !plan.cover.heroAssetId) {
+  // A book with actual PHOTO content must have a cover hero — a printed book can't
+  // have a blank front cover when there are photos to pick from. A photo-less book
+  // (freshly created, or text-only chapters) is legal without one: there is no photo a
+  // hero could be.
+  const hasPhotoContent = plan.sections.some((section) =>
+    section.pages.some((page) => !isTextItem(page) && page.assetIds.length > 0),
+  );
+  if (hasPhotoContent && !plan.cover.heroAssetId) {
     problems.push('Cover has no heroAssetId, but the book has content');
   }
 
+  const storyById = content.stories ? new Map(content.stories.map((s) => [s.storyId, s])) : null;
+  const sectionsByStory = new Map<string, number>();
+
   for (const section of plan.sections) {
+    // Counted BEFORE the empty-section bail: a story whose only section happens to be
+    // empty still HAS a section, and reporting it as "missing" on top of "has no pages"
+    // would send a repair pass chasing the wrong problem.
+    if (section.storyId) {
+      sectionsByStory.set(section.storyId, (sectionsByStory.get(section.storyId) ?? 0) + 1);
+    }
     if (section.pages.length === 0) {
       problems.push(`Section "${section.title}" has no pages`);
       continue;
     }
     for (const page of section.pages) {
+      if (isTextItem(page)) {
+        if (!section.storyId) {
+          problems.push(`Section "${section.title}" has a text block but no storyId`);
+        }
+        continue;
+      }
       const slots = PHOTO_PAGE_TEMPLATE_SLOTS[page.template];
       if (page.assetIds.length < slots.min || page.assetIds.length > slots.max) {
         const expected = slots.min === slots.max ? `${slots.min}` : `${slots.min}-${slots.max}`;
@@ -265,6 +325,44 @@ export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: Phot
         );
       }
       for (const id of page.assetIds) reference(id, `Section "${section.title}"`);
+    }
+  }
+
+  // Text rules — only enforced when the caller supplied the book's story chapters (a
+  // pre-unification caller, or a pure photo book, passes none and skips all of this).
+  if (storyById) {
+    for (const story of storyById.values()) {
+      const count = sectionsByStory.get(story.storyId) ?? 0;
+      if (count === 0) problems.push(`Plan is missing a section for story ${story.storyId}`);
+      if (count > 1) problems.push(`Story ${story.storyId} is split across ${count} sections`);
+    }
+    for (const section of plan.sections) {
+      if (!section.storyId) continue;
+      const story = storyById.get(section.storyId);
+      if (!story) {
+        problems.push(`Section "${section.title}" references unknown story ${section.storyId}`);
+        continue;
+      }
+      // Walk text items in ARRAY order (stricter than the retired story checker, which
+      // sorted first): every paragraph exactly once, in reading order, no gaps/overlaps.
+      let expected = 0;
+      let broken = false;
+      for (const item of section.pages) {
+        if (!isTextItem(item)) continue;
+        if (item.from !== expected || item.from > item.to) {
+          problems.push(
+            `Section "${section.title}": text coverage gap/overlap at paragraph ${expected} (block covers ${item.from}-${item.to})`,
+          );
+          broken = true;
+          break;
+        }
+        expected = item.to + 1;
+      }
+      if (!broken && expected !== story.paragraphCount) {
+        problems.push(
+          `Section "${section.title}": text covers paragraphs up to ${expected}, but the story has ${story.paragraphCount}`,
+        );
+      }
     }
   }
 
@@ -284,7 +382,9 @@ export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: Phot
  * question answered.
  */
 export function photoBookPlanHasContent(plan: PhotoBookPlan): boolean {
-  return plan.sections.some((section) => section.pages.some((page) => page.assetIds.length > 0));
+  return plan.sections.some((section) =>
+    section.pages.some((page) => isTextItem(page) || page.assetIds.length > 0),
+  );
 }
 
 export function isPhotoBookPlanConsistent(plan: PhotoBookPlan, content: PhotoPlanContent): boolean {

@@ -1,4 +1,5 @@
 import {
+  isTextItem,
   PHOTO_BOOK_STYLES,
   PHOTO_PAGE_TEMPLATES,
   PHOTO_PAGE_TEMPLATE_SLOTS,
@@ -6,9 +7,11 @@ import {
   templateRendersCaptions,
   type PhotoBookPlan,
   type PhotoBookStyle,
+  type PhotoFlowItem,
   type PhotoPagePlan,
   type PhotoPageTemplate,
   type PhotoSectionPlan,
+  type TextBlockPlan,
 } from '@/lib/photo-book-plan';
 import { templateFits, type LintPhoto } from '@/lib/photo-book-lint';
 
@@ -60,6 +63,13 @@ export interface PhotoBookCoerceInput {
   photos: LintPhoto[];
   fallbackTitle: string;
   fallbackStyle: PhotoBookStyle;
+  /** The book's story chapters (unified-book plan). Story content is only accepted when
+   *  the caller declares it: without this, a `storyId` (and any text run under it) the
+   *  model invented is stripped rather than persisted — otherwise a hallucinated id
+   *  would slip past `checkPhotoBookPlanConsistency` (which skips every text rule when
+   *  it gets no `stories`) and make the renderer emit a TOC for chapters that
+   *  don't exist. Only ids present here survive. */
+  stories?: Array<{ storyId: string }>;
 }
 
 /**
@@ -77,6 +87,7 @@ export function coercePhotoBookPlan(
   if (rawSections.length === 0 && !obj.cover) return null;
 
   const byId = new Map(input.photos.map((p) => [p.assetId, p]));
+  const knownStoryIds = new Set((input.stories ?? []).map((s) => s.storyId));
   const changes: string[] = [];
 
   const styleValue = asString(obj.style);
@@ -102,12 +113,33 @@ export function coercePhotoBookPlan(
     const s = rawSection as Record<string, unknown>;
     const title = asString(s.title) ?? `Kapitel ${si + 1}`;
     const dateLabel = asString(s.dateLabel);
+    const claimedStoryId = asString(s.storyId);
+    // Only a story the CALLER declared may be referenced — see `stories` above.
+    const storyId = claimedStoryId && knownStoryIds.has(claimedStoryId) ? claimedStoryId : null;
+    if (claimedStoryId && !storyId) {
+      changes.push(`stripped unknown story ${claimedStoryId} from "${title}"`);
+    }
 
-    const pages: PhotoPagePlan[] = [];
+    const pages: PhotoFlowItem[] = [];
     for (const rawPage of asArray(s.pages)) {
       if (!rawPage || typeof rawPage !== 'object') continue;
       const p = rawPage as Record<string, unknown>;
-      const templateValue = asString(p.template);
+      const templateValue = asString(p.template) ?? asString(p.type);
+
+      // A flowing text run (unified-book plan). Tolerate sloppy ranges — the repair
+      // pass re-covers paragraph ranges mechanically anyway — but only in a section
+      // that names a story; text without a story has nothing to flow.
+      if (templateValue === 'text') {
+        if (!storyId) {
+          changes.push(`dropped a text block in "${title}" (section names no story)`);
+          continue;
+        }
+        const from = asIndex(p.from) ?? 0;
+        const to = asIndex(p.to) ?? from;
+        pages.push({ template: 'text', from, to: Math.max(from, to) });
+        continue;
+      }
+
       const template = (PHOTO_PAGE_TEMPLATES as readonly string[]).includes(templateValue ?? '')
         ? (templateValue as PhotoPageTemplate)
         : null;
@@ -164,10 +196,19 @@ export function coercePhotoBookPlan(
     }
 
     if (pages.length === 0) return;
-    sections.push(dateLabel ? { title, dateLabel, pages } : { title, pages });
+    sections.push({
+      title,
+      ...(dateLabel ? { dateLabel } : {}),
+      ...(storyId ? { storyId } : {}),
+      pages,
+    });
   });
 
   return { plan: { kind: 'photo', style, cover, sections }, changes };
+}
+
+function asIndex(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : null;
 }
 
 /** Attaches the captions a page's photos carry, dropping them where the template won't
@@ -187,6 +228,10 @@ export interface PhotoBookRepairInput {
    *  these MUST end up somewhere in the plan; any that the incoming plan omits are
    *  appended (see `appendMissingPhotos` below). */
   mustInclude?: string[];
+  /** The book's story chapters with text included (unified-book plan) — when provided,
+   *  text coverage is repaired mechanically: every listed story ends up with exactly one
+   *  section covering its paragraphs 0..n-1 gap-free (see `repairTextCoverage`). */
+  stories?: Array<{ storyId: string; paragraphCount: number; title?: string }>;
 }
 
 export interface PhotoBookRepairResult {
@@ -370,8 +415,14 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
   // ── Sections / pages ─────────────────────────────────────────────────────────
   const sections: PhotoSectionPlan[] = [];
   for (const section of plan.sections) {
-    const pages: PhotoPagePlan[] = [];
+    const pages: PhotoFlowItem[] = [];
     for (const page of section.pages) {
+      // Text runs hold no photos — they pass through here untouched; their paragraph
+      // coverage is repaired as a whole by `repairTextCoverage` below.
+      if (isTextItem(page)) {
+        pages.push(page);
+        continue;
+      }
       const survivors = page.assetIds.map(claim).filter((p): p is LintPhoto => p != null);
       // A page with nothing left to show is dropped, dividers included: a photo-less
       // divider renders as a completely blank page (the section's real title page is
@@ -415,11 +466,15 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
     for (const p of missing) used.add(p.assetId);
   }
 
+  // ── Text coverage (unified-book plan) ────────────────────────────────────────
+  repaired = repairTextCoverage(repaired, input.stories, changes);
+
   // ── Cover hero of last resort ────────────────────────────────────────────────
-  // A book with content must have a front-cover photo (`checkPhotoBookPlanConsistency`).
+  // A book with PHOTO content must have a front-cover photo
+  // (`checkPhotoBookPlanConsistency`) — a text-only book has no photo a hero could be.
   // Prefer an unplaced photo so no page has to be rebuilt; only borrow from page one when
   // every available photo is already spoken for.
-  const hasContent = repaired.some((s) => s.pages.length > 0);
+  const hasContent = repaired.some((s) => s.pages.some((p) => !isTextItem(p) && p.assetIds.length > 0));
   if (hasContent && !cover.heroAssetId) {
     const spare = input.photos.find((p) => !used.has(p.assetId));
     if (spare) {
@@ -433,10 +488,11 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
       // "content needs a cover" consistency rule and was thrown away — in the stale-plan
       // path that meant the AI design got overwritten by the auto layout, the exact
       // destruction this module exists to prevent.
-      const si = repaired.findIndex((s) => s.pages.some((p) => p.assetIds.length > 0));
-      const pi = si >= 0 ? repaired[si].pages.findIndex((p) => p.assetIds.length > 0) : -1;
+      const holdsPhoto = (p: PhotoFlowItem) => !isTextItem(p) && p.assetIds.length > 0;
+      const si = repaired.findIndex((s) => s.pages.some(holdsPhoto));
+      const pi = si >= 0 ? repaired[si].pages.findIndex(holdsPhoto) : -1;
       if (si >= 0 && pi >= 0) {
-        const donor = repaired[si].pages[pi];
+        const donor = repaired[si].pages[pi] as PhotoPagePlan;
         const borrowedId = donor.assetIds[0];
         const remaining = donor.assetIds
           .slice(1)
@@ -464,4 +520,129 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
   }
 
   return { plan: { ...plan, cover, sections: repaired }, changes };
+}
+
+/** Contiguous, gap-free split of paragraphs 0..n-1 into k ranges of near-equal size —
+ *  consistent by construction, so a re-covered section always passes the text rules in
+ *  `checkPhotoBookPlanConsistency`. */
+function evenTextRanges(paragraphCount: number, blocks: number): TextBlockPlan[] {
+  const k = Math.min(Math.max(1, blocks), paragraphCount);
+  const ranges: TextBlockPlan[] = [];
+  let from = 0;
+  for (let i = 0; i < k; i++) {
+    const size = Math.ceil((paragraphCount - from) / (k - i));
+    ranges.push({ template: 'text', from, to: from + size - 1 });
+    from += size;
+  }
+  return ranges;
+}
+
+/**
+ * Mechanically repairs the plan's text coverage against the book's actual story
+ * chapters (unified-book plan): after this pass, every listed story has exactly one
+ * section whose text items cover paragraphs 0..n-1 in order with no gaps or overlaps —
+ * the same "drop what can't be shown, renumber what's left" philosophy as the photo
+ * repair above. Keeps the producer's text-break POSITIONS (how many runs, where photo
+ * pages interleave) whenever coverage is broken, redistributing the paragraphs evenly
+ * across the existing runs; only invents structure (one run covering everything) when a
+ * story has no section or no runs at all. A no-op when `stories` is not provided.
+ */
+function repairTextCoverage(
+  sections: PhotoSectionPlan[],
+  stories: PhotoBookRepairInput['stories'],
+  changes: string[],
+): PhotoSectionPlan[] {
+  if (!stories) return sections;
+  const known = new Map(stories.map((s) => [s.storyId, s]));
+  const claimed = new Set<string>();
+
+  const out: PhotoSectionPlan[] = [];
+  for (const section of sections) {
+    if (!section.storyId) {
+      const pages = section.pages.filter((p) => !isTextItem(p));
+      if (pages.length !== section.pages.length) {
+        changes.push(`dropped text block(s) in "${section.title}" (section names no story)`);
+      }
+      if (pages.length > 0) out.push({ ...section, pages });
+      else changes.push(`dropped empty section "${section.title}"`);
+      continue;
+    }
+
+    const story = known.get(section.storyId);
+    if (!story || claimed.has(section.storyId)) {
+      // Unknown story, or a second section for one already covered — degrade to a
+      // plain photo section rather than double-print (or orphan) its text.
+      changes.push(
+        !story
+          ? `stripped unknown story ${section.storyId} from "${section.title}"`
+          : `merged duplicate section for story ${section.storyId} into a photo section`,
+      );
+      const pages = section.pages.filter((p) => !isTextItem(p));
+      if (pages.length > 0) {
+        out.push({
+          title: section.title,
+          ...(section.dateLabel ? { dateLabel: section.dateLabel } : {}),
+          pages,
+        });
+      } else {
+        changes.push(`dropped empty section "${section.title}"`);
+      }
+      continue;
+    }
+    claimed.add(section.storyId);
+
+    if (story.paragraphCount === 0) {
+      const pages = section.pages.filter((p) => !isTextItem(p));
+      if (pages.length > 0) out.push({ ...section, pages });
+      else changes.push(`dropped empty section "${section.title}" (story has no text)`);
+      continue;
+    }
+
+    const textItems = section.pages.filter(isTextItem);
+    let expected = 0;
+    let intact = textItems.length > 0;
+    for (const t of textItems) {
+      if (t.from !== expected || t.from > t.to) {
+        intact = false;
+        break;
+      }
+      expected = t.to + 1;
+    }
+    if (intact && expected === story.paragraphCount) {
+      out.push(section);
+      continue;
+    }
+
+    const ranges = evenTextRanges(story.paragraphCount, textItems.length);
+    let ri = 0;
+    const pages: PhotoFlowItem[] = [];
+    for (const item of section.pages) {
+      if (!isTextItem(item)) {
+        pages.push(item);
+        continue;
+      }
+      if (ri < ranges.length) pages.push(ranges[ri++]);
+      // More runs than paragraphs: the surplus runs simply disappear.
+    }
+    // No runs at all (ranges is then exactly one block covering everything): the story's
+    // text opens the section, before its photo pages.
+    if (textItems.length === 0) pages.unshift(ranges[0]);
+    changes.push(
+      `re-covered the text of "${section.title}" (${story.paragraphCount} paragraph(s) over ${ranges.length} run(s))`,
+    );
+    out.push({ ...section, pages });
+  }
+
+  // Stories the plan left out entirely get a plain text-only trailing section.
+  for (const story of stories) {
+    if (claimed.has(story.storyId) || story.paragraphCount === 0) continue;
+    out.push({
+      title: story.title?.trim() || 'Kapitel',
+      storyId: story.storyId,
+      pages: [{ template: 'text', from: 0, to: story.paragraphCount - 1 }],
+    });
+    changes.push(`added a section for story ${story.storyId} the plan had left out`);
+  }
+
+  return out;
 }

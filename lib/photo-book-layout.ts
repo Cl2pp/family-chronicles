@@ -1,4 +1,10 @@
-import type { PhotoBookPlan, PhotoPagePlan, PhotoPageTemplate } from '@/lib/photo-book-plan';
+import {
+  isTextItem,
+  type PhotoBookPlan,
+  type PhotoPagePlan,
+  type PhotoPageTemplate,
+  type TextBlockPlan,
+} from '@/lib/photo-book-plan';
 import { PHOTO_STYLE_TOKENS, type PhotoStyleTokens } from '@/lib/photo-book-styles';
 import { PAGEDJS_POLYFILL_URL } from '@/lib/pagedjs';
 
@@ -61,6 +67,13 @@ export interface PhotoLayoutInput {
   fontFaceCss: string;
   createdLabel: string;
   watermarkText?: string;
+  /** Story paragraphs by storyId (unified-book plan) — the text a section's `text` items
+   *  slice. A section whose story is missing here renders its text items as nothing
+   *  (dormant-safe: pre-unification callers pass no paragraphs and get today's output). */
+  storyParagraphs?: Map<string, string[]>;
+  /** BCP-47-ish document language for `<html lang>` — `hyphens: auto` is a no-op
+   *  without it. Defaults to 'de', the app's German-first default. */
+  language?: string;
 }
 
 /** 3 mm bleed on every edge for the `print` variant — same value as `lib/book-layout.ts`'s
@@ -76,6 +89,13 @@ export const PHOTO_BOOK_BLEED_MM = 3;
  *  page, so a photo is downscaled to precisely the pixels its slot will print at 300 dpi,
  *  never more (bounding worker memory) and never less (bounding visible upscaling). */
 export const PHOTO_BOOK_CONTENT_MARGIN_MM = { top: 14, bottom: 16, inner: 16, outer: 14 } as const;
+
+/** Side margin (from the trim edge) of a flowing TEXT page — symmetric on purpose: a
+ *  mirrored inner/outer named page needs `@page text-flow:left/:right` variants, the
+ *  feature most likely to trip Chromium's print engine or Paged.js, and the photo pages
+ *  themselves only carry a 2mm inner/outer asymmetry. Set to the wider (inner/gutter)
+ *  of the two photo-page margins so text never sits closer to the spine than a photo. */
+const TEXT_SIDE_MARGIN_MM = PHOTO_BOOK_CONTENT_MARGIN_MM.inner;
 
 const esc = (s: string) =>
   s
@@ -109,6 +129,12 @@ function styleVarsCss(s: PhotoStyleTokens): string {
     --pb-divider-ornament-display: ${s.dividerOrnament ? 'block' : 'none'};
     --pb-photo-tape-display: ${s.photoTape ? 'block' : 'none'};
     --pb-photo-tape-color: ${s.photoTapeColor ?? 'rgba(200, 200, 200, 0.6)'};
+    --pb-body-size: ${s.bodySize};
+    --pb-body-line-height: ${s.bodyLineHeight};
+    --pb-paragraph-gap: ${s.paragraphGap};
+    --pb-dropcap-scale: ${s.dropCapScale};
+    --pb-text-align: ${s.bodyJustify ? 'justify' : 'left'};
+    --pb-hyphens: ${s.bodyJustify ? 'auto' : 'manual'};
   }`;
 }
 
@@ -140,6 +166,23 @@ function withCaption(photoHtml: string, caption: string | null | undefined): str
 
 function framedFigure(image: PhotoLayoutImage | undefined, caption?: string | null): string {
   return withCaption(`<div class="ph-frame">${img(image, 'ph-frame-img')}</div>`, caption);
+}
+
+/**
+ * A flowing story-text run (unified-book plan): NOT a fixed sheet — the `.text-flow` div
+ * lives on the named `@page text-flow` (real page margins + the folio margin box) and
+ * flows across as many print pages as its paragraphs need. Switching between the named
+ * page and the default margin-0 page forces a page break in both Chromium and Paged.js,
+ * so text ↔ photo-page sequences break correctly with no extra rules (validated by the
+ * unified-book spike). `first-of-section` drives the suite's drop cap.
+ */
+function textFlowHtml(item: TextBlockPlan, paragraphs: string[], isFirstOfSection: boolean): string {
+  const slice = paragraphs.slice(item.from, item.to + 1);
+  if (slice.length === 0) return '';
+  return `
+      <div class="text-flow${isFirstOfSection ? ' first-of-section' : ''}">
+        ${slice.map((p) => `<p>${esc(p)}</p>`).join('\n')}
+      </div>`;
 }
 
 /** The page's content box in mm — what a content-box page's photos may fill. */
@@ -415,7 +458,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
   html, body { background: #d7d9dd; }
   body { padding: ${screenBodyPadMm}mm 0; }
   .pagedjs_pages { display: flex; flex-direction: column; align-items: center; gap: 8mm; }
-  .pagedjs_page { background: #fff; box-shadow: 0 3mm 10mm rgba(15, 15, 20, 0.28); }`
+  .pagedjs_page { background: var(--pb-page-bg, #fff); box-shadow: 0 3mm 10mm rgba(15, 15, 20, 0.28); }`
       : '';
 
   // Cover front — always a bleed page (edge-to-edge hero photo).
@@ -463,14 +506,48 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
         ${section.dateLabel ? `<p class="pb-divider-date">${esc(section.dateLabel)}</p>` : ''}
       </section>`;
 
-      const pages = section.pages.map((page) => renderPage(page, input.images, contentBox)).join('\n');
+      const sectionParagraphs = section.storyId ? input.storyParagraphs?.get(section.storyId) ?? null : null;
+      let firstTextSeen = false;
+      const pages = section.pages
+        .map((page) => {
+          if (isTextItem(page)) {
+            // No paragraphs available (pre-unification caller, or a stale storyId):
+            // render nothing rather than an empty flow that would occupy a blank page.
+            if (!sectionParagraphs) return '';
+            const isFirst = !firstTextSeen;
+            firstTextSeen = true;
+            return textFlowHtml(page, sectionParagraphs, isFirst);
+          }
+          return renderPage(page, input.images, contentBox);
+        })
+        .join('\n');
 
       return `${divider}\n${pages}`;
     })
     .join('\n');
 
+  // A table of contents only makes sense for a book with story chapters — pure photo
+  // books render byte-identically to before (no front matter added).
+  const hasChapters = input.plan.sections.some((s) => s.storyId);
+  const toc = hasChapters
+    ? `
+    <section class="page pb-toc">
+      <h2>Inhalt</h2>
+      <ol>
+        ${input.plan.sections
+          .map(
+            (s) =>
+              `<li><span class="pb-toc-title">${esc(s.title)}</span>${
+                s.dateLabel ? `<span class="pb-toc-date">${esc(s.dateLabel)}</span>` : ''
+              }</li>`,
+          )
+          .join('\n')}
+      </ol>
+    </section>`
+    : '';
+
   return `<!doctype html>
-<html>
+<html lang="${esc(input.language ?? 'de')}">
 <head>
 <meta charset="utf-8" />
 <style>
@@ -496,14 +573,87 @@ ${styleVarsCss(style)}
        page). So all three variants now share this one mechanism. */
     margin: 0;
   }
+${
+  !hasChapters
+    ? ''
+    : `
+  /* The ONE exception (unified-book plan; spike-validated in both Chromium print and
+     Paged.js): flowing story text lives on this named page, which carries real margins
+     — flowed content can't use element padding (it applies once, not per page) — and
+     the folio margin box. Nothing here needs to reach a sheet edge, so the documented
+     named-page trailing-edge bug doesn't apply; the Paged.js stall was with MANY
+     scattered named rules, and this document has exactly one.
+
+     Emitted ONLY for a book that actually has story chapters: a pure photo book keeps
+     the single-unnamed-@page document it always had, so it can't be exposed to any
+     named-page risk for a feature it doesn't use. */
+  @page text-flow {
+    /* Every side measured from the TRIM edge with bleed added on top, exactly like the
+       m object above — so a text page's physical content area is IDENTICAL in screen,
+       preview and print. Getting this wrong doesn't just shift the text: a different
+       column width means different line breaks, which means the print PDF paginates
+       differently from the proof the reader approved. The extra 2mm at the bottom is
+       the folio's room. */
+    margin: ${m.top}mm ${TEXT_SIDE_MARGIN_MM + bleed}mm ${m.bottom + 2}mm;${
+      style.pageNumberStyle === 'center'
+        ? `
+    @bottom-center { content: counter(page); font-family: var(--pb-font-body); font-size: 8pt; color: var(--pb-color-muted); }`
+        : ''
+    }
+  }`
+}
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
     font-family: var(--pb-font-body);
     font-size: 10.5pt;
     line-height: 1.5;
-    color: var(--pb-color-text);
+    color: var(--pb-color-text);${
+      !hasChapters
+        ? ''
+        : `
+    /* Text pages have no full-sheet section painting them — the page canvas gets its
+       color from the root background (print engines propagate it to every page). Only
+       for books with chapters: on a pure photo book every page paints itself, and
+       propagating a background would recolor the frame strip around each photo page —
+       a visible restyle of books whose proofs are already approved. */
+    background: var(--pb-page-bg);`
+    }
   }
+${
+  !hasChapters
+    ? ''
+    : `
+  /* ---- Flowing story text (unified-book plan) ---- */
+  .text-flow { page: text-flow; }
+  .text-flow p {
+    margin: 0 0 var(--pb-paragraph-gap);
+    font-size: var(--pb-body-size);
+    line-height: var(--pb-body-line-height);
+    text-align: var(--pb-text-align);
+    hyphens: var(--pb-hyphens);
+    orphans: 2;
+    widows: 2;
+  }
+  .text-flow.first-of-section > p:first-child::first-letter {
+    font-size: calc(1em * var(--pb-dropcap-scale));
+  }
+
+  /* ---- Table of contents (only emitted for books with story chapters) ---- */
+  .pb-toc {
+    width: ${pageW}mm;
+    height: ${pageH}mm;
+    padding: ${m.top + 8}mm ${m.outer + 6}mm ${m.bottom}mm ${m.inner + 6}mm;
+  }
+  .pb-toc h2 { font-family: var(--pb-font-heading); font-size: 15pt; margin: 0 0 8mm; }
+  .pb-toc ol { list-style: none; margin: 0; padding: 0; }
+  .pb-toc li {
+    display: flex; justify-content: space-between; gap: 6mm;
+    padding: 1.8mm 0; border-bottom: 0.2mm solid color-mix(in srgb, var(--pb-color-muted) 30%, transparent);
+    font-size: 10pt;
+  }
+  .pb-toc-date { color: var(--pb-color-muted); white-space: nowrap; }`
+}
 
   .page { page-break-after: always; background: var(--pb-page-bg); }
 
@@ -705,6 +855,7 @@ ${pagedScript}
 ${watermark}
 ${coverFront}
 ${coverBack}
+${toc}
 ${sectionsHtml}
 </body>
 </html>`;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkPhotoBookPlanConsistency, type PhotoBookPlan, type PhotoPagePlan, type PhotoPlanContent } from './photo-book-plan';
+import { checkPhotoBookPlanConsistency, type PhotoBookPlan, type PhotoPagePlan, type PhotoPlanContent, isTextItem, type PhotoFlowItem } from './photo-book-plan';
 import {
   applyPhotoLayoutOp,
   findMergeSectionsIndexHazard,
@@ -48,6 +48,13 @@ function contentFor(plan: PhotoBookPlan, excluded: string[] = []): PhotoPlanCont
 
 function apply(plan: PhotoBookPlan, op: PurePhotoLayoutOp, available: string[] = ALL_IDS) {
   return applyPhotoLayoutOp(plan, op, { availableAssetIds: new Set(available) });
+}
+
+/** Narrows a flow item to a photo page — unified-plan `section.pages` may also hold
+ *  text runs; these tests only ever construct/expect photo pages. */
+function photoPage(item: PhotoFlowItem): PhotoPagePlan {
+  if (isTextItem(item)) throw new Error('expected a photo page, got a text run');
+  return item;
 }
 
 describe('applyPhotoLayoutOp', () => {
@@ -112,7 +119,7 @@ describe('applyPhotoLayoutOp', () => {
     if ('plan' in result) {
       const page = result.plan.sections[0].pages[1];
       expect(page.template).toBe('two-vertical');
-      expect(page.assetIds).toEqual(['a2', 'a3']);
+      expect(photoPage(page).assetIds).toEqual(['a2', 'a3']);
     }
   });
 
@@ -122,13 +129,13 @@ describe('applyPhotoLayoutOp', () => {
     if (!('plan' in result)) return;
     // Old page (two-horizontal, 2 photos) shrinks to a valid single-photo page.
     const oldPage = result.plan.sections[0].pages[1];
-    expect(oldPage.assetIds).toEqual(['a3']);
+    expect(photoPage(oldPage).assetIds).toEqual(['a3']);
     expect(oldPage.template).toBe('full-framed');
     // New page appended at the destination section, holding just the moved photo.
     const destPages = result.plan.sections[1].pages;
     const newPage = destPages[destPages.length - 1];
     expect(newPage.template).toBe('full-framed');
-    expect(newPage.assetIds).toEqual(['a2']);
+    expect(photoPage(newPage).assetIds).toEqual(['a2']);
   });
 
   it('move_photo rejects an unavailable (excluded) photo', () => {
@@ -147,7 +154,7 @@ describe('applyPhotoLayoutOp', () => {
     if (!('plan' in result)) return;
     expect(result.plan.cover.heroAssetId).toBe('b3'); // a1 was the hero
     // a1 wasn't on any page, so swapping it with b3 only touches the collage page b3 sat on.
-    const collage = result.plan.sections[1].pages[0].assetIds;
+    const collage = photoPage(result.plan.sections[1].pages[0]).assetIds;
     expect(collage).toEqual(['b1', 'b2', 'a1', 'b4', 'b5']);
   });
 
@@ -170,10 +177,10 @@ describe('applyPhotoLayoutOp', () => {
     expect('plan' in result).toBe(true);
     if (!('plan' in result)) return;
     const page = result.plan.sections[0].pages[2];
-    expect(page.assetIds).toEqual(['a5', 'a4', 'a6']);
+    expect(photoPage(page).assetIds).toEqual(['a5', 'a4', 'a6']);
     // a4's caption ("Cap4") must follow a4 to its new slot (index 1), and a5's caption
     // ("Cap5") must follow a5 to its new slot (index 0) — not stay behind at the old slot.
-    expect(page.captions).toEqual(['Cap5', 'Cap4', null]);
+    expect(photoPage(page).captions).toEqual(['Cap5', 'Cap4', null]);
   });
 
   it('swap_photos carries a single caption to its photo\'s new slot when only one side is captioned', () => {
@@ -183,9 +190,9 @@ describe('applyPhotoLayoutOp', () => {
     expect('plan' in result).toBe(true);
     if (!('plan' in result)) return;
     const page = result.plan.sections[0].pages[1];
-    expect(page.assetIds).toEqual(['a3', 'a2']);
+    expect(photoPage(page).assetIds).toEqual(['a3', 'a2']);
     // a2's caption travels with a2 to its new slot (index 1); a3 (never captioned) is null.
-    expect(page.captions).toEqual([null, 'At home']);
+    expect(photoPage(page).captions).toEqual([null, 'At home']);
   });
 
   it('swap_photos moves a caption across pages/sections for a cross-page swap', () => {
@@ -196,14 +203,14 @@ describe('applyPhotoLayoutOp', () => {
     expect('plan' in result).toBe(true);
     if (!('plan' in result)) return;
     const sourcePage = result.plan.sections[0].pages[2];
-    expect(sourcePage.assetIds).toEqual(['b3', 'a5', 'a6']);
+    expect(photoPage(sourcePage).assetIds).toEqual(['b3', 'a5', 'a6']);
     // b3 (now in a4's old slot) had no caption, so that slot goes back to null — "Cap4"
     // must NOT stay behind here.
-    expect(sourcePage.captions).toEqual([null, null, null]);
+    expect(photoPage(sourcePage).captions).toEqual([null, null, null]);
     const destPage = result.plan.sections[1].pages[0];
-    expect(destPage.assetIds).toEqual(['b1', 'b2', 'a4', 'b4', 'b5']);
+    expect(photoPage(destPage).assetIds).toEqual(['b1', 'b2', 'a4', 'b4', 'b5']);
     // "Cap4" must have traveled with a4 into its new page/section, landing at a4's new slot.
-    expect(destPage.captions).toEqual([null, null, 'Cap4', null, null]);
+    expect(photoPage(destPage).captions).toEqual([null, null, 'Cap4', null, null]);
   });
 
   it('move_section reorders sections', () => {
@@ -234,7 +241,7 @@ describe('applyPhotoLayoutOp', () => {
     const result = apply(basePlan(), { op: 'set_caption', sectionIndex: 0, pageIndex: 1, assetId: 'a3', caption: 'At the lake' });
     expect('plan' in result).toBe(true);
     if (!('plan' in result)) return;
-    expect(result.plan.sections[0].pages[1].captions).toEqual([null, 'At the lake']);
+    expect(photoPage(result.plan.sections[0].pages[1]).captions).toEqual([null, 'At the lake']);
   });
 
   it('set_caption rejects a photo that is not on the given page', () => {
@@ -252,14 +259,14 @@ describe('removePhotoFromPlan', () => {
   it('shrinks a full page down to a valid smaller template instead of vanishing', () => {
     const plan = removePhotoFromPlan(basePlan(), 'a2');
     const page = plan.sections[0].pages[1];
-    expect(page.assetIds).toEqual(['a3']);
+    expect(photoPage(page).assetIds).toEqual(['a3']);
     expect(page.template).toBe('full-framed');
   });
 
   it('turns a single-photo page into an empty divider rather than deleting it', () => {
     const plan = removePhotoFromPlan(basePlan(), 'a7');
     const page = plan.sections[0].pages[0];
-    expect(page.assetIds).toEqual([]);
+    expect(photoPage(page).assetIds).toEqual([]);
     expect(page.template).toBe('divider');
   });
 

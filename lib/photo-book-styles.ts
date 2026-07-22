@@ -54,6 +54,21 @@ export interface PhotoStyleTokens {
   photoShadow: string;
   photoFrameBorder: string;
   captionColor: string;
+  /** ── Flowing story text (unified-book plan) — every suite typesets chapters: ── */
+  /** Body font size of flowed text, e.g. '10.5pt'. */
+  bodySize: string;
+  bodyLineHeight: string;
+  /** Vertical gap between paragraphs (mm value with unit). */
+  paragraphGap: string;
+  /** First-letter scale of a section's opening paragraph; 1 = no drop cap. */
+  dropCapScale: number;
+  /** Justified + hyphenated (serif suites) vs. left-ragged (sans/typewriter suites). */
+  bodyJustify: boolean;
+  /** Running page number on TEXT pages ('center' = @bottom-center margin box; 'none' =
+   *  no folio). Photo pages are numberless by construction — the default page has no
+   *  margins, hence no margin boxes. Structural, not a CSS variable (it decides whether
+   *  the margin-box rule is emitted at all). */
+  pageNumberStyle: 'center' | 'none';
   /** Decorative flourish above/below a section divider's title (heirloom's "ornamental
    *  dividers", docs/PHOTO_BOOK_PLAN.md §7) — a plain hairline rule drawn by
    *  `.pb-divider h2::before/::after` in `lib/photo-book-layout.ts`, shown only when true.
@@ -87,6 +102,12 @@ export const PHOTO_STYLE_TOKENS: Record<PhotoBookStyle, PhotoStyleTokens> = {
     photoShadow: '0 3mm 8mm rgba(20, 20, 20, 0.15)',
     photoFrameBorder: 'rgba(30, 36, 48, 0.14)',
     captionColor: '#5a6372',
+    bodySize: '10.5pt',
+    bodyLineHeight: '1.55',
+    paragraphGap: '3.2mm',
+    dropCapScale: 1.6,
+    bodyJustify: true,
+    pageNumberStyle: 'center',
   },
   modern: {
     id: 'modern',
@@ -109,6 +130,12 @@ export const PHOTO_STYLE_TOKENS: Record<PhotoBookStyle, PhotoStyleTokens> = {
     photoShadow: 'none',
     photoFrameBorder: '',
     captionColor: '#6b6f76',
+    bodySize: '10pt',
+    bodyLineHeight: '1.6',
+    paragraphGap: '4.2mm',
+    dropCapScale: 1,
+    bodyJustify: false,
+    pageNumberStyle: 'center',
   },
   gallery: {
     id: 'gallery',
@@ -130,6 +157,12 @@ export const PHOTO_STYLE_TOKENS: Record<PhotoBookStyle, PhotoStyleTokens> = {
     photoShadow: 'none',
     photoFrameBorder: '',
     captionColor: '#767676',
+    bodySize: '9.5pt',
+    bodyLineHeight: '1.6',
+    paragraphGap: '4mm',
+    dropCapScale: 1,
+    bodyJustify: false,
+    pageNumberStyle: 'none',
   },
   heirloom: {
     id: 'heirloom',
@@ -151,6 +184,12 @@ export const PHOTO_STYLE_TOKENS: Record<PhotoBookStyle, PhotoStyleTokens> = {
     photoShadow: '0 2mm 6mm rgba(60, 45, 20, 0.18)',
     photoFrameBorder: 'rgba(140, 120, 80, 0.35)',
     captionColor: '#8a7a5c',
+    bodySize: '11pt',
+    bodyLineHeight: '1.6',
+    paragraphGap: '3.5mm',
+    dropCapScale: 1.8,
+    bodyJustify: true,
+    pageNumberStyle: 'center',
     dividerOrnament: true,
   },
   bold: {
@@ -173,6 +212,12 @@ export const PHOTO_STYLE_TOKENS: Record<PhotoBookStyle, PhotoStyleTokens> = {
     photoShadow: 'none',
     photoFrameBorder: '',
     captionColor: '#b8b8b8',
+    bodySize: '10pt',
+    bodyLineHeight: '1.55',
+    paragraphGap: '4mm',
+    dropCapScale: 1,
+    bodyJustify: false,
+    pageNumberStyle: 'center',
   },
   journal: {
     id: 'journal',
@@ -194,6 +239,12 @@ export const PHOTO_STYLE_TOKENS: Record<PhotoBookStyle, PhotoStyleTokens> = {
     photoShadow: '0 2mm 5mm rgba(40, 30, 15, 0.25)',
     photoFrameBorder: 'rgba(80, 60, 30, 0.25)',
     captionColor: '#8a7c68',
+    bodySize: '10pt',
+    bodyLineHeight: '1.5',
+    paragraphGap: '4mm',
+    dropCapScale: 1,
+    bodyJustify: false,
+    pageNumberStyle: 'none',
     photoTape: true,
     photoTapeColor: 'rgba(214, 188, 133, 0.75)',
   },

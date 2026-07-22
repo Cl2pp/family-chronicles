@@ -1,8 +1,10 @@
 import {
+  isTextItem,
   PHOTO_PAGE_TEMPLATE_SLOTS,
   type PhotoBookPlan,
   type PhotoBookStyle,
   type PhotoCoverPlan,
+  type PhotoFlowItem,
   type PhotoPagePlan,
   type PhotoPageTemplate,
 } from './photo-book-plan';
@@ -176,7 +178,7 @@ export function removePhotoFromPlan(plan: PhotoBookPlan, assetId: string): Photo
 
   const sections = plan.sections.map((section) => ({
     ...section,
-    pages: section.pages.map((page) => shrinkPage(page, assetId)),
+    pages: section.pages.map((page) => (isTextItem(page) ? page : shrinkPage(page, assetId))),
   }));
 
   return { ...plan, cover, sections };
@@ -189,6 +191,7 @@ export function removePhotoFromPlan(plan: PhotoBookPlan, assetId: string): Photo
 function findPlacedCaption(plan: PhotoBookPlan, assetId: string): string | null | undefined {
   for (const section of plan.sections) {
     for (const page of section.pages) {
+      if (isTextItem(page)) continue;
       const idx = page.assetIds.indexOf(assetId);
       if (idx !== -1) return page.captions?.[idx] ?? null;
     }
@@ -218,7 +221,8 @@ function swapIdEverywhere(plan: PhotoBookPlan, a: string, b: string): PhotoBookP
 
   const sections = plan.sections.map((section) => ({
     ...section,
-    pages: section.pages.map((page) => {
+    pages: section.pages.map((page): PhotoFlowItem => {
+      if (isTextItem(page)) return page;
       const idxA = page.assetIds.indexOf(a);
       const idxB = page.assetIds.indexOf(b);
       const assetIds = page.assetIds.map(swap);
@@ -302,6 +306,9 @@ export function applyPhotoLayoutOp(
       if (!section) return { error: `No section at index ${op.sectionIndex}.` };
       const page = section.pages[op.pageIndex];
       if (!page) return { error: `No page at index ${op.pageIndex} in section "${section.title}".` };
+      if (isTextItem(page)) {
+        return { error: 'That entry is flowing story text, not a photo page — it has no template to change.' };
+      }
       if (!templateFits(op.template, page.assetIds.length)) {
         const slots = PHOTO_PAGE_TEMPLATE_SLOTS[op.template];
         const expected = slots.min === slots.max ? `${slots.min}` : `${slots.min}-${slots.max}`;
@@ -383,6 +390,16 @@ export function applyPhotoLayoutOp(
       // if any op after a merge_sections addresses a section/page by index, so this
       // function never actually sees that combination — merge_sections is always the last
       // (or only) op it's asked to apply.
+      // Merging a story chapter would orphan its text: the removed section's `storyId`
+      // goes away with it, so its text runs would end up slicing the TARGET's story (or
+      // no story at all). Photo sections merge freely; chapters must be reorganised by a
+      // redesign, not by folding two stories into one section.
+      if (removed.storyId || plan.sections[intoIndex].storyId) {
+        return {
+          error:
+            'Sections that hold story text cannot be merged — their text belongs to one specific story. Move photo pages between them instead, or redesign the book.',
+        };
+      }
       const adjustedInto = sectionIndex < intoIndex ? intoIndex - 1 : intoIndex;
       sections[adjustedInto] = {
         ...sections[adjustedInto],
@@ -396,6 +413,9 @@ export function applyPhotoLayoutOp(
       if (!section) return { error: `No section at index ${op.sectionIndex}.` };
       const page = section.pages[op.pageIndex];
       if (!page) return { error: `No page at index ${op.pageIndex} in section "${section.title}".` };
+      if (isTextItem(page)) {
+        return { error: 'That entry is flowing story text, not a photo page — there is no photo to caption.' };
+      }
       const idx = page.assetIds.indexOf(op.assetId);
       if (idx === -1) return { error: 'That photo is not on this page.' };
       const captions = page.captions ? page.captions.slice() : page.assetIds.map(() => null);
