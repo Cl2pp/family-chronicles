@@ -37,6 +37,7 @@ function photo(overrides: Partial<PhotoBookPhotoRef> = {}): PhotoBookPhotoRef {
     width: 800,
     height: 600,
     position: 0,
+    storyId: null,
     excluded: false,
     excludedReason: null,
     userDecision: null,
@@ -52,6 +53,7 @@ function photo(overrides: Partial<PhotoBookPhotoRef> = {}): PhotoBookPhotoRef {
 
 function loaded(overrides: Partial<LoadedPhotoBook['row']> = {}, photos: PhotoBookPhotoRef[] = []): LoadedPhotoBook {
   return {
+    chapters: [],
     row: {
       id: 'book-1',
       title: 'Familie Müller',

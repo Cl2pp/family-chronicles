@@ -645,6 +645,17 @@ export const en = {
       deleteConfirmBody:
         'This permanently removes the book and its layout. Your stories and photos are not affected — you can always create a new book from them.',
       deleteConfirm: 'Delete permanently',
+      upgrade: {
+        title: 'New layout available',
+        body: 'This book still uses our old layout. The new one composes proper photo pages, sets the text more cleanly, and offers six styles to choose from.',
+        caveat: 'Your content, title and chapter order are kept. The design is rebuilt from scratch — any earlier layout tweaks to this book will be lost.',
+        cta: 'Switch to the new layout',
+        confirmTitle: 'Rebuild this book’s layout?',
+        confirm: 'Switch',
+        cancel: 'Cancel',
+        working: 'Switching…',
+        failed: 'Switching the layout failed. Please try again.',
+      },
       theme: 'Theme',
       themeOptions: {
         classic: 'Classic',

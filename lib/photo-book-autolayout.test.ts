@@ -6,7 +6,14 @@ import {
   type AutoLayoutPhoto,
   type PhotoBookAutoLayoutInput,
 } from './photo-book-autolayout';
-import { checkPhotoBookPlanConsistency } from './photo-book-plan';
+import { checkPhotoBookPlanConsistency, isTextItem, type PhotoFlowItem, type PhotoPagePlan } from './photo-book-plan';
+
+/** Narrows a flow item to a photo page — a plan section may also hold text runs, which
+ *  the pure photo-book cases in this file never produce. */
+function photoPage(item: PhotoFlowItem): PhotoPagePlan {
+  if (isTextItem(item)) throw new Error('expected a photo page, got a text run');
+  return item;
+}
 import type { PhotoAnalysis } from './photo-analysis';
 
 const HOUR = 60 * 60 * 1000;
@@ -115,7 +122,7 @@ describe('buildPhotoBookAutoLayout — sectioning', () => {
     expect(plan.sections.length).toBeGreaterThan(1);
     // 30 photos in, 1 becomes the cover hero (excluded from interior pages — see "cover
     // selection — exclusivity" below), so 29 remain placed inside sections.
-    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(placed).toHaveLength(29);
     expect(plan.cover.heroAssetId).toBeDefined();
     expect(placed).not.toContain(plan.cover.heroAssetId);
@@ -137,7 +144,7 @@ describe('buildPhotoBookAutoLayout — sectioning', () => {
     // two sections — the point of this test is that it does NOT explode into 8 (one per
     // photo) or leave any section under the minimum size.
     for (const section of plan.sections) {
-      const photoCount = section.pages.reduce((n, p) => n + p.assetIds.length, 0);
+      const photoCount = section.pages.reduce((n, p) => n + (isTextItem(p) ? 0 : p.assetIds.length), 0);
       expect(photoCount).toBeGreaterThanOrEqual(3);
     }
   });
@@ -157,7 +164,7 @@ describe('buildPhotoBookAutoLayout — sectioning', () => {
     // One of the 5 becomes the cover hero and is excluded from interior placement (see
     // "cover selection — exclusivity" below) — so `placed` alone is the other 4; adding
     // the hero back in accounts for all 5.
-    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(placed).toHaveLength(4);
     expect([...placed, plan.cover.heroAssetId].sort()).toEqual(['a', 'b', 'c', 'd', 'e']);
   });
@@ -214,7 +221,7 @@ describe('buildPhotoBookAutoLayout — culling', () => {
     // land in the interior pages.
     const { plan, culled } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
     expect(culled).toEqual([{ assetId: 'blurry-dup', reason: 'duplicate' }]);
-    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(placed).not.toContain('blurry-dup');
     expect(placed).toContain('sharp');
     expect(placed).toContain('other');
@@ -236,7 +243,7 @@ describe('buildPhotoBookAutoLayout — culling', () => {
       photo({ assetId: 'b', position: 1, takenAt: new Date(t0 + 60_000), blurScore: 4.9 }),
     ];
     const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
-    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(placed.length).toBeGreaterThan(0);
   });
 
@@ -261,7 +268,7 @@ describe('buildPhotoBookAutoLayout — pacing', () => {
     const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
     expect(plan.sections[0].pages).toHaveLength(1);
     expect(['full-bleed', 'full-framed']).toContain(plan.sections[0].pages[0].template);
-    expect(plan.sections[0].pages[0].assetIds).toEqual(['a']);
+    expect(photoPage(plan.sections[0].pages[0]).assetIds).toEqual(['a']);
   });
 
   it('pairs two landscape leftovers into a two-horizontal page', () => {
@@ -271,7 +278,7 @@ describe('buildPhotoBookAutoLayout — pacing', () => {
       photo({ assetId: 'b', position: 2, takenAt: new Date(t0 + 2 * HOUR), width: 1600, height: 1000 }),
     ];
     const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
-    const pairPage = plan.sections[0].pages.find((p) => p.assetIds.length === 2);
+    const pairPage = plan.sections[0].pages.find((p) => (isTextItem(p) ? [] : p.assetIds).length === 2);
     expect(pairPage?.template).toBe('two-horizontal');
   });
 
@@ -282,7 +289,7 @@ describe('buildPhotoBookAutoLayout — pacing', () => {
       photo({ assetId: 'b', position: 2, takenAt: new Date(t0 + 2 * HOUR), width: 1000, height: 1600 }),
     ];
     const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
-    const pairPage = plan.sections[0].pages.find((p) => p.assetIds.length === 2);
+    const pairPage = plan.sections[0].pages.find((p) => (isTextItem(p) ? [] : p.assetIds).length === 2);
     expect(pairPage?.template).toBe('two-vertical');
   });
 
@@ -310,8 +317,8 @@ describe('buildPhotoBookAutoLayout — pacing', () => {
     };
     for (const section of plan.sections) {
       for (const page of section.pages) {
-        expect(page.assetIds.length).toBeLessThanOrEqual(slots[page.template]);
-        expect(page.assetIds.length).toBeGreaterThan(0);
+        expect(photoPage(page).assetIds.length).toBeLessThanOrEqual(slots[photoPage(page).template]);
+        expect(photoPage(page).assetIds.length).toBeGreaterThan(0);
       }
     }
   });
@@ -411,7 +418,7 @@ describe('buildPhotoBookAutoLayout — cover selection exclusivity (regression)'
     ];
     const { plan } = buildPhotoBookAutoLayout(baseInput(photos));
     expect(plan.cover.heroAssetId).toBe('a'); // highest resolution, no pin/carry-over
-    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(interior).not.toContain('a');
   });
 
@@ -422,7 +429,7 @@ describe('buildPhotoBookAutoLayout — cover selection exclusivity (regression)'
     ];
     const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'a' });
     expect(plan.cover.heroAssetId).toBe('a');
-    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(interior).not.toContain('a');
   });
 
@@ -468,7 +475,7 @@ describe('buildPhotoBookAutoLayout — plan consistency (regression)', () => {
     );
     const { plan, problems } = checkConsistency(baseInput(photos));
     expect(problems).toEqual([]);
-    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
   });
 
@@ -479,7 +486,7 @@ describe('buildPhotoBookAutoLayout — plan consistency (regression)', () => {
     ];
     const { plan, problems } = checkConsistency(baseInput(photos));
     expect(problems).toEqual([]);
-    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
   });
 
@@ -508,7 +515,7 @@ describe('buildPhotoBookAutoLayout — plan consistency (regression)', () => {
     const { plan, problems } = checkConsistency(baseInput(clusters));
     expect(problems).toEqual([]);
     expect(plan.sections.length).toBeGreaterThan(1);
-    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
   });
 
@@ -529,7 +536,7 @@ describe('buildPhotoBookAutoLayout — plan consistency (regression)', () => {
     const { plan, problems } = checkConsistency(baseInput(photos));
     expect(problems).toEqual([]);
     expect(plan.sections.length).toBeGreaterThan(1);
-    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
   });
 
@@ -546,7 +553,7 @@ describe('buildPhotoBookAutoLayout — plan consistency (regression)', () => {
     const { plan, problems } = checkConsistency({ ...baseInput(photos), coverAssetId: 'q3' });
     expect(problems).toEqual([]);
     expect(plan.cover.heroAssetId).toBe('q3');
-    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(interior).not.toContain('q3');
   });
 });
@@ -740,7 +747,7 @@ describe('buildPhotoBookAutoLayout — plan consistency with analysis present (r
     );
     const { plan, problems } = checkConsistency(baseInput(photos));
     expect(problems).toEqual([]);
-    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
   });
 
@@ -761,7 +768,7 @@ describe('buildPhotoBookAutoLayout — plan consistency with analysis present (r
     ).flat();
     const { plan, problems } = checkConsistency(baseInput(clusters));
     expect(problems).toEqual([]);
-    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
   });
 
@@ -801,7 +808,7 @@ describe('buildPhotoBookAutoLayout — plan consistency with analysis present (r
     const { plan, problems } = checkConsistency(baseInput(photos));
     expect(problems).toEqual([]);
     expect(plan.sections.length).toBeGreaterThan(1);
-    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     if (plan.cover.heroAssetId) expect(interior).not.toContain(plan.cover.heroAssetId);
   });
 });
@@ -832,7 +839,7 @@ describe('buildPhotoBookAutoLayout — FIX 1: pinned/carried-over hero survives 
     const problems = checkPhotoBookPlanConsistency(plan, { availableAssetIds, allAssetIds });
     expect(problems).toEqual([]);
 
-    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const interior = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(interior).not.toContain(heroId);
   }
 
@@ -987,7 +994,7 @@ describe('resolveUsableHeroId + buildPhotoBookAutoLayout — FIX 1b: stale hero 
     expect(['sib1', 'sib2']).toContain(plan.cover.heroAssetId);
     expect(plan.sections.length).toBeGreaterThan(0);
 
-    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(placed).not.toContain('excluded-cover');
 
     const allAssetIds = usablePhotos.map((p) => p.assetId);
@@ -1017,7 +1024,7 @@ describe('buildPhotoBookAutoLayout — userDecision overrides (re-include fix re
     ];
     const { plan, culled } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'sharp' });
     expect(culled).toEqual([]);
-    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(placed).toContain('blurry-dup');
     expect(checkPhotoBookPlanConsistency(plan, {
       availableAssetIds: photos.map((p) => p.assetId),
@@ -1039,7 +1046,7 @@ describe('buildPhotoBookAutoLayout — userDecision overrides (re-include fix re
     ];
     const { culled, plan } = buildPhotoBookAutoLayout(baseInput(photos));
     expect(culled).toEqual([]);
-    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(placed).toContain('blurry');
   });
 
@@ -1055,7 +1062,7 @@ describe('buildPhotoBookAutoLayout — userDecision overrides (re-include fix re
       }),
     ];
     const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'open' });
-    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(placed).toContain('closed');
   });
 
@@ -1075,7 +1082,7 @@ describe('buildPhotoBookAutoLayout — userDecision overrides (re-include fix re
     const input: PhotoBookAutoLayoutInput = { ...baseInput(photos), coverAssetId: 'p1' };
     const { plan, culled } = buildPhotoBookAutoLayout(input);
     expect(culled.some((c) => c.assetId === 'forced-low')).toBe(false);
-    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(placed).toContain('forced-low');
   });
 
@@ -1092,7 +1099,7 @@ describe('buildPhotoBookAutoLayout — userDecision overrides (re-include fix re
       photo({ assetId: 'kept', position: 1, takenAt: new Date(t0 + 60_000), width: 800, height: 600 }),
     ];
     const { plan, culled } = buildPhotoBookAutoLayout(baseInput(photos));
-    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => p.assetIds));
+    const placed = plan.sections.flatMap((s) => s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)));
     expect(placed).not.toContain('excluded-best');
     expect(plan.cover.heroAssetId).not.toBe('excluded-best');
     // Force-exclusion isn't a "cull" the layouter reports/persists — the photo is simply
@@ -1124,9 +1131,9 @@ describe('buildPhotoBookAutoLayout — mixed-orientation grouping (four-mixed / 
       photo({ assetId: 'p3', position: 4, takenAt: new Date(t0 + 4 * HOUR), width: 1000, height: 1600 }),
     ];
     const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
-    const group = plan.sections[0].pages.find((p) => p.assetIds.length === 4);
+    const group = plan.sections[0].pages.find((p) => (isTextItem(p) ? [] : p.assetIds).length === 4);
     expect(group?.template).toBe('four-mixed');
-    expect(group?.assetIds[0]).toBe('l1');
+    expect(photoPage(group!).assetIds[0]).toBe('l1');
   });
 
   it('puts the landscape first in a three-mixed group regardless of its incoming order', () => {
@@ -1137,8 +1144,127 @@ describe('buildPhotoBookAutoLayout — mixed-orientation grouping (four-mixed / 
       photo({ assetId: 'p2', position: 3, takenAt: new Date(t0 + 3 * HOUR), width: 1000, height: 1600 }),
     ];
     const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
-    const trio = plan.sections[0].pages.find((p) => p.assetIds.length === 3);
+    const trio = plan.sections[0].pages.find((p) => (isTextItem(p) ? [] : p.assetIds).length === 3);
     expect(trio?.template).toBe('three-mixed');
-    expect(trio?.assetIds[0]).toBe('l1');
+    expect(photoPage(trio!).assetIds[0]).toBe('l1');
+  });
+});
+
+describe('buildPhotoBookAutoLayout — story chapters (unified book)', () => {
+  const chapter = (storyId: string, paragraphCount: number, title = storyId) => ({
+    storyId,
+    title,
+    eventLabel: '1962',
+    paragraphCount,
+    includeText: true,
+  });
+
+  it('gives each chapter its own section, in chapter order, carrying its storyId', () => {
+    const photos = [
+      photo({ assetId: 'p-a1', storyId: 'a', position: 0, width: 1600, height: 1000 }),
+      photo({ assetId: 'p-b1', storyId: 'b', position: 1, width: 1000, height: 1600 }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout({
+      ...baseInput(photos),
+      coverAssetId: 'unrelated-cover',
+      chapters: [chapter('a', 6), chapter('b', 4)],
+    });
+    expect(plan.sections.map((s) => s.storyId)).toEqual(['a', 'b']);
+    expect(plan.sections[0].dateLabel).toBe('1962');
+  });
+
+  it('covers every paragraph of a chapter exactly once, in order, with photos interleaved', () => {
+    const photos = [
+      photo({ assetId: 'p1', storyId: 'a', position: 0, width: 1600, height: 1000 }),
+      photo({ assetId: 'p2', storyId: 'a', position: 1, width: 1600, height: 1000 }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout({
+      ...baseInput(photos),
+      coverAssetId: 'unrelated-cover',
+      chapters: [chapter('a', 9)],
+    });
+    const [section] = plan.sections;
+    const runs = section.pages.filter(isTextItem);
+    expect(runs.length).toBeGreaterThan(1);
+    let expected = 0;
+    for (const run of runs) {
+      expect(run.from).toBe(expected);
+      expected = run.to + 1;
+    }
+    expect(expected).toBe(9);
+    // Text opens the chapter, and photo pages sit between the runs.
+    expect(isTextItem(section.pages[0])).toBe(true);
+    expect(section.pages.some((p) => !isTextItem(p))).toBe(true);
+    expect(
+      checkPhotoBookPlanConsistency(plan, {
+        // The pinned hero is part of the book's content set too.
+        availableAssetIds: ['p1', 'p2', 'unrelated-cover'],
+        allAssetIds: ['p1', 'p2', 'unrelated-cover'],
+        stories: [{ storyId: 'a', paragraphCount: 9 }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('keeps a text-only chapter (no photos at all) as a section', () => {
+    const { plan } = buildPhotoBookAutoLayout({
+      ...baseInput([]),
+      coverAssetId: null,
+      chapters: [chapter('a', 5)],
+    });
+    expect(plan.sections).toHaveLength(1);
+    expect(plan.sections[0].pages).toEqual([{ template: 'text', from: 0, to: 4 }]);
+    expect(
+      checkPhotoBookPlanConsistency(plan, {
+        availableAssetIds: [],
+        allAssetIds: [],
+        stories: [{ storyId: 'a', paragraphCount: 5 }],
+      }),
+    ).toEqual([]);
+  });
+
+  it('a chapter with text switched off contributes only its photo pages', () => {
+    const photos = [photo({ assetId: 'p1', storyId: 'a', position: 0, width: 1600, height: 1000 })];
+    const { plan } = buildPhotoBookAutoLayout({
+      ...baseInput(photos),
+      coverAssetId: 'unrelated-cover',
+      chapters: [{ ...chapter('a', 6), includeText: false }],
+    });
+    expect(plan.sections[0].pages.filter(isTextItem)).toEqual([]);
+    expect(plan.sections[0].pages.length).toBeGreaterThan(0);
+  });
+
+  it('photos that belong to no chapter still cluster into their own sections after them', () => {
+    const photos = [
+      photo({ assetId: 'p-story', storyId: 'a', position: 0, width: 1600, height: 1000 }),
+      photo({ assetId: 'up1', storyId: null, position: 1, takenAt: new Date(t0), width: 1600, height: 1000 }),
+      photo({ assetId: 'up2', storyId: null, position: 2, takenAt: new Date(t0 + HOUR), width: 1600, height: 1000 }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout({
+      ...baseInput(photos),
+      coverAssetId: 'unrelated-cover',
+      chapters: [chapter('a', 4)],
+    });
+    expect(plan.sections[0].storyId).toBe('a');
+    const uploadSections = plan.sections.filter((s) => !s.storyId);
+    expect(uploadSections.length).toBeGreaterThan(0);
+    const placed = uploadSections.flatMap((s) =>
+      s.pages.flatMap((p) => (isTextItem(p) ? [] : p.assetIds)),
+    );
+    expect(placed).toEqual(expect.arrayContaining(['up1', 'up2']));
+  });
+
+  it('a pure photo book (no chapters) lays out exactly as before', () => {
+    const photos = [
+      photo({ assetId: 'a', position: 0, takenAt: new Date(t0), width: 1600, height: 1000 }),
+      photo({ assetId: 'b', position: 1, takenAt: new Date(t0 + HOUR), width: 1600, height: 1000 }),
+    ];
+    const withoutChapters = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'c' });
+    const withEmptyChapters = buildPhotoBookAutoLayout({
+      ...baseInput(photos),
+      coverAssetId: 'c',
+      chapters: [],
+    });
+    expect(withEmptyChapters.plan).toEqual(withoutChapters.plan);
+    expect(withoutChapters.plan.sections.every((s) => s.storyId === undefined)).toBe(true);
   });
 });

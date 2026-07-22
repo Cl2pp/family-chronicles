@@ -27,6 +27,7 @@ import {
   photoAssetPrintTargetSizeMm,
   photoAssetRenditionNeeds,
   referencedPhotoAssetIds,
+  storyParagraphMap,
   type LoadedPhotoBook,
   type PhotoBookPhotoRef,
   type PhotoDimsById,
@@ -34,6 +35,7 @@ import {
 } from '@/lib/photo-book-content';
 import { embeddedFontFaceCss } from '@/lib/photo-book-fonts';
 import type { PhotoBookPlan } from '@/lib/photo-book-plan';
+import { isLegacyStoryPlan } from '@/lib/book-plan-kind';
 
 /**
  * The worker side of book rendering: load content, build/refresh the layout plan,
@@ -183,14 +185,22 @@ async function renderVariant(
   return htmlToPdf(browser, html);
 }
 
-/** The `render-book` job: render, pad, store, and flip the book's status — branches on
- *  `books.kind` right away (docs/PHOTO_BOOK_PLAN.md PR5). The story path below is exactly
- *  what it was before photo books existed; `renderPhotoBook` (further down) is the new,
- *  entirely separate photo-book path — they share only `htmlToPdf`/`padPdf`. */
+/** The `render-book` job: render, pad, store, and flip the book's status.
+ *
+ *  Branches on which ENGINE the book belongs to (`lib/book-plan-kind.ts`), NOT on
+ *  `books.kind`: since the unification every book renders through the photo-book
+ *  renderer, except one that still holds a stored story-book plan — those keep the old
+ *  path (and their exact current look) until their owner regenerates them. The legacy
+ *  path below is byte-for-byte what it always was; the two share only
+ *  `htmlToPdf`/`padPdf`. */
 export async function renderBook(bookId: string): Promise<void> {
-  const [row] = await db.select({ kind: books.kind }).from(books).where(eq(books.id, bookId)).limit(1);
+  const [row] = await db
+    .select({ layoutPlan: books.layoutPlan })
+    .from(books)
+    .where(eq(books.id, bookId))
+    .limit(1);
   if (!row) throw new Error(`Book ${bookId} not found`);
-  if (row.kind === 'photo') {
+  if (!isLegacyStoryPlan(row.layoutPlan)) {
     await renderPhotoBook(bookId);
     return;
   }
@@ -339,6 +349,7 @@ async function renderPhotoBookVariant(
     plan,
     images: resolved,
     fontFaceCss: embeddedFontFaceCss(plan.style),
+    storyParagraphs: storyParagraphMap(loaded),
     createdLabel: new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long' }),
     watermarkText: 'VORSCHAU · PREVIEW',
   });

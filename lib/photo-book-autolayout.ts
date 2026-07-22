@@ -4,6 +4,7 @@ import type { PhotoAnalysis } from '@/lib/photo-analysis';
 import {
   photoOrientation,
   type PhotoBookPlan,
+  type PhotoFlowItem,
   type PhotoBookStyle,
   type PhotoPagePlan,
   type PhotoSectionPlan,
@@ -68,6 +69,10 @@ export interface AutoLayoutPhoto {
    *  reads this treats its absence as "no opinion", not as a bad score — see the module
    *  header comment. */
   analysis?: PhotoAnalysis | null;
+  /** Which story this photo came from (`book_photos.story_id`), or `null` for a photo
+   *  uploaded straight into the book. When the book has chapters, this is what puts a
+   *  photo in ITS story's section rather than in a time/topic/place cluster. */
+  storyId?: string | null;
   /** The user's own explicit include/exclude choice (`book_photos.user_decision`),
    *  independent of everything else here — `undefined`/`null` means "no explicit choice,
    *  auto-culling decides" (the PR2/PR3 behavior, unchanged). `'include'` makes a photo
@@ -120,6 +125,24 @@ export interface PhotoBookAutoLayoutInput {
   /** Every photo currently AVAILABLE to the layout — i.e. `book_photos.excluded = false`
    *  (a user's own exclusions are never second-guessed here; see the module header). */
   photos: AutoLayoutPhoto[];
+  /** The book's story chapters, in reading order (unified-book plan). When present, each
+   *  becomes ONE section carrying its own `storyId`, its photos, and — for chapters with
+   *  `includeText` — its paragraphs as interleaved text runs. Photos that belong to no
+   *  chapter (direct uploads) are still grouped by the chosen `grouping` into sections
+   *  after the chapters. Absent/empty = a pure photo book, laid out exactly as before. */
+  chapters?: AutoLayoutChapter[];
+}
+
+/** One story chapter for the auto-layouter — the subset of `BookChapterRef`
+ *  (`lib/photo-book-content.ts`) this pure function needs. */
+export interface AutoLayoutChapter {
+  storyId: string;
+  title: string;
+  eventLabel: string | null;
+  /** Paragraph count; 0 (or `includeText: false`) means the chapter contributes photos
+   *  only and its section carries no text runs. */
+  paragraphCount: number;
+  includeText: boolean;
 }
 
 export interface CulledPhoto {
@@ -129,15 +152,13 @@ export interface CulledPhoto {
   reason: 'duplicate' | 'blurry' | 'eyes-closed' | 'low-quality';
 }
 
-/** The auto-layouter never emits text runs — its sections hold photo pages only
- *  (story-aware layout arrives with the unified loader). Narrowed types keep that
- *  guarantee visible to callers and tests; both are assignable to their wide
- *  counterparts (`PhotoSectionPlan`/`PhotoBookPlan`). */
+/** A section that holds photo pages only — what every section of a book WITHOUT
+ *  chapters is. Kept as a named type because the pacing helpers below all produce
+ *  exactly this; a chapter section additionally interleaves text runs. */
 export type PhotoOnlySectionPlan = Omit<PhotoSectionPlan, 'pages'> & { pages: PhotoPagePlan[] };
-export type PhotoOnlyBookPlan = Omit<PhotoBookPlan, 'sections'> & { sections: PhotoOnlySectionPlan[] };
 
 export interface PhotoBookAutoLayoutResult {
-  plan: PhotoOnlyBookPlan;
+  plan: PhotoBookPlan;
   /** Photos the layouter chose to leave out of the plan, with why — NOT yet persisted;
    *  see the module header. */
   culled: CulledPhoto[];
@@ -603,6 +624,45 @@ function paceSection(photos: AutoLayoutPhoto[]): PhotoPagePlan[] {
   return pages;
 }
 
+/** Fewest paragraphs a text run should carry — a one-paragraph run wedged between two
+ *  photo pages reads as a caption that escaped, not as a chapter. */
+const MIN_PARAGRAPHS_PER_RUN = 2;
+
+/** Contiguous, gap-free split of paragraphs 0..n-1 into k near-equal runs. */
+function textRuns(paragraphCount: number, runs: number): PhotoFlowItem[] {
+  const k = Math.max(1, Math.min(runs, Math.floor(paragraphCount / MIN_PARAGRAPHS_PER_RUN) || 1));
+  const out: PhotoFlowItem[] = [];
+  let from = 0;
+  for (let i = 0; i < k; i++) {
+    const size = Math.ceil((paragraphCount - from) / (k - i));
+    out.push({ template: 'text', from, to: from + size - 1 });
+    from += size;
+  }
+  return out;
+}
+
+/**
+ * Paces one story chapter: its prose split into runs with the chapter's photo pages
+ * interleaved between them, so a photo lands near the text it belongs to rather than
+ * being dumped at the end. Opens with text (the chapter's voice first, under its own
+ * divider page), then alternates page/run; any photo pages left over follow the last
+ * run. A chapter with no text is just its photo pages; a chapter with no photos is one
+ * unbroken run.
+ */
+function paceChapter(chapter: AutoLayoutChapter, photos: AutoLayoutPhoto[]): PhotoFlowItem[] {
+  const pages: PhotoFlowItem[] = photos.length > 0 ? paceSection(photos) : [];
+  const paragraphCount = chapter.includeText ? chapter.paragraphCount : 0;
+  if (paragraphCount === 0) return pages;
+
+  const runs = textRuns(paragraphCount, pages.length + 1);
+  const out: PhotoFlowItem[] = [];
+  for (let i = 0; i < Math.max(runs.length, pages.length); i++) {
+    if (i < runs.length) out.push(runs[i]);
+    if (i < pages.length) out.push(pages[i]);
+  }
+  return out;
+}
+
 /* ──────────────────────────────────────────────────────────────────────────────
  * Non-chronological groupings (`lib/photo-book-grouping.ts`): the user's "organise this
  * book by topic / by place" choice.
@@ -873,7 +933,18 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   const usablePhotos = input.photos.filter((p) => p.userDecision !== 'exclude');
 
   const grouping = input.grouping ?? DEFAULT_PHOTO_BOOK_GROUPING;
-  const groups = computeCandidateSections(usablePhotos, grouping);
+  // Chapters own their photos; everything else (direct uploads) still clusters by the
+  // reader's chosen grouping into sections that follow the chapters.
+  const chapters = (input.chapters ?? []).filter((c) => c.paragraphCount > 0 || true);
+  const chapterOwned = new Set(chapters.map((c) => c.storyId));
+  const unowned = usablePhotos.filter((p) => !p.storyId || !chapterOwned.has(p.storyId));
+  const groups: Array<{ photos: AutoLayoutPhoto[]; chapter?: AutoLayoutChapter }> = [
+    ...chapters.map((chapter) => ({
+      chapter,
+      photos: usablePhotos.filter((p) => p.storyId === chapter.storyId),
+    })),
+    ...computeCandidateSections(unowned, grouping).map((photos) => ({ photos })),
+  ];
 
   // Resolved up front (before any culling runs) so the score-aware cullers below can
   // protect it from their own candidacy — see `cullEyesClosed`'s doc comment for why. A
@@ -898,10 +969,15 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   // book-wide survivor pool), but pacing each section needs to know the hero first (to
   // exclude it — see below), so the pass that builds pages can't happen until after hero
   // selection.
-  const groupKeeps: { group: AutoLayoutPhoto[]; keep: AutoLayoutPhoto[] }[] = [];
+  const groupKeeps: {
+    group: AutoLayoutPhoto[];
+    keep: AutoLayoutPhoto[];
+    chapter?: AutoLayoutChapter;
+  }[] = [];
 
-  for (const group of groups) {
-    if (group.length === 0) continue;
+  for (const { photos: group, chapter } of groups) {
+    // A chapter with text is kept even with zero photos — its prose IS the section.
+    if (group.length === 0 && !(chapter && chapter.includeText && chapter.paragraphCount > 0)) continue;
     const dupResult = cullDuplicates(group);
     culled.push(...dupResult.culled);
     const blurResult = cullBlurry(dupResult.keep);
@@ -915,10 +991,10 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
     const aestheticResult = cullLowAesthetic(eyesResult.keep, protectedHeroId);
     culled.push(...aestheticResult.culled);
     const keep = aestheticResult.keep;
-    if (keep.length === 0) continue;
+    if (keep.length === 0 && !chapter) continue;
 
     survivorsForCover.push(...keep);
-    groupKeeps.push({ group, keep });
+    groupKeeps.push({ group, keep, chapter });
   }
 
   const bestOverall = pickBestPhoto(survivorsForCover);
@@ -931,9 +1007,23 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   // opener, producing a duplicate `assetId` that fails `checkPhotoBookPlanConsistency`
   // (mirrors `buildChapterBlocks`'s `pool = pool.filter(...)` in `lib/book-autolayout.ts`,
   // which solves the same problem for story books).
-  const sections: PhotoOnlySectionPlan[] = [];
-  for (const { group, keep } of groupKeeps) {
+  const sections: PhotoSectionPlan[] = [];
+  for (const { group, keep, chapter } of groupKeeps) {
     const interior = heroAssetId ? keep.filter((p) => p.assetId !== heroAssetId) : keep;
+    if (chapter) {
+      // A story chapter is always its own section, in chapter order, even if every one
+      // of its photos went to the cover or got culled — the TEXT is the content that
+      // matters here, and dropping the section would lose the chapter from the book.
+      const pages = paceChapter(chapter, interior);
+      if (pages.length === 0) continue;
+      sections.push({
+        title: chapter.title,
+        ...(chapter.eventLabel ? { dateLabel: chapter.eventLabel } : {}),
+        storyId: chapter.storyId,
+        pages,
+      });
+      continue;
+    }
     // Excluding the hero can leave a section with nothing left (e.g. a single-photo
     // section whose only photo IS the hero) — drop it rather than emit an empty section,
     // which `checkPhotoBookPlanConsistency` also rejects.
@@ -944,7 +1034,7 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
     });
   }
 
-  const plan: PhotoOnlyBookPlan = {
+  const plan: PhotoBookPlan = {
     kind: 'photo',
     style: input.existingStyle ?? 'classic',
     cover: {

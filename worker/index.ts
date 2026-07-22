@@ -17,8 +17,6 @@ import {
   type TranscodeJob,
 } from '@/lib/queue';
 import { markRenderFailed, renderBook } from '@/lib/book-render';
-import { proposeLayoutPlan } from '@/lib/book-ai-layout';
-import { backfillDimensionsFromOriginals, buildAndPersistAutoPlan, loadBook } from '@/lib/book-content';
 import { proposePhotoBookPlan } from '@/lib/photo-book-ai-layout';
 import type { PhotoBookDesignStage } from '@/lib/photo-book-design-stage';
 import { buildAndPersistPhotoAutoPlan, loadPhotoBook } from '@/lib/photo-book-content';
@@ -99,42 +97,12 @@ async function handleRenderBook(data: RenderBookJob) {
  * than before it was clicked, only either improved or unchanged.
  */
 async function handleDesignBook(data: DesignBookJob) {
-  const { bookId } = data;
-  try {
-    const plan = await proposeLayoutPlan(bookId);
-    if (plan) {
-      await db
-        .update(books)
-        .set({
-          layoutPlan: plan,
-          layoutSource: 'ai',
-          layoutStale: false,
-          designRequestedAt: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(books.id, bookId));
-      console.log(`[worker] AI-designed book ${bookId}`);
-      return;
-    }
-
-    console.log(`[worker] AI design pass for ${bookId} produced no usable plan — falling back to auto layout`);
-    const loaded = await loadBook(bookId);
-    await backfillDimensionsFromOriginals(loaded.allPhotosById);
-    await buildAndPersistAutoPlan(bookId, loaded);
-    await db.update(books).set({ designRequestedAt: null }).where(eq(books.id, bookId));
-  } catch (err) {
-    console.error(`[worker] design-book failed for ${bookId}:`, err);
-    // Best effort: still clear the flag so the builder's poll doesn't spin forever, and
-    // still try to leave a fresh auto plan in place rather than a stale/broken one.
-    try {
-      const loaded = await loadBook(bookId);
-      await backfillDimensionsFromOriginals(loaded.allPhotosById);
-      await buildAndPersistAutoPlan(bookId, loaded);
-    } catch (fallbackErr) {
-      console.error(`[worker] auto-layout fallback also failed for ${bookId}:`, fallbackErr);
-    }
-    await db.update(books).set({ designRequestedAt: null }).where(eq(books.id, bookId));
-  }
+  // Both design queues now run the SAME pass. The legacy `design-book` queue stays
+  // registered for one release so jobs enqueued before the unified deploy still drain;
+  // every enqueue site targets `design-photo-book`. A book still holding a stored
+  // story-book plan is converted explicitly by its owner (`convertBookToUnifiedLayout`),
+  // never by a background job, so there is nothing kind-specific left to do here.
+  await handleDesignPhotoBook({ bookId: data.bookId });
 }
 
 /**

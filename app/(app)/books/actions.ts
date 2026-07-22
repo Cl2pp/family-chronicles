@@ -18,6 +18,7 @@ import {
   requestPhotoBookAiDesign,
   requestPreview,
   resetBookLayout,
+  convertBookToUnifiedLayout,
   setBookStories,
   setPhotoBookStyle,
   setPhotoExcluded,
@@ -282,6 +283,16 @@ export async function resetBookLayoutAction(input: {
   const user = await requireUser();
   const result = await resetBookLayout({ ...input, userId: user.id });
   revalidatePath(`/books/${input.bookId}`);
+  return result.ok ? {} : { error: result.error };
+}
+
+/** Convert a legacy story book to the unified layout engine — see
+ *  `convertBookToUnifiedLayout`. The book keeps its content and settings; its typography
+ *  and page layout are rebuilt, which is why the UI confirms first. */
+export async function convertBookToUnifiedLayoutAction(bookId: string): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await convertBookToUnifiedLayout({ bookId, userId: user.id });
+  revalidatePath(`/books/${bookId}`);
   return result.ok ? {} : { error: result.error };
 }
 

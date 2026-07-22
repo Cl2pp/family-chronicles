@@ -48,6 +48,7 @@ import {
   type LayoutTheme,
   type PlanContent,
 } from '@/lib/book-layout-plan';
+import { isLegacyStoryPlan } from '@/lib/book-plan-kind';
 import {
   buildAndPersistPhotoAutoPlan,
   countPhotoBookPages,
@@ -253,6 +254,8 @@ export interface BookChapter {
   storyId: string;
   position: number;
   includePhotos: boolean;
+  /** Whether this chapter's TEXT is part of the book (unified-book plan). */
+  includeText: boolean;
   title: string;
   summary: string | null;
   eventDate: Date | null;
@@ -282,6 +285,10 @@ export interface BookDetail {
   /** Who last wrote the layout plan: the heuristic auto-layouter, an AI design pass, or a
    *  manual edit (manual edits are phase 4; the type already allows for them). */
   layoutSource: 'auto' | 'ai' | 'edited';
+  /** The stored layout plan, untyped — read ONLY to decide which engine renders this
+   *  book (`bookEngineFor`, `lib/book-plan-kind.ts`). Callers that need the plan's
+   *  contents validate it themselves. */
+  layoutPlan: unknown;
   /** True when the book's content changed since `layoutPlan` was built (a photo was
    *  added/excluded, a chat op touched the plan) — the render/download flow uses this to
    *  decide whether a stored `preview_ready` PDF still matches the book's current content
@@ -339,6 +346,7 @@ export async function getBookForUser(
       storyId: bookStories.storyId,
       position: bookStories.position,
       includePhotos: bookStories.includePhotos,
+      includeText: bookStories.includeText,
       title: stories.title,
       summary: stories.summary,
       eventDate: stories.eventDate,
@@ -410,6 +418,7 @@ export async function getBookForUser(
     previewS3Key: row.book.previewS3Key,
     printS3Key: row.book.printS3Key,
     layoutSource: row.book.layoutSource as 'auto' | 'ai' | 'edited',
+    layoutPlan: row.book.layoutPlan,
     layoutStale: row.book.layoutStale,
     designRequestedAt: row.book.designRequestedAt,
     designStage: row.book.designStage,
@@ -420,6 +429,7 @@ export async function getBookForUser(
       storyId: c.storyId,
       position: c.position ?? i,
       includePhotos: c.includePhotos,
+      includeText: c.includeText,
       title: c.title,
       summary: c.summary,
       eventDate: c.eventDate,
@@ -2023,6 +2033,66 @@ export async function resetBookLayout(input: {
   }
   const loaded = await loadBook(input.bookId);
   await buildAndPersistAutoPlan(input.bookId, loaded);
+  return { ok: true };
+}
+
+
+/**
+ * Converts a legacy story book to the unified engine (unified-book plan, PR C).
+ *
+ * Existing memoir books keep their exact current look until their owner asks for the
+ * change — this is that ask. Conversion is deliberately just "drop the legacy plan":
+ * `bookEngineFor` then routes the book to the unified engine, and the next preview load
+ * builds a fresh plan from the same chapters and photos (`loadOrBuildPhotoPlan`). The
+ * book's own settings — title, subtitle, dedication, format, cover pin, and which
+ * stories are attached with which include flags — are columns and survive untouched.
+ *
+ * What visibly changes, and is worth telling the user before they confirm: the old
+ * two-theme typography is replaced by the matching style suite (classic stays classic,
+ * modern stays modern), photos that used to float inside the text become designed photo
+ * pages, and pagination shifts. Any hand-edited or AI-designed story layout is replaced
+ * by a fresh automatic one — old story-plan edits cannot be carried across the schema
+ * change, which is exactly why this is an explicit action rather than a migration.
+ *
+ * Irreversible in practice (the old plan is not kept), so the caller must confirm.
+ */
+export async function convertBookToUnifiedLayout(input: {
+  bookId: string;
+  userId: string;
+}): Promise<Result> {
+  const gate = await editableBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+  const hidden = hiddenChaptersError(gate.book);
+  if (hidden) return hidden;
+  if (!isLegacyStoryPlan(gate.book.layoutPlan)) {
+    return err('This book already uses the current layout engine.');
+  }
+
+  const legacy = validateLayoutPlan(gate.book.layoutPlan);
+  // Carry the theme across by name — the two story themes exist as same-named style
+  // suites, so a classic memoir stays classic. Everything else about the old plan
+  // (blocks, figure sizes, cover style) has no equivalent and is deliberately dropped.
+  const style: PhotoBookStyle = legacy.ok && legacy.plan.theme === 'modern' ? 'modern' : 'classic';
+
+  await db
+    .update(books)
+    .set({
+      ...invalidatePreview(),
+      layoutPlan: null,
+      layoutSource: 'auto',
+      layoutStale: true,
+      // Photo books gate their builder on this; a converted book has content already, so
+      // it must not fall back to the "not generated yet" view.
+      generatedAt: gate.book.generatedAt ?? new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(books.id, input.bookId));
+
+  // Persist the carried-over style by seeding a plan built with it — the auto-layouter
+  // reads `existingStyle` from the stored plan, which we just cleared, so hand it over
+  // explicitly on this one build.
+  const loaded = await loadPhotoBook(input.bookId);
+  await buildAndPersistPhotoAutoPlan(input.bookId, loaded, { style });
   return { ok: true };
 }
 

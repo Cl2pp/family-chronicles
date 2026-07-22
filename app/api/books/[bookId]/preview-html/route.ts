@@ -18,9 +18,11 @@ import {
   loadPhotoBook,
   photoAssetRenditionNeeds,
   referencedPhotoAssetIds,
+  storyParagraphMap,
   type PhotoBookPhotoRef,
 } from '@/lib/photo-book-content';
 import { screenFontFaceCss } from '@/lib/photo-book-fonts';
+import { isLegacyStoryPlan } from '@/lib/book-plan-kind';
 
 /**
  * The live builder preview: the same layout plan the worker prints to PDF,
@@ -46,7 +48,11 @@ export async function GET(
   const book = await getBookForUser(bookId, session.user.id);
   if (!book) return new NextResponse('Not found', { status: 404 });
 
-  if (book.kind === 'photo') return photoBookPreview(bookId, book.chronicleName);
+  // Engine fork, not a kind fork: every book previews through the photo-book renderer
+  // except one still holding a stored story-book plan (see `lib/book-plan-kind.ts`).
+  if (!isLegacyStoryPlan(book.layoutPlan)) {
+    return photoBookPreview(bookId, book.chronicleName, session.user.id);
+  }
 
   const loaded = await loadBook(bookId);
   await backfillDimensionsFromThumbnails(loaded.allPhotosById);
@@ -127,14 +133,28 @@ export async function GET(
  * build/resolve the plan (`loadOrBuildPhotoPlan`, `lib/photo-book-content.ts`), presign
  * every photo the plan places — the ~1600px "display" rendition for full-page slots, the
  * 640px thumbnail for grids (`photoAssetRenditionNeeds`) — and render it with the same
- * Paged.js screen-variant plumbing as story books (`lib/photo-book-layout.ts`). Photo
- * books have no per-viewer story-access hiding (docs/PHOTO_BOOK_PLAN.md §2: "every
- * chronicle member with access to the book sees them"), so there's no hidden-content
- * filtering step here — `getBookForUser`'s membership check above is the whole gate.
+ * Paged.js screen-variant plumbing (`lib/photo-book-layout.ts`).
+ *
+ * Per-viewer story access (unified-book plan): a book built purely from uploads is
+ * visible in full to every member with book access — uploading into a shared book IS
+ * sharing it. But once a book carries story chapters, the same rule the story books
+ * always had applies: a chapter the viewer may not read is dropped from the rendered
+ * output, and so are the photos that came from it (`book_photos.story_id` provenance),
+ * cover hero included. Filtering happens on the OUTPUT only — the stored plan is always
+ * built from the full content, so a partial view can never overwrite it.
  */
-async function photoBookPreview(bookId: string, chronicleName: string): Promise<NextResponse> {
+async function photoBookPreview(
+  bookId: string,
+  chronicleName: string,
+  userId: string,
+): Promise<NextResponse> {
   const loaded = await loadPhotoBook(bookId);
   const plan = await loadOrBuildPhotoPlan(bookId, loaded);
+
+  // `getBookForUser` already computed which chapters this viewer may read.
+  const detail = await getBookForUser(bookId, userId);
+  const hasHidden = (detail?.hiddenChapterCount ?? 0) > 0;
+  const visibleStories = new Set((detail?.chapters ?? []).map((c) => c.storyId));
 
   const byId = new Map(loaded.photos.map((p) => [p.assetId, p]));
   const needed = referencedPhotoAssetIds(plan);
@@ -169,9 +189,20 @@ async function photoBookPreview(bookId: string, chronicleName: string): Promise<
   const resolved = new Map<string, PhotoLayoutImage>();
   for (const id of needed) {
     const photo = byId.get(id);
+    // Never presign a photo that came from a chapter this viewer can't read.
+    if (photo && hasHidden && photo.storyId && !visibleStories.has(photo.storyId)) continue;
     if (!photo || photo.excluded) continue;
     const image = await resolveImage(photo, renditionNeeds.get(id) ?? 'thumb');
     if (image) resolved.set(id, image);
+  }
+
+  // Hidden chapters lose their text as well as their photos: drop their paragraphs so
+  // the renderer emits nothing for those sections' text runs.
+  const paragraphsByStory = storyParagraphMap(loaded);
+  if (hasHidden) {
+    for (const storyId of paragraphsByStory.keys()) {
+      if (!visibleStories.has(storyId)) paragraphsByStory.delete(storyId);
+    }
   }
 
   const html = renderPhotoBookHtml({
@@ -182,6 +213,7 @@ async function photoBookPreview(bookId: string, chronicleName: string): Promise<
     images: resolved,
     fontFaceCss: screenFontFaceCss(plan.style),
     createdLabel: new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long' }),
+    storyParagraphs: paragraphsByStory,
   });
 
   return new NextResponse(html, {
