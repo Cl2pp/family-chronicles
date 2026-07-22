@@ -184,15 +184,55 @@ describe('renderPhotoBookHtml', () => {
   // `height` and no CSS margin. No variant emits `page: <ident>` or a named `@page` rule
   // anymore.
   describe('unnamed @page bleed mechanism (all variants)', () => {
-    it('emits exactly ONE named @page rule — text-flow — and no inline page declarations', () => {
-      // The margin-0 element-box mechanism tolerates exactly one named page: the flowing
-      // story text's `@page text-flow` (spike-validated in Chromium print and Paged.js).
-      // Anything beyond that risks re-triggering the documented named-page bugs.
+    it('a PHOTO-ONLY book emits no named @page rule at all (unchanged from before text support)', () => {
+      // The named-page mechanism only exists for flowing text. A book without chapters
+      // must keep the single-unnamed-@page document it always had — that's what makes
+      // text support dormant for every existing photo book, and it keeps them away from
+      // the documented Chromium/Paged.js named-page bugs entirely.
       for (const variant of ['screen', 'preview', 'print'] as const) {
         const html = renderPhotoBookHtml(baseInput({ variant }));
         expect(html).not.toMatch(/style="page:/);
-        const named = html.match(/@page [a-zA-Z][\w-]*\s*\{/g) ?? [];
-        expect(named).toEqual(['@page text-flow {']);
+        expect(html.match(/@page [a-zA-Z][\w-]*\s*\{/g) ?? []).toEqual([]);
+      }
+    });
+
+    it('a book WITH chapters emits exactly one named @page rule — text-flow', () => {
+      const plan = basePlan({
+        sections: [{ title: 'Kapitel', storyId: 's1', pages: [{ template: 'text', from: 0, to: 0 }] }],
+      });
+      for (const variant of ['screen', 'preview', 'print'] as const) {
+        const html = renderPhotoBookHtml(
+          baseInput({ variant, plan, storyParagraphs: new Map([['s1', ['Ein Absatz.']]]) }),
+        );
+        expect(html.match(/@page [a-zA-Z][\w-]*\s*\{/g) ?? []).toEqual(['@page text-flow {']);
+      }
+    });
+
+    it('text-page margins are measured from the trim edge in every variant (print adds bleed)', () => {
+      // A different column width would mean different line breaks — and therefore a
+      // print PDF that paginates differently from the proof the reader approved.
+      const plan = basePlan({
+        sections: [{ title: 'Kapitel', storyId: 's1', pages: [{ template: 'text', from: 0, to: 0 }] }],
+      });
+      const input = { plan, storyParagraphs: new Map([['s1', ['Ein Absatz.']]]) };
+      const m = PHOTO_BOOK_CONTENT_MARGIN_MM;
+      expect(renderPhotoBookHtml(baseInput({ ...input, variant: 'screen' }))).toContain(
+        `margin: ${m.top}mm ${m.inner}mm ${m.bottom + 2}mm;`,
+      );
+      expect(renderPhotoBookHtml(baseInput({ ...input, variant: 'print' }))).toContain(
+        `margin: ${m.top + PHOTO_BOOK_BLEED_MM}mm ${m.inner + PHOTO_BOOK_BLEED_MM}mm ${m.bottom + PHOTO_BOOK_BLEED_MM + 2}mm;`,
+      );
+    });
+
+    it('a photo-only book never propagates a page background (no restyle of existing books)', () => {
+      // `background-clip: content-box` leaves the frame strip around every photo page
+      // showing the page canvas; propagating --pb-page-bg would recolor it (black for
+      // the `bold` suite) on books whose proofs are already approved.
+      for (const style of PHOTO_BOOK_STYLES) {
+        const html = renderPhotoBookHtml(
+          baseInput({ plan: basePlan({ style }), fontFaceCss: screenFontFaceCss(style) }),
+        );
+        expect(html).not.toMatch(/color: var\(--pb-color-text\);\s*\n\s*background: var\(--pb-page-bg\);/);
       }
     });
 

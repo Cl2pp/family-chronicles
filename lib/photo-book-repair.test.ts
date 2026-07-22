@@ -411,7 +411,7 @@ describe('repairTextCoverage (unified-book plan)', () => {
     expect(repaired.sections[0].pages).toHaveLength(1);
   });
 
-  it('coerce keeps model-emitted text items only in sections that name a story', () => {
+  it('coerce keeps model-emitted text items only in sections that name a KNOWN story', () => {
     const photos = [landscape('hero'), portrait('a')];
     const raw = {
       style: 'classic',
@@ -421,10 +421,37 @@ describe('repairTextCoverage (unified-book plan)', () => {
         { title: 'B', pages: [{ type: 'text', from: 0, to: 2 }, { template: 'full-framed', assetIds: ['a'] }] },
       ],
     };
-    const result = coercePhotoBookPlan(raw, { photos, fallbackTitle: 'Buch', fallbackStyle: 'classic' });
+    const result = coercePhotoBookPlan(raw, {
+      photos,
+      fallbackTitle: 'Buch',
+      fallbackStyle: 'classic',
+      stories: [{ storyId: 's1' }],
+    });
     expect(result).not.toBeNull();
     expect(result!.plan.sections[0].pages).toEqual([{ template: 'text', from: 0, to: 5 }]);
     expect(result!.plan.sections[1].pages).toHaveLength(1);
     expect(result!.plan.sections[1].pages[0].template).toBe('full-framed');
+  });
+
+  it('coerce strips a hallucinated storyId (and its text) when the caller declared no stories', () => {
+    // The live photo-book design pass passes no `stories`. Without this gate a model
+    // that invented a storyId would get it persisted — and the renderer would then emit
+    // a table of contents for chapters that don't exist.
+    const photos = [landscape('hero'), portrait('a')];
+    const raw = {
+      style: 'classic',
+      cover: { heroAssetId: 'hero', title: 'Buch' },
+      sections: [
+        {
+          title: 'A',
+          storyId: 'made-up',
+          pages: [{ template: 'text', from: 0, to: 5 }, { template: 'full-framed', assetIds: ['a'] }],
+        },
+      ],
+    };
+    const result = coercePhotoBookPlan(raw, { photos, fallbackTitle: 'Buch', fallbackStyle: 'classic' });
+    expect(result).not.toBeNull();
+    expect(result!.plan.sections[0].storyId).toBeUndefined();
+    expect(result!.plan.sections[0].pages).toEqual([{ template: 'full-framed', assetIds: ['a'] }]);
   });
 });

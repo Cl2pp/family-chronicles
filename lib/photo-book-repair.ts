@@ -63,6 +63,13 @@ export interface PhotoBookCoerceInput {
   photos: LintPhoto[];
   fallbackTitle: string;
   fallbackStyle: PhotoBookStyle;
+  /** The book's story chapters (unified-book plan). Story content is only accepted when
+   *  the caller declares it: without this, a `storyId` (and any text run under it) the
+   *  model invented is stripped rather than persisted — otherwise a hallucinated id
+   *  would slip past `checkPhotoBookPlanConsistency` (which skips every text rule when
+   *  it gets no `stories`) and make the renderer emit a TOC for chapters that
+   *  don't exist. Only ids present here survive. */
+  stories?: Array<{ storyId: string }>;
 }
 
 /**
@@ -80,6 +87,7 @@ export function coercePhotoBookPlan(
   if (rawSections.length === 0 && !obj.cover) return null;
 
   const byId = new Map(input.photos.map((p) => [p.assetId, p]));
+  const knownStoryIds = new Set((input.stories ?? []).map((s) => s.storyId));
   const changes: string[] = [];
 
   const styleValue = asString(obj.style);
@@ -105,7 +113,12 @@ export function coercePhotoBookPlan(
     const s = rawSection as Record<string, unknown>;
     const title = asString(s.title) ?? `Kapitel ${si + 1}`;
     const dateLabel = asString(s.dateLabel);
-    const storyId = asString(s.storyId);
+    const claimedStoryId = asString(s.storyId);
+    // Only a story the CALLER declared may be referenced — see `stories` above.
+    const storyId = claimedStoryId && knownStoryIds.has(claimedStoryId) ? claimedStoryId : null;
+    if (claimedStoryId && !storyId) {
+      changes.push(`stripped unknown story ${claimedStoryId} from "${title}"`);
+    }
 
     const pages: PhotoFlowItem[] = [];
     for (const rawPage of asArray(s.pages)) {

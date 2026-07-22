@@ -390,6 +390,16 @@ export function applyPhotoLayoutOp(
       // if any op after a merge_sections addresses a section/page by index, so this
       // function never actually sees that combination — merge_sections is always the last
       // (or only) op it's asked to apply.
+      // Merging a story chapter would orphan its text: the removed section's `storyId`
+      // goes away with it, so its text runs would end up slicing the TARGET's story (or
+      // no story at all). Photo sections merge freely; chapters must be reorganised by a
+      // redesign, not by folding two stories into one section.
+      if (removed.storyId || plan.sections[intoIndex].storyId) {
+        return {
+          error:
+            'Sections that hold story text cannot be merged — their text belongs to one specific story. Move photo pages between them instead, or redesign the book.',
+        };
+      }
       const adjustedInto = sectionIndex < intoIndex ? intoIndex - 1 : intoIndex;
       sections[adjustedInto] = {
         ...sections[adjustedInto],

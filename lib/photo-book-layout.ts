@@ -90,6 +90,13 @@ export const PHOTO_BOOK_BLEED_MM = 3;
  *  never more (bounding worker memory) and never less (bounding visible upscaling). */
 export const PHOTO_BOOK_CONTENT_MARGIN_MM = { top: 14, bottom: 16, inner: 16, outer: 14 } as const;
 
+/** Side margin (from the trim edge) of a flowing TEXT page — symmetric on purpose: a
+ *  mirrored inner/outer named page needs `@page text-flow:left/:right` variants, the
+ *  feature most likely to trip Chromium's print engine or Paged.js, and the photo pages
+ *  themselves only carry a 2mm inner/outer asymmetry. Set to the wider (inner/gutter)
+ *  of the two photo-page margins so text never sits closer to the spine than a photo. */
+const TEXT_SIDE_MARGIN_MM = PHOTO_BOOK_CONTENT_MARGIN_MM.inner;
+
 const esc = (s: string) =>
   s
     .replaceAll('&', '&amp;')
@@ -566,34 +573,57 @@ ${styleVarsCss(style)}
        page). So all three variants now share this one mechanism. */
     margin: 0;
   }
+${
+  !hasChapters
+    ? ''
+    : `
   /* The ONE exception (unified-book plan; spike-validated in both Chromium print and
      Paged.js): flowing story text lives on this named page, which carries real margins
      — flowed content can't use element padding (it applies once, not per page) — and
      the folio margin box. Nothing here needs to reach a sheet edge, so the documented
      named-page trailing-edge bug doesn't apply; the Paged.js stall was with MANY
-     scattered named rules, and this document has exactly one. Symmetric side margins on
-     purpose (mirrored inner/outer named-page variants are the riskiest feature in both
-     engines, and photo pages only carry a 2mm asymmetry anyway). */
+     scattered named rules, and this document has exactly one.
+
+     Emitted ONLY for a book that actually has story chapters: a pure photo book keeps
+     the single-unnamed-@page document it always had, so it can't be exposed to any
+     named-page risk for a feature it doesn't use. */
   @page text-flow {
-    margin: ${m.top}mm 16mm ${m.bottom + 2 + bleed}mm;${
+    /* Every side measured from the TRIM edge with bleed added on top, exactly like the
+       m object above — so a text page's physical content area is IDENTICAL in screen,
+       preview and print. Getting this wrong doesn't just shift the text: a different
+       column width means different line breaks, which means the print PDF paginates
+       differently from the proof the reader approved. The extra 2mm at the bottom is
+       the folio's room. */
+    margin: ${m.top}mm ${TEXT_SIDE_MARGIN_MM + bleed}mm ${m.bottom + 2}mm;${
       style.pageNumberStyle === 'center'
         ? `
     @bottom-center { content: counter(page); font-family: var(--pb-font-body); font-size: 8pt; color: var(--pb-color-muted); }`
         : ''
     }
-  }
+  }`
+}
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
     font-family: var(--pb-font-body);
     font-size: 10.5pt;
     line-height: 1.5;
-    color: var(--pb-color-text);
+    color: var(--pb-color-text);${
+      !hasChapters
+        ? ''
+        : `
     /* Text pages have no full-sheet section painting them — the page canvas gets its
-       color from the root background (print engines propagate it to every page). */
-    background: var(--pb-page-bg);
+       color from the root background (print engines propagate it to every page). Only
+       for books with chapters: on a pure photo book every page paints itself, and
+       propagating a background would recolor the frame strip around each photo page —
+       a visible restyle of books whose proofs are already approved. */
+    background: var(--pb-page-bg);`
+    }
   }
-
+${
+  !hasChapters
+    ? ''
+    : `
   /* ---- Flowing story text (unified-book plan) ---- */
   .text-flow { page: text-flow; }
   .text-flow p {
@@ -622,7 +652,8 @@ ${styleVarsCss(style)}
     padding: 1.8mm 0; border-bottom: 0.2mm solid color-mix(in srgb, var(--pb-color-muted) 30%, transparent);
     font-size: 10pt;
   }
-  .pb-toc-date { color: var(--pb-color-muted); white-space: nowrap; }
+  .pb-toc-date { color: var(--pb-color-muted); white-space: nowrap; }`
+}
 
   .page { page-break-after: always; background: var(--pb-page-bg); }
 

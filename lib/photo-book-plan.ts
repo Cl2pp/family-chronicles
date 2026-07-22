@@ -295,6 +295,12 @@ export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: Phot
   const sectionsByStory = new Map<string, number>();
 
   for (const section of plan.sections) {
+    // Counted BEFORE the empty-section bail: a story whose only section happens to be
+    // empty still HAS a section, and reporting it as "missing" on top of "has no pages"
+    // would send a repair pass chasing the wrong problem.
+    if (section.storyId) {
+      sectionsByStory.set(section.storyId, (sectionsByStory.get(section.storyId) ?? 0) + 1);
+    }
     if (section.pages.length === 0) {
       problems.push(`Section "${section.title}" has no pages`);
       continue;
@@ -319,9 +325,6 @@ export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: Phot
         );
       }
       for (const id of page.assetIds) reference(id, `Section "${section.title}"`);
-    }
-    if (section.storyId) {
-      sectionsByStory.set(section.storyId, (sectionsByStory.get(section.storyId) ?? 0) + 1);
     }
   }
 

@@ -4,7 +4,7 @@ import { getObjectBuffer } from '@/lib/s3';
 import { renderPhotoBookHtml, type PhotoLayoutImage } from '@/lib/photo-book-layout';
 import { embeddedFontFaceCss } from '@/lib/photo-book-fonts';
 import { referencedPhotoAssetIds, type LoadedPhotoBook } from '@/lib/photo-book-content';
-import type { PhotoBookPlan } from '@/lib/photo-book-plan';
+import { isTextItem, type PhotoBookPlan } from '@/lib/photo-book-plan';
 import type { PhotoBookLintFinding } from '@/lib/photo-book-lint';
 
 /**
@@ -87,10 +87,19 @@ export function planPageLabels(plan: PhotoBookPlan): {
   indexOf: (sectionIndex: number, pageIndex: number) => number | null;
 } {
   const labels: string[] = ['front cover', 'back cover'];
+  // The renderer emits a TOC page (also a `section.page`) right after the back cover
+  // whenever the book has story chapters — it must occupy a slot here too, or every
+  // later label points at the DOM element before the one it names.
+  if (plan.sections.some((s) => s.storyId)) labels.push('table of contents');
   const map = new Map<string, number>();
   plan.sections.forEach((section, si) => {
     labels.push(`section ${si} ("${section.title}") — divider`);
-    section.pages.forEach((_, pi) => {
+    section.pages.forEach((page, pi) => {
+      // A text run is NOT a `section.page` element (it's a `.text-flow` that spans as
+      // many print pages as its paragraphs need), so it takes no slot in this flat
+      // index — and `indexOf` returns null for it, which makes `flaggedPageIndices`
+      // skip text findings rather than screenshot an unrelated page.
+      if (isTextItem(page)) return;
       map.set(`${si}:${pi}`, labels.length);
       labels.push(`section ${si} ("${section.title}"), page ${pi}`);
     });
