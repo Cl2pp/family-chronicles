@@ -287,8 +287,13 @@ down (photos are never cropped — only `full-bleed` crops, slightly, by design)
 photo pages share one constant page frame (`PHOTO_BOOK_CONTENT_MARGIN_MM`); only the
 covers and section dividers bleed edge-to-edge.
 
-**Unified-book engine (PR C):** every book now renders through this stack. The fork is
-the SHAPE OF THE STORED PLAN, not `books.kind` — `bookEngineFor` (`lib/book-plan-kind.ts`)
+**Unified-book engine (PR C–F):** every book renders through this stack, and the legacy
+story-book engine has been DELETED (PR F: `lib/book-layout*.ts`, `book-autolayout.ts`,
+`book-ai-layout.ts`, the old builder/chat, and migration `0025` which cleared any
+remaining legacy plan so those books rebuild here). `lib/book-content.ts` is reduced to
+the shared pure helpers (`TRIM`, `paragraphs`, `eventLabel`, `orientedDimensions`);
+`lib/photo-book-content.ts` is the one loader. The historical fork below is kept for
+context — it described the transition, and the plan SHAPE (not `books.kind`) — `bookEngineFor` (`lib/book-plan-kind.ts`)
 routes a book still holding an old `LayoutPlan` to the retired story renderer so existing
 memoir books keep their exact look, and everything else (including a book with no plan
 yet) to this one. Conversion is an explicit, confirmed user action

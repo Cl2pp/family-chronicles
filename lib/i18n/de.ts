@@ -662,17 +662,6 @@ export const de: Dictionary = {
       deleteConfirmBody:
         'Das entfernt das Buch und sein Layout dauerhaft. Deine Geschichten und Fotos bleiben erhalten — du kannst jederzeit ein neues Buch daraus erstellen.',
       deleteConfirm: 'Endgültig löschen',
-      upgrade: {
-        title: 'Neues Layout verfügbar',
-        body: 'Dieses Buch nutzt noch unser altes Layout. Das neue gestaltet eigene Fotoseiten, setzt den Text sauberer und bietet sechs Stile zur Auswahl.',
-        caveat: 'Inhalt, Titel und Reihenfolge bleiben erhalten. Die Gestaltung wird komplett neu gebaut — frühere Layout-Änderungen an diesem Buch gehen dabei verloren.',
-        cta: 'Auf das neue Layout umstellen',
-        confirmTitle: 'Layout dieses Buchs neu aufbauen?',
-        confirm: 'Umstellen',
-        cancel: 'Abbrechen',
-        working: 'Wird umgestellt…',
-        failed: 'Die Umstellung hat nicht geklappt. Versuch es bitte noch einmal.',
-      },
       theme: 'Stil',
       themeOptions: {
         classic: 'Klassisch',

@@ -5,32 +5,23 @@ import type { BookStatus } from './books';
 const NOT_PREVIEW_READY: BookStatus[] = ['draft', 'rendering', 'render_failed'];
 
 describe('isBookPrintFresh', () => {
-  it('is fresh for an ordered book regardless of status oddities or staleness', () => {
-    expect(isBookPrintFresh('legacy', 'ordered', false)).toBe(true);
-    expect(isBookPrintFresh('unified', 'ordered', true)).toBe(true);
+  it('is fresh for an ordered book regardless of staleness', () => {
+    expect(isBookPrintFresh('ordered', false)).toBe(true);
+    expect(isBookPrintFresh('ordered', true)).toBe(true);
   });
 
   it('is never fresh outside preview_ready/ordered', () => {
     for (const status of NOT_PREVIEW_READY) {
-      expect(isBookPrintFresh('legacy', status, false)).toBe(false);
-      expect(isBookPrintFresh('unified', status, false)).toBe(false);
-      expect(isBookPrintFresh('unified', status, true)).toBe(false);
+      expect(isBookPrintFresh(status, false)).toBe(false);
+      expect(isBookPrintFresh(status, true)).toBe(false);
     }
   });
 
-  it('a preview_ready LEGACY book is fresh regardless of layoutStale', () => {
-    // The legacy story path never maintained `layoutStale` — it downgrades `status`
-    // back to `draft` on any content change (`invalidatePreview`), so the flag alone
-    // must not gate those books.
-    expect(isBookPrintFresh('legacy', 'preview_ready', false)).toBe(true);
-    expect(isBookPrintFresh('legacy', 'preview_ready', true)).toBe(true);
-  });
-
-  it('a preview_ready UNIFIED book is fresh only when not layoutStale', () => {
-    // Keyed on the engine, not `books.kind`: a story-ENTRY book (kind 'story') now runs
-    // on the unified engine, which does maintain `layoutStale`, so it must be honoured —
-    // gating on kind here would have served stale print PDFs for every new book.
-    expect(isBookPrintFresh('unified', 'preview_ready', false)).toBe(true);
-    expect(isBookPrintFresh('unified', 'preview_ready', true)).toBe(false);
+  it('a preview_ready book is fresh only when its plan has not gone stale', () => {
+    // Every book maintains `layoutStale` now that one engine renders them all — the
+    // old kind/engine parameter existed only for the retired story path, which relied
+    // on `invalidatePreview()` alone.
+    expect(isBookPrintFresh('preview_ready', false)).toBe(true);
+    expect(isBookPrintFresh('preview_ready', true)).toBe(false);
   });
 });

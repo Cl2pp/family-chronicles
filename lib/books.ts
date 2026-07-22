@@ -23,7 +23,6 @@ import { canContribute, type AccessRole } from '@/lib/permissions';
 import { MAX_PHOTOS_PER_BOOK } from '@/lib/uploads';
 import { deleteObject } from '@/lib/s3';
 import {
-  enqueueDesignBook,
   enqueueDesignPhotoBook,
   enqueuePhotoMeta,
   enqueueRenderBook,
@@ -31,24 +30,6 @@ import {
 } from '@/lib/queue';
 import { enqueuePendingPhotoVisionBatches } from '@/lib/photo-vision';
 import { quoteBookPrice, type BookCoverType, type BookFormat, type BookQuote } from '@/lib/gelato';
-import {
-  buildAndPersistAutoPlan,
-  loadBook,
-  loadOrBuildPlan,
-  paragraphs,
-  type LoadedBook,
-} from '@/lib/book-content';
-import {
-  checkPlanConsistency,
-  validateLayoutPlan,
-  type Block,
-  type CoverStyle,
-  type FigureSize,
-  type LayoutPlan,
-  type LayoutTheme,
-  type PlanContent,
-} from '@/lib/book-layout-plan';
-import { isLegacyStoryPlan } from '@/lib/book-plan-kind';
 import {
   buildAndPersistPhotoAutoPlan,
   countPhotoBookPages,
@@ -285,9 +266,8 @@ export interface BookDetail {
   /** Who last wrote the layout plan: the heuristic auto-layouter, an AI design pass, or a
    *  manual edit (manual edits are phase 4; the type already allows for them). */
   layoutSource: 'auto' | 'ai' | 'edited';
-  /** The stored layout plan, untyped — read ONLY to decide which engine renders this
-   *  book (`bookEngineFor`, `lib/book-plan-kind.ts`). Callers that need the plan's
-   *  contents validate it themselves. */
+  /** The stored layout plan, untyped. Callers that need its contents validate it
+   *  themselves (`validatePhotoBookPlan`). */
   layoutPlan: unknown;
   /** True when the book's content changed since `layoutPlan` was built (a photo was
    *  added/excluded, a chat op touched the plan) — the render/download flow uses this to
@@ -850,11 +830,6 @@ export async function editablePhotoBook(
     .where(eq(books.id, bookId))
     .limit(1);
   if (!row) return err('Book not found.');
-  // Engine gate, not a kind gate: these mutations belong to the unified builder, which
-  // now serves EVERY book except one still holding a legacy story-book plan (those keep
-  // the old builder until their owner converts). Gating on `kind` here would have left
-  // every story-entry book in a builder whose controls all failed.
-  if (isLegacyStoryPlan(row.layoutPlan)) return err('This book still uses the old layout — switch it to the new layout first.');
   const gate = await ensureBookAccess(row.chronicleId, userId);
   if (!gate.ok) return gate;
   if (row.status === 'ordered') {
@@ -1068,7 +1043,6 @@ export async function listBookPhotos(
     .where(eq(books.id, bookId))
     .limit(1);
   if (!row) return err('Book not found.');
-  if (isLegacyStoryPlan(row.layoutPlan)) return err('This book still uses the old layout — switch it to the new layout first.');
   const m = await getMembership(row.chronicleId, userId);
   if (!m) return err('Book not found.');
 
@@ -1179,7 +1153,6 @@ export async function getPhotoBookStyle(
     .where(eq(books.id, bookId))
     .limit(1);
   if (!row) return err('Book not found.');
-  if (isLegacyStoryPlan(row.layoutPlan)) return err('This book still uses the old layout — switch it to the new layout first.');
   const m = await getMembership(row.chronicleId, userId);
   if (!m) return err('Book not found.');
 
@@ -1526,7 +1499,6 @@ export async function getPhotoBookSummary(bookId: string, userId: string): Promi
     .where(eq(books.id, bookId))
     .limit(1);
   if (!row) return err('Book not found.');
-  if (isLegacyStoryPlan(row.layoutPlan)) return err('This book still uses the old layout — switch it to the new layout first.');
   const m = await getMembership(row.chronicleId, userId);
   if (!m) return err('Book not found.');
 
@@ -1740,6 +1712,32 @@ export async function updatePhotoBookLayout(input: {
 
     return { ok: true };
   });
+}
+
+/**
+ * Marks every book containing this story as needing a fresh print render — its prose is
+ * printed content, so an edit to it makes any rendered PDF wrong. Deliberately does NOT
+ * set `layoutStale`: the layout still matches the book's structure, only the words
+ * changed, and flagging the plan stale would make an AI-designed book fall back to a
+ * repair pass it doesn't need. Best-effort; never fails the caller's own write.
+ */
+export async function invalidateBooksForStory(storyId: string): Promise<void> {
+  try {
+    await db
+      .update(books)
+      .set({ status: 'draft', updatedAt: new Date() })
+      .where(
+        and(
+          eq(books.status, 'preview_ready'),
+          inArray(
+            books.id,
+            db.select({ id: bookStories.bookId }).from(bookStories).where(eq(bookStories.storyId, storyId)),
+          ),
+        ),
+      );
+  } catch (e) {
+    console.error(`[books] could not invalidate books for story ${storyId}:`, e);
+  }
 }
 
 /** Guard shared by every mutation: member, contributor, and the book not locked.
@@ -2015,39 +2013,27 @@ export async function requestPreview(input: {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
 
-  // Photo books (docs/PHOTO_BOOK_PLAN.md PR5): a separate branch, not a rewrite of the
-  // story checks below — a photo book has no `chapters`/`hiddenChapterCount` (book_stories
-  // stays empty for it) and, unlike a story book, is never opened by a viewer with partial
-  // access (§2: "every chronicle member with access to the book sees them"), so neither of
-  // the story-only checks below applies.
-  if (!isLegacyStoryPlan(gate.book.layoutPlan)) {
-    // Already fresh — nothing to (re-)render. Lets the "Download PDF" flow call this
-    // unconditionally before serving the PDF without forcing a wasteful Chromium re-run
-    // on a book whose print PDF already matches its current content.
-    if (gate.book.status === 'preview_ready' && !gate.book.layoutStale) return { ok: true };
-    const [{ count }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(bookPhotos)
-      .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.excluded, false)));
-    if (!count) return err('Add at least one photo before rendering.');
-    if (gate.book.status === 'rendering') return err('A preview is already being rendered.');
+  // Already fresh — nothing to (re-)render. Lets the "Download PDF" flow call this
+  // unconditionally before serving the PDF without forcing a wasteful Chromium re-run
+  // on a book whose print PDF already matches its current content.
+  if (gate.book.status === 'preview_ready' && !gate.book.layoutStale) return { ok: true };
 
-    await db
-      .update(books)
-      .set({ status: 'rendering', errorMessage: null, updatedAt: new Date() })
-      .where(eq(books.id, input.bookId));
-    await enqueueRenderBook({ bookId: input.bookId });
-    return { ok: true };
-  }
-
-  // The rendered PDF physically contains EVERY chapter — all-or-nothing: only
-  // someone who can read all of the book's stories may trigger (and later fetch) it.
+  // The rendered PDF physically contains EVERY chapter — all-or-nothing: only someone
+  // who can read all of the book's stories may trigger (and later fetch) it. Vacuous for
+  // a book built purely from uploads, which has no chapters to hide.
   if (gate.book.hiddenChapterCount > 0) {
     return err(
       "Some of this book's chapters are stories you don't have access to — the print PDF contains every chapter, so only someone who can read all of them can render or order it.",
     );
   }
-  if (gate.book.chapters.length === 0) return err('Add at least one story before rendering.');
+
+  const [{ count: photoCount }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(bookPhotos)
+    .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.excluded, false)));
+  if (!photoCount && gate.book.chapters.length === 0) {
+    return err('Add at least one photo or story before rendering.');
+  }
   if (gate.book.status === 'rendering') return err('A preview is already being rendered.');
 
   await db
@@ -2056,498 +2042,6 @@ export async function requestPreview(input: {
     .where(eq(books.id, input.bookId));
   await enqueueRenderBook({ bookId: input.bookId });
   return { ok: true };
-}
-
-/**
- * Queue the AI design pass (docs/BOOK_LAYOUT_PLAN.md §5, producer #2): a vision model
- * looks at the book's actual photos and proposes a new layout plan, replacing the
- * current one (AI's plan on success, a freshly-built auto plan on failure — see the
- * `design-book` worker handler, `lib/book-ai-layout.ts`). Does NOT touch `status` or
- * the print PDFs: the builder's own preview is live HTML and picks up the new plan on
- * its next request; the stored print proof is separately invalidated by the layout
- * change becoming visible (its `layoutStale`/content-changed handling already covers
- * this — a design pass doesn't remove or add stories, only rearranges existing ones).
- *
- * Consent guard: if the plan currently in place was a manual edit (`layoutSource ===
- * 'edited'` — see `updateBookLayout` below), the caller must pass
- * `overwriteEdits: true` to proceed.
- */
-export async function requestAiDesign(input: {
-  bookId: string;
-  userId: string;
-  overwriteEdits?: boolean;
-}): Promise<Result> {
-  const gate = await editableBook(input.bookId, input.userId);
-  if (!gate.ok) return gate;
-  const hidden = hiddenChaptersError(gate.book);
-  if (hidden) return hidden;
-  // A legacy book must never be redesigned in place: the design pass writes a UNIFIED
-  // plan, which would silently convert the book and throw away the very look this
-  // fork exists to preserve. Converting is the user's explicit call
-  // (`convertBookToUnifiedLayout`), never a side effect of pressing "Design my book".
-  if (isLegacyStoryPlan(gate.book.layoutPlan)) {
-    return err(
-      'This book still uses the old layout. Switch it to the new layout first — then the AI can design it.',
-    );
-  }
-  if (gate.book.chapters.length === 0) return err('Add at least one story before designing.');
-  if (gate.book.designRequestedAt) return err('An AI design pass is already running for this book.');
-  if (gate.book.layoutSource === 'edited' && !input.overwriteEdits) {
-    return err(
-      'This book\'s layout has manual edits. Designing it again with AI would replace them — try again to confirm.',
-    );
-  }
-
-  await db.update(books).set({ designRequestedAt: new Date() }).where(eq(books.id, input.bookId));
-  await enqueueDesignBook({ bookId: input.bookId });
-  return { ok: true };
-}
-
-/**
- * Rebuild the deterministic auto plan on demand — the "Reset layout" action. Same
- * consent guard as `requestAiDesign`: an `edited` plan requires `overwriteEdits: true`.
- * Theme/cover style/pinned hero still carry over (see `buildAndPersistAutoPlan`) — this
- * resets photo *placement* back to the heuristic default, not the user's design choices.
- */
-export async function resetBookLayout(input: {
-  bookId: string;
-  userId: string;
-  overwriteEdits?: boolean;
-}): Promise<Result> {
-  const gate = await editableBook(input.bookId, input.userId);
-  if (!gate.ok) return gate;
-  const hidden = hiddenChaptersError(gate.book);
-  if (hidden) return hidden;
-  if (gate.book.chapters.length === 0) return err('Add at least one story before resetting the layout.');
-  if (gate.book.layoutSource === 'edited' && !input.overwriteEdits) {
-    return err(
-      'This book\'s layout has manual edits. Resetting it would replace them — try again to confirm.',
-    );
-  }
-  const loaded = await loadBook(input.bookId);
-  await buildAndPersistAutoPlan(input.bookId, loaded);
-  return { ok: true };
-}
-
-
-/**
- * Converts a legacy story book to the unified engine (unified-book plan, PR C).
- *
- * Existing memoir books keep their exact current look until their owner asks for the
- * change — this is that ask. Conversion is deliberately just "drop the legacy plan":
- * `bookEngineFor` then routes the book to the unified engine, and the next preview load
- * builds a fresh plan from the same chapters and photos (`loadOrBuildPhotoPlan`). The
- * book's own settings — title, subtitle, dedication, format, cover pin, and which
- * stories are attached with which include flags — are columns and survive untouched.
- *
- * What visibly changes, and is worth telling the user before they confirm: the old
- * two-theme typography is replaced by the matching style suite (classic stays classic,
- * modern stays modern), photos that used to float inside the text become designed photo
- * pages, and pagination shifts. Any hand-edited or AI-designed story layout is replaced
- * by a fresh automatic one — old story-plan edits cannot be carried across the schema
- * change, which is exactly why this is an explicit action rather than a migration.
- *
- * Irreversible in practice (the old plan is not kept), so the caller must confirm.
- */
-export async function convertBookToUnifiedLayout(input: {
-  bookId: string;
-  userId: string;
-}): Promise<Result> {
-  const gate = await editableBook(input.bookId, input.userId);
-  if (!gate.ok) return gate;
-  const hidden = hiddenChaptersError(gate.book);
-  if (hidden) return hidden;
-  if (!isLegacyStoryPlan(gate.book.layoutPlan)) {
-    return err('This book already uses the current layout engine.');
-  }
-
-  const legacy = validateLayoutPlan(gate.book.layoutPlan);
-  // Carry the theme across by name — the two story themes exist as same-named style
-  // suites, so a classic memoir stays classic. Everything else about the old plan
-  // (blocks, figure sizes, cover style) has no equivalent and is deliberately dropped.
-  const style: PhotoBookStyle = legacy.ok && legacy.plan.theme === 'modern' ? 'modern' : 'classic';
-
-  await db
-    .update(books)
-    .set({
-      ...invalidatePreview(),
-      layoutPlan: null,
-      layoutSource: 'auto',
-      layoutStale: true,
-      // Photo books gate their builder on this; a converted book has content already, so
-      // it must not fall back to the "not generated yet" view.
-      generatedAt: gate.book.generatedAt ?? new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(books.id, input.bookId));
-
-  // Persist the carried-over style by seeding a plan built with it — the auto-layouter
-  // reads `existingStyle` from the stored plan, which we just cleared, so hand it over
-  // explicitly on this one build.
-  const loaded = await loadPhotoBook(input.bookId);
-  await buildAndPersistPhotoAutoPlan(input.bookId, loaded, { style });
-  return { ok: true };
-}
-
-/* ──────────────────────────────────────────────────────────────────────────
- * Layout editing — targeted, validated mutations of the stored plan
- * (docs/BOOK_LAYOUT_PLAN.md §6 phase 4). The builder UI and the chat agent's
- * `update_book_layout` tool are both thin wrappers over `updateBookLayout`.
- * ────────────────────────────────────────────────────────────────────────── */
-
-export type LayoutOp =
-  | { op: 'set_theme'; theme: LayoutTheme }
-  | { op: 'set_cover_style'; style: CoverStyle }
-  | { op: 'set_cover_hero'; assetId: string }
-  | { op: 'set_figure_size'; assetId: string; size: FigureSize }
-  | { op: 'promote_photo_page'; assetId: string }
-  | { op: 'demote_photo_page'; assetId: string }
-  | { op: 'move_block'; storyId: string; blockIndex: number; direction: 'up' | 'down' };
-
-type ImageBlock = Extract<Block, { type: 'figure' | 'photo-page' | 'photo-row' | 'photo-grid' }>;
-
-function isImageBlock(block: Block): block is ImageBlock {
-  return block.type !== 'paragraphs';
-}
-
-/** Where `assetId` currently sits in a chapter's block list: alone (figure/photo-page) or
- *  as one member of a group (photo-row/photo-grid), which carries the group's full id list
- *  so the caller can compute what remains after extracting it. */
-type ImageLocation =
-  | { kind: 'single'; blockIndex: number }
-  | { kind: 'group'; blockIndex: number; groupAssetIds: string[] };
-
-function findImageLocation(blocks: Block[], assetId: string): ImageLocation | null {
-  for (let i = 0; i < blocks.length; i++) {
-    const b = blocks[i];
-    if ((b.type === 'figure' || b.type === 'photo-page') && b.assetId === assetId) {
-      return { kind: 'single', blockIndex: i };
-    }
-    if ((b.type === 'photo-row' || b.type === 'photo-grid') && b.assetIds.includes(assetId)) {
-      return { kind: 'group', blockIndex: i, groupAssetIds: b.assetIds };
-    }
-  }
-  return null;
-}
-
-/** The block the remaining images of a row/grid collapse into once one is extracted —
- *  1 left => a full figure, 2 left => a photo-row, 3+ left => a (still valid) photo-grid. */
-function collapsedGroupBlock(remainingAssetIds: string[]): Block {
-  if (remainingAssetIds.length === 1) {
-    return { type: 'figure', assetId: remainingAssetIds[0], size: 'full' };
-  }
-  if (remainingAssetIds.length === 2) {
-    return { type: 'photo-row', assetIds: remainingAssetIds };
-  }
-  return { type: 'photo-grid', assetIds: remainingAssetIds };
-}
-
-/**
- * Replaces wherever `assetId` currently sits in `blocks` with `newBlock`, extracting it
- * from a photo-row/photo-grid first when needed — the remaining images of that group
- * collapse into a smaller, still-valid group (or a single figure) in the same spot, and
- * the new block for `assetId` is inserted right after it. Used by `set_figure_size` and
- * `promote_photo_page`, which both mean "this image becomes exactly this one block,
- * wherever it was."
- */
-function relocateImage(
-  blocks: Block[],
-  assetId: string,
-  newBlock: Block,
-): Block[] | { error: string } {
-  const loc = findImageLocation(blocks, assetId);
-  if (!loc) return { error: `That photo isn't currently placed in this book's layout.` };
-  const out = blocks.slice();
-  if (loc.kind === 'single') {
-    out[loc.blockIndex] = newBlock;
-    return out;
-  }
-  const remaining = loc.groupAssetIds.filter((id) => id !== assetId);
-  out.splice(loc.blockIndex, 1, collapsedGroupBlock(remaining), newBlock);
-  return out;
-}
-
-/** Swaps the image block at `blockIndex` with its neighbor among the chapter's OTHER
- *  image blocks — paragraph blocks never move, only the image blocks change slots
- *  around them (docs/BOOK_LAYOUT_PLAN.md §6 phase 4, `move_block`). */
-function moveImageBlock(
-  blocks: Block[],
-  blockIndex: number,
-  direction: 'up' | 'down',
-): Block[] | { error: string } {
-  if (blockIndex < 0 || blockIndex >= blocks.length || !isImageBlock(blocks[blockIndex])) {
-    return { error: 'That is not a photo block in this chapter.' };
-  }
-  const imageIndices = blocks.map((_, i) => i).filter((i) => isImageBlock(blocks[i]));
-  const pos = imageIndices.indexOf(blockIndex);
-  const targetPos = direction === 'up' ? pos - 1 : pos + 1;
-  if (targetPos < 0 || targetPos >= imageIndices.length) {
-    return { error: `That photo is already ${direction === 'up' ? 'first' : 'last'} among this chapter's photos.` };
-  }
-  const otherIndex = imageIndices[targetPos];
-  const out = blocks.slice();
-  [out[blockIndex], out[otherIndex]] = [out[otherIndex], out[blockIndex]];
-  return out;
-}
-
-/** Finds which chapter of the plan currently places `assetId` in an image block. */
-function findChapterForAsset(plan: LayoutPlan, assetId: string): number {
-  return plan.chapters.findIndex((c) => findImageLocation(c.blocks, assetId) != null);
-}
-
-/** Applies one `LayoutOp` to `plan`, returning the new plan or an error. Pure — no I/O,
- *  no DB access; `updateBookLayout` validates + persists the result once, after every op
- *  in the batch has applied cleanly. */
-function applyLayoutOp(
-  plan: LayoutPlan,
-  loaded: LoadedBook,
-  op: LayoutOp,
-): { plan: LayoutPlan; markEdited: boolean; coverAssetId?: string } | { error: string } {
-  switch (op.op) {
-    case 'set_theme': {
-      return { plan: { ...plan, theme: op.theme }, markEdited: false };
-    }
-    case 'set_cover_style': {
-      return { plan: { ...plan, cover: { ...plan.cover, style: op.style } }, markEdited: true };
-    }
-    case 'set_cover_hero': {
-      if (!loaded.allPhotosById.has(op.assetId)) {
-        return { error: 'The cover photo must belong to a story in this book.' };
-      }
-      return {
-        plan: { ...plan, cover: { ...plan.cover, heroAssetId: op.assetId } },
-        markEdited: true,
-        coverAssetId: op.assetId,
-      };
-    }
-    case 'set_figure_size': {
-      const chapterIdx = findChapterForAsset(plan, op.assetId);
-      if (chapterIdx === -1) return { error: `That photo isn't currently placed in this book's layout.` };
-      const result = relocateImage(plan.chapters[chapterIdx].blocks, op.assetId, {
-        type: 'figure',
-        assetId: op.assetId,
-        size: op.size,
-      });
-      if ('error' in result) return result;
-      const chapters = plan.chapters.slice();
-      chapters[chapterIdx] = { ...chapters[chapterIdx], blocks: result };
-      return { plan: { ...plan, chapters }, markEdited: true };
-    }
-    case 'promote_photo_page': {
-      const chapterIdx = findChapterForAsset(plan, op.assetId);
-      if (chapterIdx === -1) return { error: `That photo isn't currently placed in this book's layout.` };
-      const result = relocateImage(plan.chapters[chapterIdx].blocks, op.assetId, {
-        type: 'photo-page',
-        assetId: op.assetId,
-      });
-      if ('error' in result) return result;
-      const chapters = plan.chapters.slice();
-      chapters[chapterIdx] = { ...chapters[chapterIdx], blocks: result };
-      return { plan: { ...plan, chapters }, markEdited: true };
-    }
-    case 'demote_photo_page': {
-      const chapterIdx = plan.chapters.findIndex((c) =>
-        c.blocks.some((b) => b.type === 'photo-page' && b.assetId === op.assetId),
-      );
-      if (chapterIdx === -1) return { error: 'That photo does not currently have its own page.' };
-      const blocks = plan.chapters[chapterIdx].blocks.map((b) =>
-        b.type === 'photo-page' && b.assetId === op.assetId
-          ? ({ type: 'figure', assetId: op.assetId, size: 'full' } satisfies Block)
-          : b,
-      );
-      const chapters = plan.chapters.slice();
-      chapters[chapterIdx] = { ...chapters[chapterIdx], blocks };
-      return { plan: { ...plan, chapters }, markEdited: true };
-    }
-    case 'move_block': {
-      const chapterIdx = plan.chapters.findIndex((c) => c.storyId === op.storyId);
-      if (chapterIdx === -1) return { error: `No chapter with story id ${op.storyId} in this book.` };
-      const result = moveImageBlock(plan.chapters[chapterIdx].blocks, op.blockIndex, op.direction);
-      if ('error' in result) return result;
-      const chapters = plan.chapters.slice();
-      chapters[chapterIdx] = { ...chapters[chapterIdx], blocks: result };
-      return { plan: { ...plan, chapters }, markEdited: true };
-    }
-  }
-}
-
-/**
- * Applies one or more targeted layout ops to a book's plan (§6 phase 4's producer #3:
- * explicit edits). Builds an auto plan first if none exists yet (`loadOrBuildPlan`, same
- * as the live preview), applies every op in order, then validates the result against both
- * the schema and the book's current content before persisting — an op that would leave
- * the plan invalid is rejected and NOTHING is written, including the other ops in the same
- * batch, so the stored plan is never left half-mutated.
- *
- * Every op except `set_theme` sets `layout_source: 'edited'` and clears `layout_stale`;
- * `set_theme` never marks the plan edited, so a saved theme survives both auto and AI
- * regeneration exactly like a saved cover style (see `buildLayoutPlan`/`applyPlanCarryOver`).
- * Locked (ordered) books are rejected by `editableBook`, same as every other mutation.
- */
-export async function updateBookLayout(input: {
-  bookId: string;
-  userId: string;
-  ops: LayoutOp[];
-}): Promise<Result> {
-  const gate = await editableBook(input.bookId, input.userId);
-  if (!gate.ok) return gate;
-  const hidden = hiddenChaptersError(gate.book);
-  if (hidden) return hidden;
-  // Photo books have no layout plan yet (docs/PHOTO_BOOK_PLAN.md PR 2+) — `loadBook`
-  // below assumes a story book (>= 1 chapter) and throws otherwise.
-  if (gate.book.kind !== 'story') return err('This book has no layout plan yet.');
-  if (input.ops.length === 0) return { ok: true };
-
-  const loaded = await loadBook(input.bookId);
-  let plan = await loadOrBuildPlan(input.bookId, loaded);
-  let markEdited = false;
-  let coverAssetId: string | undefined;
-
-  for (const op of input.ops) {
-    const result = applyLayoutOp(plan, loaded, op);
-    if ('error' in result) return err(result.error);
-    plan = result.plan;
-    if (result.markEdited) markEdited = true;
-    if (result.coverAssetId !== undefined) coverAssetId = result.coverAssetId;
-  }
-
-  const validated = validateLayoutPlan(plan);
-  if (!validated.ok) return err(`That change would leave the layout invalid: ${validated.error}`);
-
-  const content: PlanContent = {
-    chapters: loaded.chapters.map((c) => ({
-      storyId: c.storyId,
-      paragraphCount: paragraphs(c.body).length,
-      assetIds: c.photoAssets.map((p) => p.id),
-    })),
-    allAssetIds: [...loaded.allPhotosById.keys()],
-  };
-  const problems = checkPlanConsistency(validated.plan, content);
-  if (problems.length > 0) {
-    return err(`That change would leave the layout invalid: ${problems.join('; ')}`);
-  }
-
-  const set: Partial<typeof books.$inferInsert> = {
-    layoutPlan: validated.plan,
-    updatedAt: new Date(),
-  };
-  if (markEdited) {
-    set.layoutSource = 'edited';
-    set.layoutStale = false;
-  }
-  if (coverAssetId !== undefined) set.coverAssetId = coverAssetId;
-
-  await db.update(books).set(set).where(eq(books.id, input.bookId));
-  return { ok: true };
-}
-
-export interface LayoutImageBlockSummary {
-  /** Index into that chapter's plan.blocks — what `move_block` takes as `blockIndex`. */
-  blockIndex: number;
-  assetId: string;
-  caption: string | null;
-  type: 'figure' | 'photo-row' | 'photo-grid' | 'photo-page';
-  /** Only set for `type: 'figure'`. */
-  size?: FigureSize;
-  /** Only set for `type: 'photo-row' | 'photo-grid'` — every assetId in that group,
-   *  including this one, in plan order. */
-  groupAssetIds?: string[];
-}
-
-export interface LayoutChapterSummary {
-  storyId: string;
-  images: LayoutImageBlockSummary[];
-}
-
-export interface BookLayoutSummary {
-  theme: LayoutTheme;
-  coverStyle: CoverStyle;
-  coverHeroAssetId: string | null;
-  chapters: LayoutChapterSummary[];
-}
-
-/**
- * The book's current layout plan, flattened into per-chapter image lists addressable by
- * the ops above — every image block's assetId, caption, current placement, and
- * `blockIndex`. Shared by the builder's Layout card (thumbnails + controls) and the
- * agent's `get_book` tool (so the model can address photos by id after just one read).
- * Read-only: does not build+persist a missing plan the way editing ops do, but still
- * needs SOME plan to summarize, so it reuses `loadOrBuildPlan` exactly like the live
- * preview route — a book with no stored plan yet gets a fresh auto plan, same as opening
- * the preview would.
- */
-export async function getBookLayoutSummary(
-  bookId: string,
-  userId: string,
-  accessCtx?: StoryAccessContext,
-): Promise<Result<BookLayoutSummary>> {
-  const book = await getBookForUser(bookId, userId, accessCtx);
-  if (!book) return err('Book not found.');
-  // Photo books have no layout plan yet (docs/PHOTO_BOOK_PLAN.md PR 2+) — `loadBook`
-  // below assumes a story book (>= 1 chapter) and throws otherwise.
-  if (book.kind !== 'story') return err('This book has no layout plan yet.');
-  const loaded = await loadBook(bookId);
-  const plan = await loadOrBuildPlan(bookId, loaded);
-
-  // Per-viewer: chapters hidden from `book.chapters` are dropped here too, so the
-  // summary never leaks a hidden chapter's photos or captions (builder Layout card
-  // and the agent's get_book both read this).
-  const visibleStories = new Set(book.chapters.map((c) => c.storyId));
-  const visiblePlanChapters =
-    book.hiddenChapterCount > 0
-      ? plan.chapters.filter((c) => visibleStories.has(c.storyId))
-      : plan.chapters;
-
-  const chapters: LayoutChapterSummary[] = visiblePlanChapters.map((chapterPlan) => {
-    const images: LayoutImageBlockSummary[] = [];
-    chapterPlan.blocks.forEach((block, blockIndex) => {
-      if (block.type === 'figure') {
-        images.push({
-          blockIndex,
-          assetId: block.assetId,
-          caption: loaded.allPhotosById.get(block.assetId)?.caption ?? null,
-          type: 'figure',
-          size: block.size,
-        });
-      } else if (block.type === 'photo-page') {
-        images.push({
-          blockIndex,
-          assetId: block.assetId,
-          caption: loaded.allPhotosById.get(block.assetId)?.caption ?? null,
-          type: 'photo-page',
-        });
-      } else if (block.type === 'photo-row' || block.type === 'photo-grid') {
-        for (const assetId of block.assetIds) {
-          images.push({
-            blockIndex,
-            assetId,
-            caption: loaded.allPhotosById.get(assetId)?.caption ?? null,
-            type: block.type,
-            groupAssetIds: block.assetIds,
-          });
-        }
-      }
-    });
-    return { storyId: chapterPlan.storyId, images };
-  });
-
-  // The hero photo may belong to a hidden chapter — don't hand its asset id
-  // to a viewer who can't see that chapter (it would let targeted layout ops
-  // address it, and ids should not leak across the access boundary at all).
-  const heroAssetId = plan.cover.heroAssetId ?? null;
-  const heroStoryId = heroAssetId ? loaded.allPhotosById.get(heroAssetId)?.storyId : null;
-  const heroHidden =
-    book.hiddenChapterCount > 0 && heroStoryId != null && !visibleStories.has(heroStoryId);
-
-  return {
-    ok: true,
-    value: {
-      theme: plan.theme,
-      coverStyle: plan.cover.style,
-      coverHeroAssetId: heroHidden ? null : heroAssetId,
-      chapters,
-    },
-  };
 }
 
 /** Price the book as it currently stands (uses rendered page count or an estimate). */
@@ -2585,7 +2079,7 @@ export async function quoteBook(input: {
 export async function estimatePageCount(
   book: Pick<BookDetail, 'id' | 'kind' | 'chapters' | 'layoutPlan'>,
 ): Promise<number> {
-  if (!isLegacyStoryPlan(book.layoutPlan)) {
+  {
     const loaded = await loadPhotoBook(book.id);
     const plan = await loadOrBuildPhotoPlan(book.id, loaded);
     return countPhotoBookPages(plan);

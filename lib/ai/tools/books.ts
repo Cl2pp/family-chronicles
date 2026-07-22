@@ -4,7 +4,6 @@ import {
   deleteBook,
   estimatePageCount,
   getBookForUser,
-  getBookLayoutSummary,
   listBooksForUser,
   quoteBook,
   requestPreview,
@@ -40,18 +39,12 @@ async function resolveBook(
 }
 
 /**
- * `get_book`'s JSON, optionally including the current layout plan's per-chapter image
- * blocks (assetId, caption, current placement, blockIndex) so the model can address a
- * specific photo with `update_book_layout` right after this one read — mirrors what the
- * builder's Layout card shows a human. Layout is fetched separately (it needs its own
- * DB round trip) and merged in by storyId; omitted (not an error) if it fails to load.
+ * `get_book`'s JSON: the book's settings and which stories are its chapters. The
+ * laid-out result — sections, pages, templates, photo assetIds — is a separate read
+ * (`get_book_layout`), since only the builder chat needs it and it costs its own
+ * queries.
  */
-async function bookSummary(book: BookDetail, userId: string, access?: StoryAccessContext) {
-  const layout = await getBookLayoutSummary(book.id, userId, access);
-  const imagesByStory = new Map(
-    layout.ok ? layout.value.chapters.map((c) => [c.storyId, c.images]) : [],
-  );
-
+async function bookSummary(book: BookDetail) {
   return {
     id: book.id,
     title: book.title,
@@ -66,21 +59,14 @@ async function bookSummary(book: BookDetail, userId: string, access?: StoryAcces
     // Chapters the acting user can't read (story access). When > 0, chapter
     // changes and the print/order flow are rejected for this user.
     hiddenChapterCount: book.hiddenChapterCount > 0 ? book.hiddenChapterCount : undefined,
-    theme: layout.ok ? layout.value.theme : undefined,
-    coverStyle: layout.ok ? layout.value.coverStyle : undefined,
-    coverHeroAssetId: layout.ok ? layout.value.coverHeroAssetId : undefined,
     chapters: book.chapters.map((c, i) => ({
       position: i + 1,
       storyId: c.storyId,
       title: c.title,
       year: c.eventDate ? c.eventDate.getUTCFullYear() : null,
       photos: c.photoCount,
+      includeText: c.includeText,
       includePhotos: c.includePhotos,
-      // Every image block the layout currently places for this chapter — use these
-      // assetIds with update_book_layout's set_figure_size/promote_photo_page/
-      // demote_photo_page/move_block ops. A photo with includePhotos off, or one the
-      // AI design pass chose not to place, simply won't appear here.
-      layoutImages: imagesByStory.get(c.storyId) ?? [],
     })),
   };
 }
@@ -113,11 +99,10 @@ export const listBooksTool = defineTool({
 export const getBookTool = defineTool({
   name: 'get_book',
   description:
-    'Read one book in full: settings (incl. theme, cover style, cover hero photo) plus the ' +
-    'ordered chapter list (each with storyId, title, year, photo count, and every photo the ' +
-    'current layout actually places — assetId, caption, and placement). Always call this before ' +
-    'changing a book, and specifically before calling update_book_layout, since that\'s how you ' +
-    'find the assetIds to address.',
+    'Read one book: its settings (title, subtitle, dedication, format, status, page count) and ' +
+    'its ordered chapter list — each with storyId, title, year, photo count, and whether that ' +
+    'chapter contributes its text and/or its photos. Call this before changing a book. The ' +
+    'laid-out result (sections, pages, photo assetIds) is a separate read, get_book_layout.',
   schema: z.object({
     book: z.string().min(1).describe('The book title (or id) to read.'),
   }),
@@ -126,7 +111,7 @@ export const getBookTool = defineTool({
     const access = await loadStoryAccessContext(ctx.userId);
     const found = await resolveBook(ctx, args.book, access);
     if ('error' in found) return { ok: false, error: found.error };
-    return { ok: true, message: JSON.stringify(await bookSummary(found.book, ctx.userId, access)) };
+    return { ok: true, message: JSON.stringify(await bookSummary(found.book)) };
   },
 });
 

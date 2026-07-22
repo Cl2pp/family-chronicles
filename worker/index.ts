@@ -18,7 +18,7 @@ import {
 } from '@/lib/queue';
 import { markRenderFailed, renderBook } from '@/lib/book-render';
 import { proposePhotoBookPlan } from '@/lib/photo-book-ai-layout';
-import { isLegacyStoryPlan } from '@/lib/book-plan-kind';
+import { validatePhotoBookPlan } from '@/lib/photo-book-plan';
 import type { PhotoBookDesignStage } from '@/lib/photo-book-design-stage';
 import { buildAndPersistPhotoAutoPlan, loadPhotoBook } from '@/lib/photo-book-content';
 import { styleStory } from '@/lib/ai/openrouter';
@@ -92,28 +92,27 @@ async function handleRenderBook(data: RenderBookJob) {
 /**
  * Run the AI design pass and persist whatever plan results: the AI's plan on success,
  * or a freshly-built auto-layout plan when the pass fails (invalid output, request
- * error, etc. — `proposeLayoutPlan` never throws, it returns null). Either way the
+ * error, etc. — `proposePhotoBookPlan` never throws, it returns null). Either way the
  * job always ends with `design_requested_at` cleared so the builder's poll stops, and
  * a fresh plan in place — the "Design my book" button never leaves the book worse off
  * than before it was clicked, only either improved or unchanged.
  */
 async function handleDesignBook(data: DesignBookJob) {
-  // Both design queues now run the SAME pass — the legacy `design-book` queue stays
-  // registered for one release so jobs enqueued before the unified deploy still drain.
+  // The legacy `design-book` queue stays registered for one release so jobs enqueued
+  // before the unified deploy still drain; every enqueue site targets the unified
+  // handler now.
   //
-  // A legacy book must never reach the unified pass: it writes a `PhotoBookPlan`, which
-  // would silently convert the book and destroy the look the legacy fork exists to
-  // preserve. `requestAiDesign` already refuses for those, so this is defense in depth
-  // for a job enqueued before that guard shipped — clear the in-flight flag and stop.
+  // Defense in depth for exactly that drain window: a job queued before the deploy could
+  // land on a book whose stored plan migration 0025 hasn't converted yet. Designing it
+  // would overwrite that plan. A plan that doesn't validate as a unified one is left
+  // alone — the migration (or the next regenerate) will deal with it.
   const [row] = await db
     .select({ layoutPlan: books.layoutPlan })
     .from(books)
     .where(eq(books.id, data.bookId))
     .limit(1);
-  if (row && isLegacyStoryPlan(row.layoutPlan)) {
-    console.log(
-      `[worker] design-book skipped for legacy book ${data.bookId} — it must be converted to the new layout first`,
-    );
+  if (row?.layoutPlan != null && !validatePhotoBookPlan(row.layoutPlan).ok) {
+    console.log(`[worker] design-book skipped for ${data.bookId}: its stored plan is not a unified plan`);
     await db.update(books).set({ designRequestedAt: null }).where(eq(books.id, data.bookId));
     return;
   }
