@@ -33,14 +33,23 @@ export async function analyzePhotoMeta(assetId: string): Promise<'done' | 'skipp
     .from(assets)
     .where(eq(assets.id, assetId))
     .limit(1);
-  if (!asset || asset.kind !== 'photo' || !asset.bookId) return 'skipped';
+  if (!asset || asset.kind !== 'photo') return 'skipped';
 
-  const [photo] = await db
+  // "In a book" means the asset has a `book_photos` row — NOT `assets.book_id`, which is
+  // only set for photos uploaded straight into a book. Since story photos mirror into
+  // `book_photos` (unified-book plan), a story-owned asset (`assets.book_id` NULL) can
+  // be in a book too, and gating on `book_id` would leave every story-sourced photo
+  // without capture time, GPS, phash or blur score — silently disabling time/place
+  // grouping and duplicate detection for exactly the photos this pass exists to serve.
+  // Mirrors the same widening in `lib/thumbnails.ts`.
+  const rows = await db
     .select({ id: bookPhotos.id, phash: bookPhotos.phash })
     .from(bookPhotos)
-    .where(eq(bookPhotos.assetId, assetId))
-    .limit(1);
-  if (!photo || photo.phash) return 'skipped';
+    .where(eq(bookPhotos.assetId, assetId));
+  if (rows.length === 0) return 'skipped';
+  // Already analyzed everywhere it appears — nothing to do. A single un-analyzed row
+  // (a fresh mirror of a photo already scored in another book) is enough to run.
+  if (rows.every((r) => r.phash)) return 'skipped';
 
   const buffer = await getObjectBuffer(asset.s3Key);
 
@@ -58,6 +67,11 @@ export async function analyzePhotoMeta(assetId: string): Promise<'done' | 'skipp
     computeBlurScore(image),
   ]);
 
+  // Written to EVERY row of this asset, not just one: the same photo can legitimately
+  // appear in several books once a story is attached to more than one (its mirrors are
+  // per book), and this metadata is asset-intrinsic — computing it once and storing it
+  // on an arbitrary single row would leave the others permanently blank. Mirrors what
+  // `lib/photo-vision.ts` already does for scores.
   await db
     .update(bookPhotos)
     .set({
@@ -68,7 +82,7 @@ export async function analyzePhotoMeta(assetId: string): Promise<'done' | 'skipp
       blurScore,
       updatedAt: new Date(),
     })
-    .where(eq(bookPhotos.id, photo.id));
+    .where(eq(bookPhotos.assetId, assetId));
 
   return 'done';
 }

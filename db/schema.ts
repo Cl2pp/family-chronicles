@@ -615,8 +615,8 @@ export const bookPhotos = pgTable(
     /** Provenance (unified-book plan, PR A): set when this row MIRRORS a photo of an
      *  attached story (`book_stories`), so every photo — uploaded or story-sourced —
      *  flows through the one analysis + layout pipeline. `null` = uploaded directly
-     *  into the book. Mirror rows are inserted/removed by `registerBookPhotos`/
-     *  `syncStoryPhotoMirrors` (`lib/books.ts`) as stories are attached/detached; the
+     *  into the book. Mirror rows are inserted/removed by `syncStoryPhotoMirrors`
+     *  (`lib/books.ts`) as stories are attached/detached; the
      *  cascade is belt-and-braces (deleting a story already cascades its assets, which
      *  cascades these rows via `asset_id`). */
     storyId: uuid('story_id').references(() => stories.id, { onDelete: 'cascade' }),
@@ -657,5 +657,10 @@ export const bookPhotos = pgTable(
     uniqueIndex('book_photos_book_asset_uq').on(t.bookId, t.assetId),
     index('book_photos_book_idx').on(t.bookId),
     index('book_photos_book_story_idx').on(t.bookId, t.storyId),
+    /** By ASSET: the analysis passes write metadata/scores to every row of an asset,
+     *  the thumbnail job probes "is this asset in any book", the mirror insert looks for
+     *  an analysis donor, and the `stories` FK cascade deletes by story — none of which
+     *  the book-leading indexes above can serve. */
+    index('book_photos_asset_idx').on(t.assetId),
   ],
 );

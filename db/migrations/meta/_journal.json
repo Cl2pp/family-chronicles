@@ -169,6 +169,13 @@
       "when": 1784730276635,
       "tag": "0023_lame_kabuki",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1784733306622,
+      "tag": "0024_massive_obadiah_stane",
+      "breakpoints": true
     }
   ]
 }
