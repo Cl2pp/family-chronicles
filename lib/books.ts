@@ -1431,7 +1431,15 @@ export async function requestPhotoBookAiDesign(input: {
     .select({ count: sql<number>`count(*)::int` })
     .from(bookPhotos)
     .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.excluded, false)));
-  if (!count) return err('Add at least one photo before designing.');
+  if (!count) {
+    // A text-only book (chapters with `include_text`, no photos) is a legitimate book —
+    // the unified engine lays out its prose. Only a book with neither is refused.
+    const [{ count: textChapterCount }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(bookStories)
+      .where(and(eq(bookStories.bookId, input.bookId), eq(bookStories.includeText, true)));
+    if (!textChapterCount) return err('Add at least one photo or story before designing.');
+  }
 
   // `designStage: 'preparing'` is set here, not by the worker, so the builder's checklist
   // has a first step to show from the moment the button is clicked — a queued job can sit
@@ -1864,13 +1872,9 @@ export async function setBookStories(input: {
   // story now mirrors its photos into `book_photos` — so without it, attaching stories
   // to a photo book would inject photos into its grid, count them against the upload
   // cap, and race `addBookPhotos` for positions.
-  // A photo-ENTRY book (no chapters, built from uploads) has no chapter list to
-  // replace; attaching stories to one would inject their mirrored photos into its grid
-  // and count them against the upload cap. The unified builder's own story picker
-  // (PR D) is what will make this a real capability; until then it stays refused.
-  if (gate.book.kind === 'photo') {
-    return err('This is a photo book — it is built from uploaded photos, not from stories.');
-  }
+  // No kind gate: attaching stories to ANY book is the point of the unified builder.
+  // A story's photos mirror into `book_photos` and join the same tray/layout as uploads
+  // (`syncStoryPhotoMirrors`), which is the intended behaviour, not a leak.
   // A viewer with hidden chapters only sees part of the chapter list — a full
   // replace from their view would silently drop the chapters they can't see.
   // Owners always see everything, so this never blocks them.
@@ -1880,7 +1884,18 @@ export async function setBookStories(input: {
     );
   }
   const unique = [...new Set(input.storyIds)];
-  if (unique.length === 0) return err('A book needs at least one story.');
+  if (unique.length === 0) {
+    // Legal for a book that still has uploaded photos — removing the last chapter from
+    // a hybrid book just turns it back into a photo book. Only a book left with nothing
+    // at all is refused.
+    const [{ count: photoCount }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(bookPhotos)
+      .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.excluded, false)));
+    if (!photoCount) {
+      return err('A book needs at least one story or one photo.');
+    }
+  }
 
   // Every story must be ready, shared into the book's chronicle, and readable
   // by the acting user.

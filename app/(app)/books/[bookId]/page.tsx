@@ -127,6 +127,7 @@ export default async function BookBuilderPage({
             includeText: c.includeText,
             includePhotos: c.includePhotos,
           }))}
+          hiddenChapterCount={book.hiddenChapterCount}
           chronicleStories={chronicleStories.map((s) => ({
             id: s.id,
             title: s.title,

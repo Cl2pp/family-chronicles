@@ -40,11 +40,17 @@ export function BookStoriesPanel({
   chapters,
   chronicleStories,
   locked,
+  hiddenChapterCount,
 }: {
   bookId: string;
   chapters: BookChapterView[];
   chronicleStories: ChronicleStoryOption[];
   locked: boolean;
+  /** Chapters this viewer can't read. `setBookStories` refuses a full replace from such
+   *  a partial view (it would silently drop the invisible chapters), so the controls are
+   *  disabled and the reason is stated up front rather than surfaced as an error after
+   *  the click. */
+  hiddenChapterCount: number;
 }) {
   const { t } = useI18n();
   const ts = t.books.builder.photoBook.sources;
@@ -52,6 +58,8 @@ export function BookStoriesPanel({
   const [pending, startTransition] = useTransition();
   const [busyStory, setBusyStory] = useState<string | null>(null);
 
+  const partialView = hiddenChapterCount > 0;
+  const readOnly = locked || partialView;
   const inBook = new Set(chapters.map((c) => c.storyId));
   const available = chronicleStories.filter((s) => !inBook.has(s.id));
 
@@ -91,7 +99,7 @@ export function BookStoriesPanel({
     <Card withBorder radius="md" p="md">
       <Group justify="space-between" mb={4} wrap="wrap">
         <Title order={4}>{ts.storiesTitle}</Title>
-        {!locked && available.length > 0 && (
+        {!readOnly && available.length > 0 && (
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
               <Button size="compact-sm" variant="light" leftSection={<IconPlus size={14} />} disabled={pending}>
@@ -115,6 +123,11 @@ export function BookStoriesPanel({
       <Text fz={12} c="dimmed" mb="sm">
         {ts.storiesHint}
       </Text>
+      {partialView && (
+        <Text fz={12} c="orange.7" mb="sm">
+          {t.books.builder.hiddenChapters(hiddenChapterCount)}
+        </Text>
+      )}
 
       {chapters.length === 0 ? (
         <Text fz={13} c="dimmed">
@@ -133,7 +146,7 @@ export function BookStoriesPanel({
                     {[c.year, ts.photoCount(c.photoCount)].filter(Boolean).join(' · ')}
                   </Text>
                 </Stack>
-                {!locked && (
+                {!readOnly && (
                   <Group gap={2} wrap="nowrap">
                     <Tooltip label={ts.moveUp}>
                       <ActionIcon variant="subtle" size="sm" disabled={i === 0 || pending} onClick={() => move(i, -1)}>
@@ -171,14 +184,14 @@ export function BookStoriesPanel({
                   size="xs"
                   label={ts.includeText}
                   checked={c.includeText}
-                  disabled={locked || pending || busyStory === c.storyId}
+                  disabled={readOnly || pending || busyStory === c.storyId}
                   onChange={(e) => toggleFlag(c.storyId, { includeText: e.currentTarget.checked })}
                 />
                 <Switch
                   size="xs"
                   label={ts.includePhotos}
                   checked={c.includePhotos}
-                  disabled={locked || pending || busyStory === c.storyId || c.photoCount === 0}
+                  disabled={readOnly || pending || busyStory === c.storyId || c.photoCount === 0}
                   onChange={(e) => toggleFlag(c.storyId, { includePhotos: e.currentTarget.checked })}
                 />
               </Group>

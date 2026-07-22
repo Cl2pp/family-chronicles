@@ -210,6 +210,7 @@ async function photoBookPreview(bookId: string, book: BookDetail): Promise<NextR
     fontFaceCss: screenFontFaceCss(plan.style),
     createdLabel: new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long' }),
     storyParagraphs: paragraphsByStory,
+    dedication: loaded.row.dedication,
   });
 
   return new NextResponse(html, {

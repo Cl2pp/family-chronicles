@@ -21,6 +21,7 @@ export function PhotoBookUploadStep({
   photos,
   chapters,
   chronicleStories,
+  hiddenChapterCount,
   locked,
   pending,
   onToggleExcluded,
@@ -33,6 +34,7 @@ export function PhotoBookUploadStep({
   photos: PhotoBookPhotoView[];
   chapters: BookChapterView[];
   chronicleStories: ChronicleStoryOption[];
+  hiddenChapterCount: number;
   locked: boolean;
   pending: boolean;
   onToggleExcluded: (assetId: string, excluded: boolean) => void;
@@ -62,6 +64,7 @@ export function PhotoBookUploadStep({
           bookId={bookId}
           chapters={chapters}
           chronicleStories={chronicleStories}
+          hiddenChapterCount={hiddenChapterCount}
           locked={locked}
         />
       )}
@@ -129,7 +132,11 @@ export function PhotoBookUploadStep({
               {tp.waitingForAnalysis}
             </Text>
           )}
-          <Button rightSection={<IconArrowRight size={16} />} disabled={!analysisComplete} onClick={onNext}>
+          <Button
+            rightSection={<IconArrowRight size={16} />}
+            disabled={!analysisComplete || !(photos.length > 0 || chapters.length > 0)}
+            onClick={onNext}
+          >
             {tp.next}
           </Button>
         </Stack>

@@ -66,6 +66,9 @@ export interface PhotoLayoutInput {
    *  variant (see the module header). Injected verbatim into the `<style>` block. */
   fontFaceCss: string;
   createdLabel: string;
+  /** Title-page dedication ("Für Oma Hilde") — printed on its own page after the cover
+   *  for a book with story chapters. Absent/empty prints nothing. */
+  dedication?: string | null;
   watermarkText?: string;
   /** Story paragraphs by storyId (unified-book plan) — the text a section's `text` items
    *  slice. A section whose story is missing here renders its text items as nothing
@@ -529,6 +532,16 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
   // A table of contents only makes sense for a book with story chapters — pure photo
   // books render byte-identically to before (no front matter added).
   const hasChapters = input.plan.sections.some((s) => s.storyId);
+  // A dedication gets its own quiet page, the way a printed book does it — only for a
+  // book with chapters (a pure photo book has no front matter to hang it on).
+  const dedicationPage =
+    hasChapters && input.dedication?.trim()
+      ? `
+    <section class="page pb-dedication">
+      <p>${esc(input.dedication.trim())}</p>
+    </section>`
+      : '';
+
   const toc = hasChapters
     ? `
     <section class="page pb-toc">
@@ -652,7 +665,25 @@ ${
     padding: 1.8mm 0; border-bottom: 0.2mm solid color-mix(in srgb, var(--pb-color-muted) 30%, transparent);
     font-size: 10pt;
   }
-  .pb-toc-date { color: var(--pb-color-muted); white-space: nowrap; }`
+  .pb-toc-date { color: var(--pb-color-muted); white-space: nowrap; }
+
+  /* ---- Dedication: one line, centred, generous air around it ---- */
+  .pb-dedication {
+    width: ${pageW}mm;
+    height: ${pageH}mm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 ${m.inner + 14}mm;
+  }
+  .pb-dedication p {
+    margin: 0;
+    text-align: center;
+    font-size: calc(var(--pb-body-size) * 1.15);
+    line-height: 1.6;
+    font-style: italic;
+    color: var(--pb-color-muted);
+  }`
 }
 
   .page { page-break-after: always; background: var(--pb-page-bg); }
@@ -855,6 +886,7 @@ ${pagedScript}
 ${watermark}
 ${coverFront}
 ${coverBack}
+${dedicationPage}
 ${toc}
 ${sectionsHtml}
 </body>

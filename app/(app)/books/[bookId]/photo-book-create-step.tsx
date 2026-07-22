@@ -372,6 +372,9 @@ export function PhotoBookCreateStep({
   const { t } = useI18n();
   const tb = t.books.builder;
   const tp = tb.photoBook;
+  // Content is photos OR story chapters — a text-only book is a real book, and the
+  // generate/design controls must agree with the step gate that let it get here.
+  const hasBookContent = photos.length > 0 || book.chapterCount > 0;
   const theme = useMantineTheme();
   // Desktop gets the full 3-pane layout (chat | preview, tray below); narrower than this
   // the chat pane moves into a Drawer instead of fighting the preview for width. Driven
@@ -472,7 +475,7 @@ export function PhotoBookCreateStep({
                 mt="md"
                 leftSection={<IconSparkles size={16} />}
                 loading={book.designing || designPending}
-                disabled={locked || photos.length === 0}
+                disabled={locked || !hasBookContent}
                 onClick={onCreateBook}
               >
                 {book.designing ? tp.config.creating : tp.config.createBook}
@@ -650,7 +653,7 @@ export function PhotoBookCreateStep({
               size="sm"
               leftSection={<IconSparkles size={16} />}
               loading={book.designing || designPending}
-              disabled={locked || photos.length === 0}
+              disabled={locked || !hasBookContent}
               onClick={onDesignBook}
             >
               {book.designing ? tb.designingBook : tb.designBook}
@@ -662,7 +665,7 @@ export function PhotoBookCreateStep({
               size="sm"
               leftSection={<IconSparkles size={16} />}
               loading={regenerating}
-              disabled={locked || photos.length === 0}
+              disabled={locked || !hasBookContent}
               onClick={onRegenerate}
             >
               {regenerating ? tp.regenerating : tp.regenerate}

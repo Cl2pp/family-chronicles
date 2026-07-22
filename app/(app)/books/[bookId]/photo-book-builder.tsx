@@ -130,6 +130,7 @@ export function PhotoBookBuilder({
   photos,
   chapters,
   chronicleStories,
+  hiddenChapterCount,
   order,
   quote,
   contactEmail,
@@ -138,6 +139,7 @@ export function PhotoBookBuilder({
   photos: PhotoBookPhotoView[];
   chapters: BookChapterView[];
   chronicleStories: ChronicleStoryOption[];
+  hiddenChapterCount: number;
   order: OrderBook;
   quote: BookQuote | null;
   contactEmail: string;
@@ -544,6 +546,7 @@ export function PhotoBookBuilder({
             photos={photos}
             chapters={chapters}
             chronicleStories={chronicleStories}
+            hiddenChapterCount={hiddenChapterCount}
             locked={locked}
             pending={pending}
             onToggleExcluded={toggleExcluded}
