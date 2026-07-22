@@ -10,7 +10,7 @@ import {
 } from './photo-book-plan';
 
 /**
- * Targeted photo-book layout edits (docs/PHOTO_BOOK_PLAN.md §9's `update_photo_book_layout`
+ * Targeted photo-book layout edits (docs/PHOTO_BOOK_PLAN.md §9's `update_book_layout`
  * table) — the photo-book counterpart of `LayoutOp`/`applyLayoutOp` in `lib/books.ts`. Kept
  * in its own module, deliberately free of any `db`/`env` import (like `lib/photo-analysis.ts`
  * and `lib/photo-book-autolayout.ts`), so the plan-editing logic itself is unit-testable
@@ -74,7 +74,7 @@ function referencesIndex(op: PhotoLayoutOp): boolean {
 
 /**
  * Guards against the footgun `applyPhotoLayoutOp`'s `merge_sections` case warns about in
- * its own comment but a model calling `update_photo_book_layout` can't see: merging
+ * its own comment but a model calling `update_book_layout` can't see: merging
  * removes a section, so every section index from `sectionIndex` onward — including any
  * later op's `sectionIndex`/`intoIndex`/`toSectionIndex`/`fromIndex`/`toIndex` — silently
  * points at a DIFFERENT (but still valid) section after the merge. That's a silent wrong
@@ -83,7 +83,7 @@ function referencesIndex(op: PhotoLayoutOp): boolean {
  * Rejects a batch where a `merge_sections` op is followed by ANY other op that addresses
  * a section/page by index — `merge_sections` may be the last op in a batch, or the only
  * op, but never followed by an index-addressed op in the same call. The caller must
- * re-fetch `get_photo_book` (fresh indices) before issuing further indexed ops. Pure and
+ * re-fetch `get_book_layout` (fresh indices) before issuing further indexed ops. Pure and
  * batch-only — never touches a plan, called once up front before any op is applied.
  */
 export function findMergeSectionsIndexHazard(ops: readonly PhotoLayoutOp[]): string | null {
@@ -94,7 +94,7 @@ export function findMergeSectionsIndexHazard(ops: readonly PhotoLayoutOp[]): str
       return (
         'merge_sections shifts every later section index down by one, so it cannot be ' +
         'followed by another op that addresses a section or page by index in the same ' +
-        'batch. Call merge_sections alone (or last), then get_photo_book again for fresh ' +
+        'batch. Call merge_sections alone (or last), then get_book_layout again for fresh ' +
         'indices before any further move_section/set_section_title/set_page_template/' +
         'move_photo/set_caption/merge_sections op.'
       );
@@ -143,7 +143,7 @@ function templateFits(template: PhotoPageTemplate, count: number): boolean {
  *  disappearing, which is what keeps every OTHER op's section/page indices stable within
  *  the same batch (dropping pages/sections would shift every later index, a real footgun
  *  when several ops in one call address earlier-computed indices from a single
- *  `get_photo_book` read). The batch's caller drops those placeholders again via
+ *  `get_book_layout` read). The batch's caller drops those placeholders again via
  *  `sweepBlankPages` before persisting — they exist only between ops, never in a book. */
 function shrinkPage(page: PhotoPagePlan, assetId: string): PhotoPagePlan {
   const idx = page.assetIds.indexOf(assetId);

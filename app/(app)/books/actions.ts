@@ -34,7 +34,7 @@ import {
 } from '@/lib/books';
 import type { PhotoBookStyle } from '@/lib/photo-book-plan';
 import type { PhotoBookGrouping } from '@/lib/photo-book-grouping';
-import { runBookAgent, runPhotoBookAgent, type ChatTurn } from '@/lib/ai/agent';
+import { runBookAgent, type ChatTurn } from '@/lib/ai/agent';
 import type { Receipt, ToolContext } from '@/lib/ai/tools';
 import { getI18n } from '@/lib/i18n/server';
 import type { BookCoverType, BookFormat } from '@/lib/gelato';
@@ -428,7 +428,7 @@ async function runPhotoBookChatTurn(input: {
   ];
 
   try {
-    const result = await runPhotoBookAgent(history, ctx, { id: book.id, title: book.title });
+    const result = await runBookAgent(history, ctx, { id: book.id, title: book.title });
     revalidatePath(`/books/${input.bookId}`);
     return { reply: result.reply, receipts: result.receipts };
   } catch (err) {
@@ -440,7 +440,7 @@ async function runPhotoBookChatTurn(input: {
 /**
  * The photo-book builder's embedded chat, typed message — mirrors `bookChatAction`
  * exactly, just running the photo-book-scoped agent (`lib/ai/agent.ts`'s
- * `runPhotoBookAgent`, photo-book tools only) instead of the story one.
+ * `runBookAgent`) — the same agent the legacy builder's chat uses.
  */
 export async function photoBookChatAction(input: {
   bookId: string;

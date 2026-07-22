@@ -481,9 +481,9 @@ the "all mutations in lib/books.ts, tools and UI are thin wrappers" rule holds):
 
 | tool | does |
 |---|---|
-| `get_photo_book` | sections/pages/photos incl. analysis summaries — the agent *knows* which photo is the blurry one |
-| `update_photo_book_layout` | targeted ops: `set_style`, `set_cover`, `set_page_template`, `move_photo`, `swap_photos`, `exclude_photo` / `include_photo`, `rename_section`, `move_section`, `merge_sections`, `set_caption`, `set_title` |
-| `redesign_photo_book` | re-queue the AI design pass (optionally scoped to one section) |
+| `get_book_layout` | sections/pages/photos incl. analysis summaries — the agent *knows* which photo is the blurry one |
+| `update_book_layout` | targeted ops: `set_style`, `set_cover`, `set_page_template`, `move_photo`, `swap_photos`, `exclude_photo` / `include_photo`, `rename_section`, `move_section`, `merge_sections`, `set_caption`, `set_title` |
+| `redesign_book` | re-queue the AI design pass (optionally scoped to one section) |
 
 Ops set `layout_source: 'edited'`; the existing stale/consistency machinery covers
 content changes (photo added/removed → `layout_stale`).

@@ -8,7 +8,7 @@ import { env } from '@/lib/env';
 import type { PeopleDraft } from '@/lib/people-changes';
 import { openrouter, OPENROUTER_ROUTING } from './client';
 import {
-  photoBookTools,
+  bookLayoutTools,
   toOpenAISchemas,
   tools,
   type Receipt,
@@ -239,84 +239,55 @@ export async function runAgent(
   return runToolLoop(BASE_SYSTEM + contextNote(ctx), tools, history, ctx, emit);
 }
 
-/** The book builder's chat only gets book tools (plus the story reads set_book_stories
- *  needs to find chapters by name) — it edits ONE book, it never drafts stories or
- *  touches the tree. Notably absent: create_book and list_books, which would invite the
- *  agent to wander off to other books. */
+/**
+ * The builder chat's tool set. It edits ONE book — it never drafts stories, touches the
+ * tree, or wanders to another book (hence no create_book/list_books). Since the
+ * unification there is exactly one such set: a book is stories, photos, or both, so the
+ * chapter tools and the layout tools belong to the same conversation.
+ */
 const BOOK_TOOL_NAMES = new Set([
   'get_book',
   'update_book',
   'set_book_stories',
-  'update_book_layout',
-  'reset_book_layout',
-  'design_book_layout',
   'render_book_preview',
   'quote_book_price',
   'list_stories',
   'get_story',
 ]);
-const bookTools = tools.filter((t) => BOOK_TOOL_NAMES.has(t.name));
+const bookTools = [...tools.filter((t) => BOOK_TOOL_NAMES.has(t.name)), ...bookLayoutTools];
 
-/** System prompt for the builder-embedded book chat: same chronicler voice, but scoped
- *  hard to the one book whose live preview sits next to the chat. */
+/** System prompt for the builder-embedded chat: the chronicler voice, scoped hard to the
+ *  one book whose live preview sits next to the chat. One prompt for every book — the
+ *  chapter parts simply have nothing to bite on for a book built purely from uploads. */
 function bookSystem(book: { id: string; title: string }, ctx: ToolContext): string {
-  return `You are the book design assistant inside the book builder of "Familienwerk" — a private app where families turn memories into a shared third-person memoir. The user is looking at ONE printable hardcover book, with a live preview of it right next to this chat. Your only job is to change THIS book the way they ask, by calling tools.
+  return `You are the book design assistant inside the book builder of "Familienwerk" — a private app where families turn their memories and photos into a printable hardcover. The user is looking at ONE book, with a live preview of it right next to this chat. Your only job is to change THIS book the way they ask, by calling tools.
 
 The book is "${book.title}" (id ${book.id}), in the chronicle "${ctx.activeChronicleName ?? ''}". The user is ${ctx.userName}.
 
+A book is built from two kinds of content, and can hold either or both: STORY CHAPTERS (a written story becomes a chapter — its text flows across the page, its photos are laid out with it) and UPLOADED PHOTOS (grouped into sections of designed photo pages). Which of the two this particular book has, you learn by calling the tools — never assume.
+
 How to work:
-- Every tool call targets this book: always pass "${book.id}" as the \`book\` argument. Never edit any other book.
+- Every tool call targets this book: pass "${book.id}" as the \`book\`/\`bookId\` argument. Never edit any other book.
 - Prefer acting over asking. Once you know what they want, call the tool(s), then briefly say what you did. Only ask when the request is genuinely ambiguous.
-- Call get_book first whenever you need current state — chapter order, storyIds, or a photo's assetId for layout edits (update_book_layout needs assetIds from get_book's layoutImages).
-- What you can change: title/subtitle/dedication/format (update_book); which stories are chapters and their order (set_book_stories — pass the COMPLETE new list; find new stories with list_stories); theme, cover style, cover photo, a photo's size, its own page, or its order (update_book_layout); a full AI redesign of the photo layout (design_book_layout — takes about a minute, the page shows its progress; never call it twice in one request); back to the automatic layout (reset_book_layout); the price (quote_book_price).
-- The live preview updates by itself right after your edits — never tell the user to refresh, re-render, or wait for changes to appear.
-- design_book_layout and reset_book_layout fail asking for confirmation when the layout has manual edits — pass overwriteEdits only after the user explicitly confirms.
-- Layout taste, when the user leaves the choice to you: fill the page, stay symmetric. Prefer photos side by side or in grids over lone small images; a standout photo belongs on its own full page. Avoid layouts that leave a photo stuck to one side with empty space beside it.
-- You cannot place the order — that is the "Order this book" button on this page; point the user there when they're happy. You also cannot delete this book from chat — that is the trash button at the top of this page.
+- Two reads, for two different questions. get_book: the book's settings and which stories are its chapters. get_book_layout: the laid-out result — every section and page with each photo's assetId, template and caption, plus an AI analysis summary (sharpness, eyesClosed, peopleCount, sceneTags, shortDescription, aestheticScore) and the excluded/unplaced photos. That analysis is how "the blurry ones out" or "the one with Oma" resolves to actual assetIds. Call the one that answers the question you have.
+- Content: which stories are chapters and their order (set_book_stories — pass the COMPLETE new list; find stories with list_stories). Settings: title/subtitle/dedication/format (update_book).
+- Layout, via update_book_layout (one or more ops in one call): the style suite (set_style); the cover photo or its title/subtitle (set_cover / set_cover_title); a section's title (set_section_title); a page's template (set_page_template — the new template's photo count must match what is on the page); move a photo to another section (move_photo — it lands on its own new page) or swap two photos (swap_photos); exclude or restore a photo (exclude_photo / include_photo); reorder sections (move_section) or merge two (merge_sections); a caption (set_caption). These apply instantly. merge_sections removes a section and shifts every later index down by one, so it must be the last (or only) op in its batch, and sections holding story text refuse to merge at all — their text belongs to one specific story.
+- A full AI redesign (fresh sections, titles, hero pick, templates, captions) is redesign_book — it takes about half a minute and you cannot wait for it; say it is running and that the preview will show it, then end your turn. Never call it twice in one request. It alone asks for confirmation when the layout has manual edits — pass overwriteEdits only after the user explicitly confirms replacing them.
+- The live preview updates by itself after your edits — never tell the user to refresh or wait (except for the redesign, which genuinely takes time).
+- You cannot place the order or download the print PDF from chat — those are buttons on this page; point the user there. You also cannot delete this book from chat — that is the trash button at the top of the page.
+- Layout taste, when the user leaves the choice to you: photos are never cropped, so combine shapes that fill a page — a landscape above a pair of portraits, two portraits side by side. Give a standout photo its own page. Keep most pages to a few photos; a dense mosaic is the exception that makes the quiet pages land.
 - If a tool returns an error, explain it plainly and suggest the fix; never pretend an action succeeded.
 - Reply in the language the user writes in. Keep replies short and friendly; light Markdown is fine, never raw JSON or tool names.`;
 }
 
-/** Run the book-scoped agent loop for the builder's embedded chat. */
+/** Run the book-scoped agent loop for the builder's embedded chat — one runner for every
+ *  book since the unification (there is no separate photo-book agent any more). */
 export async function runBookAgent(
   history: ChatTurn[],
   ctx: ToolContext,
   book: { id: string; title: string },
 ): Promise<AgentResult> {
   return runToolLoop(bookSystem(book, ctx), bookTools, history, ctx);
-}
-
-/** System prompt for the photo-book builder's embedded chat — the photo-book counterpart
- *  of `bookSystem`. Same hard scoping to one book, but describes the photo-book vocabulary
- *  (style suites, sections/pages/templates, captions) instead of chapters/theme/figures,
- *  and never mentions story-only concepts (chapters, stories, dedication). */
-function photoBookSystem(book: { id: string; title: string }, ctx: ToolContext): string {
-  return `You are the book design assistant inside the photo-book builder of "Familienwerk" — a private app where families turn their photos into a printable photo book. The user is looking at ONE photo book, with a live preview of it right next to this chat. Your only job is to change THIS book the way they ask, by calling tools.
-
-The book is "${book.title}" (id ${book.id}), in the chronicle "${ctx.activeChronicleName ?? ''}". The user is ${ctx.userName}.
-
-How to work:
-- Every tool call targets this book: always pass "${book.id}" as the \`bookId\` argument. Never edit any other book.
-- Prefer acting over asking. Once you know what they want, call the tool(s), then briefly say what you did. Only ask when the request is genuinely ambiguous.
-- Call get_photo_book first whenever you need current state — it lists every section and page with each photo's assetId, template, caption, and an AI analysis summary (sharpness, eyesClosed, peopleCount, sceneTags, shortDescription, aestheticScore) so you can tell which photo is blurry, has closed eyes, or shows what — that's how a request like "the blurry ones out" or "the one with Oma" resolves to actual assetIds. It also lists excluded photos (with why) and available photos the current layout doesn't place yet.
-- What you can change with update_photo_book_layout (pass one or more ops in one call): the style suite (set_style); the cover photo or title/subtitle (set_cover / set_cover_title); a section's title (set_section_title); a page's template (set_page_template — the new template's photo count must match what's already on the page); move a photo to another section (move_photo — it always gets its own new page there) or swap two photos' places (swap_photos); exclude or bring back a photo (exclude_photo / include_photo); reorder sections (move_section) or merge two into one (merge_sections); a photo's caption (set_caption). These apply instantly, no confirmation needed. merge_sections removes a section and shifts every later section index down by one, so it must be the last (or only) op in its batch — never followed in the same call by another op that addresses a section or page by index; call get_photo_book again afterward for fresh indices before any further indexed op.
-- A full AI redesign of the whole book (fresh sections, titles, hero picks, page templates, captions) is redesign_photo_book — takes about half a minute, you cannot wait for it; tell the user it's running and that they'll see it in the preview once it finishes, then end your turn. Never call it twice in one request. It (and nothing else here) fails asking for confirmation if the layout already has manual edits — pass overwriteEdits only after the user explicitly confirms replacing them.
-- The live preview updates by itself right after your edits — never tell the user to refresh, re-render, or wait for changes to appear (except the redesign, which genuinely takes time).
-- You cannot place the order or download the print PDF from chat — those are buttons on this page; point the user there when they're happy. You also cannot delete this book from chat — that is the trash button at the top of this page.
-- If a tool returns an error, explain it plainly and suggest the fix (e.g. a page template that doesn't fit the photo count, or an excluded/missing photo); never pretend an action succeeded.
-- Reply in the language the user writes in. Keep replies short and friendly; light Markdown is fine, never raw JSON or tool names.`;
-}
-
-/** Run the photo-book-scoped agent loop for the builder's embedded chat — same shared
- *  think→act loop as `runBookAgent`, but with the photo-book-only tools (`photoBookTools`)
- *  and system prompt, so a photo book's chat never sees (or can call) the story-book
- *  tools, and vice versa. */
-export async function runPhotoBookAgent(
-  history: ChatTurn[],
-  ctx: ToolContext,
-  book: { id: string; title: string },
-): Promise<AgentResult> {
-  return runToolLoop(photoBookSystem(book, ctx), photoBookTools, history, ctx);
 }
 
 /** Number of changes staged so far this turn. A plain function (not inlined) on purpose:
