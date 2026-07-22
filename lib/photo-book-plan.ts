@@ -38,8 +38,10 @@ export const PHOTO_PAGE_TEMPLATES = [
   'two-vertical',
   'three-column',
   'three-mixed',
+  'four-mixed',
   'collage-4',
   'collage-5',
+  'collage-6',
   'divider',
 ] as const;
 export type PhotoPageTemplate = (typeof PHOTO_PAGE_TEMPLATES)[number];
@@ -55,8 +57,10 @@ export const PHOTO_PAGE_TEMPLATE_SLOTS: Record<PhotoPageTemplate, { min: number;
   'two-vertical': { min: 2, max: 2 },
   'three-column': { min: 3, max: 3 },
   'three-mixed': { min: 3, max: 3 },
+  'four-mixed': { min: 4, max: 4 },
   'collage-4': { min: 4, max: 4 },
   'collage-5': { min: 5, max: 5 },
+  'collage-6': { min: 6, max: 6 },
   divider: { min: 0, max: 1 },
 };
 
@@ -86,7 +90,7 @@ export function photoOrientation(photo: { width: number; height: number }): Phot
  *  divider already shows its section title (`renderPage` in `lib/photo-book-layout.ts` is
  *  the authority). Shared by the design check (which flags captions here) and the repair
  *  pass (which strips them). */
-export const CAPTION_LESS_TEMPLATES: readonly PhotoPageTemplate[] = ['collage-4', 'collage-5', 'divider'];
+export const CAPTION_LESS_TEMPLATES: readonly PhotoPageTemplate[] = ['collage-4', 'collage-5', 'collage-6', 'divider'];
 
 export function templateRendersCaptions(template: PhotoPageTemplate): boolean {
   return !CAPTION_LESS_TEMPLATES.includes(template);
@@ -129,8 +133,10 @@ export const pagePlanSchema = z.discriminatedUnion('template', [
   pageVariantSchema('two-vertical'),
   pageVariantSchema('three-column'),
   pageVariantSchema('three-mixed'),
+  pageVariantSchema('four-mixed'),
   pageVariantSchema('collage-4'),
   pageVariantSchema('collage-5'),
+  pageVariantSchema('collage-6'),
   pageVariantSchemaRanged('divider'),
 ]);
 export type PhotoPagePlan = z.infer<typeof pagePlanSchema>;

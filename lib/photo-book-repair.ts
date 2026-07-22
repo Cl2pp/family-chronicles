@@ -118,8 +118,12 @@ export function coercePhotoBookPlan(
       const captionFor = new Map<string, string | null>();
       assetIds.forEach((id, i) => captionFor.set(id, asString(rawCaptions[i])));
 
-      if (template === 'divider') {
-        pages.push({ template: 'divider', assetIds: assetIds.slice(0, 1) });
+      // A model-emitted `divider` page is never kept as one: the real section-title page
+      // is added automatically per section, so a photo-less divider renders as a BLANK
+      // page (the empty-pages bug this guards against), and one with a photo is better
+      // shown as a real photo page — fall through to the generic re-grouping below.
+      if (template === 'divider' && assetIds.length === 0) {
+        changes.push(`dropped a blank divider page in "${title}" (sections get their title page automatically)`);
         continue;
       }
       if (assetIds.length === 0) {
@@ -127,7 +131,7 @@ export function coercePhotoBookPlan(
         continue;
       }
 
-      const slots = template ? PHOTO_PAGE_TEMPLATE_SLOTS[template] : null;
+      const slots = template && template !== 'divider' ? PHOTO_PAGE_TEMPLATE_SLOTS[template] : null;
       const arityOk = slots != null && assetIds.length >= slots.min && assetIds.length <= slots.max;
       if (arityOk && template) {
         pages.push(withCaptions({ template, assetIds } as PhotoPagePlan, captionFor));
@@ -203,7 +207,7 @@ const rendersCaptions = templateRendersCaptions;
  * construction. Also returns the photo ORDER the template wants (`three-mixed` needs its
  * landscape first — that slot is the dominant one).
  *
- * Only ever called with 1-5 photos; `pageSizes` below is what guarantees that.
+ * Only ever called with 1-6 photos; `pageSizes` below is what guarantees that.
  */
 export function templateForGroup(input: LintPhoto[]): { template: PhotoPageTemplate; ordered: LintPhoto[] } {
   // Deduplicate FIRST, and pick the template from what survives. A model that lists the
@@ -239,20 +243,29 @@ export function templateForGroup(input: LintPhoto[]): { template: PhotoPageTempl
           }
         : { template: 'three-column', ordered: photos };
     case 4:
-      return { template: 'collage-4', ordered: photos };
-    default:
+      // Exactly one landscape among four reads best as the dominant full-width photo with
+      // the other three justified below it; any other mix balances fine as a 2+2 grid.
+      return shapes.filter((s) => s === 'landscape').length === 1
+        ? {
+            template: 'four-mixed',
+            ordered: [photos[landscapeIndex], ...photos.filter((_, i) => i !== landscapeIndex)],
+          }
+        : { template: 'collage-4', ordered: photos };
+    case 5:
       return { template: 'collage-5', ordered: photos };
+    default:
+      return { template: 'collage-6', ordered: photos };
   }
 }
 
-/** Splits n photos into page-sized groups of 1-5, never leaving a group of exactly 1 when
+/** Splits n photos into page-sized groups of 1-6, never leaving a group of exactly 1 when
  *  it can be avoided — the same "never strand a lone leftover" rule `paceSection`
  *  (`lib/photo-book-autolayout.ts`) applies. */
 function pageSizes(n: number): number[] {
   const sizes: number[] = [];
   let left = n;
   while (left > 0) {
-    if (left <= 5) {
+    if (left <= 6) {
       sizes.push(left);
       break;
     }
@@ -360,14 +373,15 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
     const pages: PhotoPagePlan[] = [];
     for (const page of section.pages) {
       const survivors = page.assetIds.map(claim).filter((p): p is LintPhoto => p != null);
-      // A divider is the one template that legitimately carries no photo — keep it as-is
-      // rather than dropping the section opener just because its backdrop went away.
+      // A page with nothing left to show is dropped, dividers included: a photo-less
+      // divider renders as a completely blank page (the section's real title page is
+      // emitted automatically), and a printed book must never contain blank pages.
       if (survivors.length === 0) {
-        if (page.template === 'divider') {
-          pages.push({ template: 'divider', assetIds: [] });
-        } else {
-          changes.push(`dropped a ${page.template} page in "${section.title}" (no usable photos left)`);
-        }
+        changes.push(
+          page.template === 'divider'
+            ? `dropped a blank divider page in "${section.title}"`
+            : `dropped a ${page.template} page in "${section.title}" (no usable photos left)`,
+        );
         continue;
       }
       if (page.template === 'divider') {

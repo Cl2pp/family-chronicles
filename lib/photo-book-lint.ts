@@ -34,6 +34,8 @@ import {
 export type PhotoBookLintCode =
   /** A page's template needs a photo shape it didn't get (the three-column complaint). */
   | 'template-orientation'
+  /** A page that renders with no photo on it — a blank page in a printed book. */
+  | 'empty-page'
   /** The same page template repeated too many times back to back. */
   | 'monotonous-pacing'
   /** A section so short it doesn't earn its own divider/opener. */
@@ -98,13 +100,13 @@ export interface TemplateShapeRule {
 export const TEMPLATE_SHAPE_RULES: Record<PhotoPageTemplate, TemplateShapeRule | null> = {
   'full-bleed': null,
   'full-framed': null,
-  // Two photos stacked, each filling the page width in its own half — a portrait in one of
-  // those wide, short cells is letterboxed with white space either side.
+  // Two photos stacked, each rendered full-width at its true shape — a portrait one
+  // towers over the page and forces the whole stack to shrink into a narrow column.
   'two-horizontal': {
     allowed: ['landscape', 'square'],
     slots: 'all',
     flagWhen: 'any',
-    why: 'both photos are stacked full-width, so a portrait one gets letterboxed — use "two-vertical" instead when a portrait is involved',
+    why: 'both photos render full-width, stacked — a portrait one is taller than wide, so the pair has to shrink into a narrow centered column. Use "two-vertical" instead when a portrait is involved',
   },
   // A justified side-by-side row. Shared row height = pageWidth / sum(aspect ratios), so a
   // pair of landscapes here renders as a short strip; they belong stacked instead. A mixed
@@ -124,15 +126,23 @@ export const TEMPLATE_SHAPE_RULES: Record<PhotoPageTemplate, TemplateShapeRule |
     flagWhen: 'any',
     why: 'three photos share one row height, which only works when they are all portrait — a single landscape squashes the entire row into a thin strip. Use "three-mixed" (landscape first) for any trio containing a landscape',
   },
-  // One dominant photo across the top, two stacked below it.
+  // One dominant photo across the top, a justified pair below it.
   'three-mixed': {
     allowed: ['landscape', 'square'],
     slots: 'first',
     flagWhen: 'any',
-    why: 'the FIRST photo is the dominant full-width one, so it must be landscape (or square) — put the landscape first',
+    why: 'the FIRST photo spans the full width across the top, so it must be landscape (or square) — put the landscape first',
+  },
+  // Same dominant-on-top arrangement with a trio below.
+  'four-mixed': {
+    allowed: ['landscape', 'square'],
+    slots: 'first',
+    flagWhen: 'any',
+    why: 'the FIRST photo spans the full width across the top, so it must be landscape (or square) — put the landscape first',
   },
   'collage-4': null,
   'collage-5': null,
+  'collage-6': null,
   divider: null,
 };
 
@@ -201,6 +211,18 @@ export function lintPhotoBookPlan(plan: PhotoBookPlan, photos: LintPhoto[]): Pho
 
     section.pages.forEach((page, pageIndex) => {
       const where = `Section ${sectionIndex} ("${section.title}"), page ${pageIndex}`;
+
+      // Only `divider` can legally have zero photos (schema-wise) — and photo-less
+      // dividers render as a completely BLANK page, because the real section-title page
+      // is emitted automatically per section; a printed book must never contain one.
+      if (page.assetIds.length === 0) {
+        findings.push({
+          code: 'empty-page',
+          sectionIndex,
+          pageIndex,
+          message: `${where} has no photos on it and renders as a blank page — remove it (every section already gets its own title page automatically).`,
+        });
+      }
 
       const rule = TEMPLATE_SHAPE_RULES[page.template];
       const known = page.assetIds.map((id) => byId.get(id)).filter((p): p is LintPhoto => p != null);
@@ -287,6 +309,7 @@ export function lintPhotoBookPlan(plan: PhotoBookPlan, photos: LintPhoto[]): Pho
  *  a slightly repetitive rhythm is a nitpick. Used only for the better/worse comparison in
  *  `lintScore`, never shown to anyone. */
 const CODE_WEIGHT: Record<PhotoBookLintCode, number> = {
+  'empty-page': 12,
   'template-orientation': 10,
   'caption-not-rendered': 4,
   'monotonous-pacing': 3,

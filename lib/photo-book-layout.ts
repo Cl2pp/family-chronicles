@@ -1,4 +1,4 @@
-import type { PhotoBookPlan, PhotoPagePlan } from '@/lib/photo-book-plan';
+import type { PhotoBookPlan, PhotoPagePlan, PhotoPageTemplate } from '@/lib/photo-book-plan';
 import { PHOTO_STYLE_TOKENS, type PhotoStyleTokens } from '@/lib/photo-book-styles';
 import { PAGEDJS_POLYFILL_URL } from '@/lib/pagedjs';
 
@@ -18,7 +18,7 @@ import { PAGEDJS_POLYFILL_URL } from '@/lib/pagedjs';
  * All three variants use the SAME element-box bleed mechanism: a single unnamed
  * `@page { margin: 0 }` for the whole document, with every page element carrying its own
  * explicit `width`/`height` (and, for content-box pages, its own `padding`) — see the
- * `@page` rule and the `.photo-page:not(.pb-fullbleed):not(.pb-divider-page)` rule below.
+ * `@page` rule and the `.photo-page:not(.pb-divider-page)` rule below.
  * This used to differ between `screen` (element-box) and `preview`/`print` (CSS named
  * `@page` overrides per bleed page) because Chromium's `page.pdf()` doesn't fully honor a
  * named-page margin override on the trailing edges (right/bottom fell ~20-27mm short of the
@@ -138,31 +138,147 @@ function withCaption(photoHtml: string, caption: string | null | undefined): str
   return `<div class="ph-cell">${photoHtml}${captionEl(caption)}</div>`;
 }
 
-/** One figure of a justified row: the flex share equals the image's aspect ratio, same
- *  math as `rowFigureHtml` in `lib/book-layout.ts` — every image in the row renders at
- *  the SAME height while the row fills the full width, whatever the orientation mix. */
-function rowFigure(image: PhotoLayoutImage | undefined, caption?: string | null): string {
-  if (!image) return `<div class="ph-row-figure ph-missing" style="flex: 1 1 0%"></div>`;
-  const aspect = (image.width / image.height).toFixed(4);
-  return `<div class="ph-row-figure" style="flex: ${aspect} 1 0%">${withCaption(img(image, 'ph-row-img'), caption)}</div>`;
-}
-
 function framedFigure(image: PhotoLayoutImage | undefined, caption?: string | null): string {
   return withCaption(`<div class="ph-frame">${img(image, 'ph-frame-img')}</div>`, caption);
 }
 
-function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>): string {
+/** The page's content box in mm — what a content-box page's photos may fill. */
+export interface ContentBox {
+  w: number;
+  h: number;
+}
+
+/** Uniform gap between photos, horizontal and vertical (mm) — one value for the whole
+ *  book, whatever the arrangement, so every page reads as the same grid system.
+ *  Exported for `lib/photo-book-print-sizing.ts`, whose per-slot pixel budgets replay
+ *  this exact geometry. */
+export const PHOTO_GAP_MM = 4;
+
+/** How each multi-photo template splits its photos into justified rows (in `assetIds`
+ *  order), or `null` for templates that aren't row stacks (single-photo pages and
+ *  dividers). THE single definition of every template's geometry — the renderer
+ *  (`rowStackPage` below) and the print-sizing module both read it, so the pixels a
+ *  photo is embedded at can never drift from the box it actually renders into. */
+export const TEMPLATE_ROW_ARRANGEMENT: Record<PhotoPageTemplate, number[] | null> = {
+  'full-bleed': null,
+  'full-framed': null,
+  'two-vertical': [2],
+  'three-column': [3],
+  'two-horizontal': [1, 1],
+  'three-mixed': [1, 2],
+  'four-mixed': [1, 3],
+  'collage-4': [2, 2],
+  'collage-5': [2, 3],
+  'collage-6': [3, 3],
+  divider: null,
+};
+
+/**
+ * The row-stack math, standalone: given each row's photo aspect ratios and the content
+ * box, returns every cell's exact size in mm. Within a row every cell shares one height
+ * and its width is `aspect × height`, so the row fills `box.w` exactly; a stack whose
+ * natural height exceeds `box.h` is scaled down uniformly (photos shrink, never crop).
+ * Shared by the renderer (below) and `photoAssetPrintTargetSizeMm` /
+ * `photoAssetRenditionNeeds` (print embedding + rendition tier) — see
+ * `TEMPLATE_ROW_ARRANGEMENT`.
+ */
+export function rowStackCellSizesMm(aspectRows: number[][], box: ContentBox): { w: number; h: number }[][] {
+  const naturalHeights = aspectRows.map((row) => {
+    const gaps = (row.length - 1) * PHOTO_GAP_MM;
+    const aspectSum = row.reduce((sum, a) => sum + a, 0);
+    return (box.w - gaps) / aspectSum;
+  });
+  const gapsH = (aspectRows.length - 1) * PHOTO_GAP_MM;
+  const totalH = naturalHeights.reduce((a, b) => a + b, 0) + gapsH;
+  const scale = totalH > box.h ? (box.h - gapsH) / (totalH - gapsH) : 1;
+  return aspectRows.map((row, r) => row.map((a) => ({ w: a * naturalHeights[r] * scale, h: naturalHeights[r] * scale })));
+}
+
+/** Aspect ratio stood in for a photo the caller couldn't resolve (`ph-missing`) — the
+ *  placeholder tile still has to occupy a plausible slot in the row math. */
+const MISSING_ASPECT = 4 / 3;
+
+interface RowPhoto {
+  image?: PhotoLayoutImage;
+  caption?: string | null;
+}
+
+function aspectOf(p: RowPhoto): number {
+  return p.image ? p.image.width / p.image.height : MISSING_ASPECT;
+}
+
+/**
+ * A stack of justified photo rows — the one mechanism behind every multi-photo template
+ * (and the reason none of them crop): within a row, every photo renders at one shared
+ * height with its width equal to `aspect × height`, so the row fills the content-box
+ * width exactly, uncropped, whatever the orientation mix (the math: width_i = a_i · h and
+ * Σ width_i = W − gaps means h is the row's single free variable). Rows are stacked and
+ * vertically centered; when the stack's natural height exceeds the content box (e.g. a
+ * dominant square over two portraits), every row is scaled down by the same factor and
+ * stays horizontally centered — photos shrink, they never crop.
+ *
+ * Sized deterministically here in mm, not with CSS percentage/stretch tricks: a
+ * stretched cell whose aspect ratio differs from its photo's forces `object-fit: cover`
+ * to crop — exactly the "half the photo is missing" defect this renderer replaced.
+ */
+function rowStackHtml(rows: RowPhoto[][], box: ContentBox): string {
+  const cellSizes = rowStackCellSizesMm(rows.map((row) => row.map(aspectOf)), box);
+  const rowsHtml = rows
+    .map((row, r) => {
+      const cells = row
+        .map((p, i) => {
+          const photo = p.image ? img(p.image, 'ph-jimg') : `<div class="ph-jimg ph-missing"></div>`;
+          return `<div class="ph-jcell" style="width: ${cellSizes[r][i].w.toFixed(2)}mm">${withCaption(photo, p.caption)}</div>`;
+        })
+        .join('\n');
+      return `<div class="ph-jrow" style="height: ${cellSizes[r][0].h.toFixed(2)}mm">${cells}</div>`;
+    })
+    .join('\n');
+  return `<div class="ph-rows">${rowsHtml}</div>`;
+}
+
+/** Renders a multi-photo template as its row arrangement (see `rowStackHtml`). */
+function rowStackPage(
+  page: PhotoPagePlan,
+  images: Map<string, PhotoLayoutImage>,
+  rowSizes: number[],
+  box: ContentBox,
+  withCaptions: boolean,
+): string {
+  const rows: RowPhoto[][] = [];
+  let offset = 0;
+  for (const size of rowSizes) {
+    rows.push(
+      page.assetIds.slice(offset, offset + size).map((id, i) => ({
+        image: images.get(id),
+        caption: withCaptions ? page.captions?.[offset + i] : null,
+      })),
+    );
+    offset += size;
+  }
+  return `
+      <section class="page photo-page pb-rows-page">
+        ${rowStackHtml(rows.filter((r) => r.length > 0), box)}
+      </section>`;
+}
+
+function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, box: ContentBox): string {
   const get = (id: string) => images.get(id);
   switch (page.template) {
     case 'full-bleed': {
-      // Bleeds edge to edge, so a caption (when present) overlays the bottom on a
-      // scrim rather than pushing content below it — same treatment the cover front
-      // uses for its title over `coverHero` (`.pb-cover-text`'s gradient, below).
+      // One photo filling the entire content box — inside the same page frame as every
+      // other page (the margins are the book's constant frame; a photo page doesn't get
+      // to break it). Filling the box means a slight crop to its aspect ratio, which is
+      // why this template is reserved for photos whose shape roughly matches the page.
+      // A caption (when present) overlays the bottom on a scrim rather than pushing
+      // content below it — same treatment the cover front uses for its title.
       const caption = page.captions?.[0];
       return `
       <section class="page photo-page pb-fullbleed">
-        ${img(get(page.assetIds[0]), 'ph-fullbleed-img')}
-        ${caption ? `<div class="ph-fullbleed-caption"><p>${esc(caption)}</p></div>` : ''}
+        <div class="pb-fullbleed-inner">
+          ${img(get(page.assetIds[0]), 'ph-fullbleed-img')}
+          ${caption ? `<div class="ph-fullbleed-caption"><p>${esc(caption)}</p></div>` : ''}
+        </div>
       </section>`;
     }
     case 'full-framed': {
@@ -171,62 +287,21 @@ function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>):
         <div class="pb-framed-inner">${framedFigure(get(page.assetIds[0]), page.captions?.[0])}</div>
       </section>`;
     }
-    case 'two-vertical': {
-      // Two portraits side by side, justified to share one height across full width.
-      return `
-      <section class="page photo-page pb-row">
-        ${page.assetIds.map((id, i) => rowFigure(get(id), page.captions?.[i])).join('\n')}
-      </section>`;
-    }
-    case 'two-horizontal': {
-      // Two landscapes stacked, each filling the width in its own half of the page.
-      return `
-      <section class="page photo-page pb-stack-2">
-        ${page.assetIds
-          .map((id, i) => `<div class="ph-stack-cell">${withCaption(img(get(id), 'ph-cover-img'), page.captions?.[i])}</div>`)
-          .join('\n')}
-      </section>`;
-    }
-    case 'three-column': {
-      return `
-      <section class="page photo-page pb-row">
-        ${page.assetIds.map((id, i) => rowFigure(get(id), page.captions?.[i])).join('\n')}
-      </section>`;
-    }
-    case 'three-mixed': {
-      const [dominant, ...rest] = page.assetIds;
-      const [dominantCaption, ...restCaptions] = page.captions ?? [];
-      return `
-      <section class="page photo-page pb-mixed-3">
-        <div class="ph-dominant">${withCaption(img(get(dominant), 'ph-cover-img'), dominantCaption)}</div>
-        <div class="ph-mixed-stack">
-          ${rest
-            .map((id, i) => `<div class="ph-stack-cell">${withCaption(img(get(id), 'ph-cover-img'), restCaptions[i])}</div>`)
-            .join('\n')}
-        </div>
-      </section>`;
-    }
-    case 'collage-4': {
-      // Dense mosaic, no captions — mirrors `.photo-grid figcaption { display: none }`
-      // in `lib/book-layout.ts`: 4 small tiles have no room for per-photo text without
-      // crowding the grid (the AI design pass is told the same thing — see the "not on
-      // dense collages" line in `lib/photo-book-ai-layout.ts`'s system prompt).
-      return `
-      <section class="page photo-page pb-collage-4">
-        ${page.assetIds.map((id) => `<div class="ph-tile">${img(get(id), 'ph-cover-img')}</div>`).join('\n')}
-      </section>`;
-    }
-    case 'collage-5': {
-      // Same reasoning as collage-4 — 5 tiles is even denser.
-      const [dominant, ...rest] = page.assetIds;
-      return `
-      <section class="page photo-page pb-collage-5">
-        <div class="ph-dominant">${img(get(dominant), 'ph-cover-img')}</div>
-        <div class="ph-collage-5-grid">
-          ${rest.map((id) => `<div class="ph-tile">${img(get(id), 'ph-cover-img')}</div>`).join('\n')}
-        </div>
-      </section>`;
-    }
+    // Every multi-photo template is a justified row stack (see rowStackHtml) — photos
+    // render at their true aspect ratios, never cropped. Row splits come from the shared
+    // TEMPLATE_ROW_ARRANGEMENT table (also used by print sizing). Collages render no
+    // captions — dense tiles have no room for per-photo text (CAPTION_LESS_TEMPLATES;
+    // the AI design pass is told the same).
+    case 'two-vertical':
+    case 'three-column':
+    case 'two-horizontal':
+    case 'three-mixed':
+    case 'four-mixed':
+      return rowStackPage(page, images, TEMPLATE_ROW_ARRANGEMENT[page.template]!, box, true);
+    case 'collage-4':
+    case 'collage-5':
+    case 'collage-6':
+      return rowStackPage(page, images, TEMPLATE_ROW_ARRANGEMENT[page.template]!, box, false);
     case 'divider': {
       // The auto-layouter never emits a `divider` page (it opens sections with a hero
       // photo instead — see `lib/photo-book-autolayout.ts`), but the template exists for
@@ -251,12 +326,16 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
   const style = PHOTO_STYLE_TOKENS[input.plan.style];
   // Bleed only applies to `print`: `screen` is never printed, and `preview` is a proof,
   // not the binding print file — same split as `lib/book-layout.ts`'s `renderBookHtml`.
-  // Bleed pages (cover front/back, full-bleed photo, divider) bleed to the physical page
+  // Bleed pages (cover front/back, divider) bleed to the physical page
   // edge in EVERY variant via their own explicit full-sheet `width`/`height` and no CSS
   // margin (the base `@page` rule below is a single unnamed `margin: 0` for every variant);
   // what changes for `print` is that the physical page itself grows by `PHOTO_BOOK_BLEED_MM`
   // on every edge, so those pages extend 3mm past the trim line the way a real bleed setup
   // needs.
+  // Bleed pages are the cover front/back and the section dividers — full-sheet colored/
+  // photo backdrops. Interior PHOTO pages (including the `full-bleed` template) all live
+  // inside the shared content-box frame: the book keeps one constant border on every
+  // photo page, whatever the arrangement.
   const bleed = input.variant === 'print' ? PHOTO_BOOK_BLEED_MM : 0;
   const pageW = input.trim.w + bleed * 2;
   const pageH = input.trim.h + bleed * 2;
@@ -367,6 +446,14 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
       <p class="pb-cover-back-text">${esc(input.chronicleName)} · ${esc(input.createdLabel)}</p>
     </section>`;
 
+  // The content box a content-box page's photos may fill — the padded area the
+  // `.photo-page:not(.pb-divider-page)` rule below carves out of the physical sheet
+  // (the `+ 1` mirrors that rule's 1mm pagination-safety fudge on the bottom padding).
+  const contentBox: ContentBox = {
+    w: pageW - m.inner - m.outer,
+    h: pageH - m.top - (m.bottom + 1),
+  };
+
   const sectionsHtml = input.plan.sections
     .map((section) => {
       const divider = `
@@ -376,7 +463,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
         ${section.dateLabel ? `<p class="pb-divider-date">${esc(section.dateLabel)}</p>` : ''}
       </section>`;
 
-      const pages = section.pages.map((page) => renderPage(page, input.images)).join('\n');
+      const pages = section.pages.map((page) => renderPage(page, input.images, contentBox)).join('\n');
 
       return `${divider}\n${pages}`;
     })
@@ -394,7 +481,7 @@ ${styleVarsCss(style)}
     /* Single unnamed @page rule, margin 0, for every variant -- element-box bleed
        approach: EVERY page (bleed or content-box) sizes itself to the full physical
        sheet (width/height = pageW/pageH) with no CSS margin, so it reaches every edge;
-       content-box pages (.photo-page:not(.pb-fullbleed):not(.pb-divider-page), below)
+       content-box pages (.photo-page:not(.pb-divider-page), below)
        then inset their own content via PADDING = m instead, which insets them from the
        physical edge by the content margin (screen/preview) or content margin + bleed
        (print) -- see that rule's own comment for why padding, not margin. This used to
@@ -501,18 +588,23 @@ ${styleVarsCss(style)}
      original content area, so the padding strip -- visually the old margin area --
      stays unpainted, exactly like before). The '+ 1' on bottom padding preserves the
      old contentH's longstanding 1mm pagination-safety fudge. */
-  .photo-page:not(.pb-fullbleed):not(.pb-divider-page) {
+  .photo-page:not(.pb-divider-page) {
     width: ${pageW}mm;
     height: ${pageH}mm;
     padding: ${m.top}mm ${m.outer}mm ${m.bottom + 1}mm ${m.inner}mm;
     background-clip: content-box;
   }
-  .pb-fullbleed { width: ${pageW}mm; height: ${pageH}mm; position: relative; }
-  .ph-fullbleed-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* full-bleed: one photo filling the whole CONTENT box — it sits inside the same page
+     frame (the padding above) as every other photo page, so the book keeps one constant
+     border everywhere; "bleed" survives only in the template's stored name. The inner
+     wrapper exists because the caption scrim needs a positioning context that matches
+     the photo box, not the padded sheet. */
+  .pb-fullbleed-inner { position: relative; width: 100%; height: 100%; overflow: hidden; }
+  .ph-fullbleed-img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: var(--pb-photo-radius); }
   .ph-missing { background: repeating-linear-gradient(45deg, #eee, #eee 8px, #f6f6f6 8px, #f6f6f6 16px); }
 
-  /* full-bleed caption: overlaid on a bottom scrim (the photo bleeds edge to edge, so
-     there's no margin to put text in below it) — same gradient-over-photo idea as the
+  /* full-bleed caption: overlaid on a bottom scrim (the photo fills its whole box, so
+     there's no room to put text below it) — same gradient-over-photo idea as the
      cover front's title treatment above. */
   .ph-fullbleed-caption {
     position: absolute;
@@ -521,8 +613,6 @@ ${styleVarsCss(style)}
     background: linear-gradient(transparent, rgba(0, 0, 0, 0.6) 60%);
   }
   .ph-fullbleed-caption p { margin: 0; color: #fff; font-size: 10pt; font-style: italic; line-height: 1.4; }
-
-  .ph-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: var(--pb-photo-radius); }
 
   /* Optional per-photo captions (AI design pass only — the auto-layouter never emits
      them, so a caption-less plan never emits this markup at all — see withCaption()).
@@ -577,32 +667,23 @@ ${styleVarsCss(style)}
   }
   .ph-frame-img { width: 100%; height: 100%; object-fit: contain; display: block; border-radius: var(--pb-photo-radius); }
 
-  /* two-vertical / three-column: a justified row sharing one height (see rowFigure).
-     A caption (when present) arrives already wrapped in '.ph-cell' by withCaption(), so
-     it gets the same flex-shrink-to-make-room treatment as every other template — the
-     caption-less path below ('.ph-row-img' direct child, 'height: 100%') is untouched. */
-  .pb-row { display: flex; align-items: stretch; gap: 4mm; }
-  .ph-row-figure { min-width: 0; }
-  .ph-row-img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: var(--pb-photo-radius); }
-
-  /* two-horizontal: two landscapes stacked, each filling its half */
-  .pb-stack-2 { display: flex; flex-direction: column; gap: 4mm; }
-  .ph-stack-cell { flex: 1; min-height: 0; }
-
-  /* three-mixed: one dominant + a stacked pair */
-  .pb-mixed-3 { display: flex; gap: 4mm; }
-  .ph-dominant { flex: 2; min-width: 0; }
-  .ph-mixed-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4mm; }
-
-  /* collage-4: a flat 2x2 */
-  .pb-collage-4 { display: flex; flex-wrap: wrap; gap: 4mm; }
-  .pb-collage-4 .ph-tile { width: calc(50% - 2mm); height: calc(50% - 2mm); }
-
-  /* collage-5: one dominant + a 2x2 of the rest */
-  .pb-collage-5 { display: flex; gap: 4mm; }
-  .pb-collage-5 .ph-dominant { flex: 1; min-width: 0; }
-  .ph-collage-5-grid { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 4mm; }
-  .ph-collage-5-grid .ph-tile { width: calc(50% - 2mm); height: calc(50% - 2mm); }
+  /* Every multi-photo template: a stack of justified rows (see rowStackHtml). Row
+     heights and cell widths arrive as exact inline mm values computed from the photos'
+     real aspect ratios, so 'cover' below never actually crops (cell aspect == photo
+     aspect) — it only absorbs the tiny shrink a caption steals from its cell. Rows and
+     the stack are centered so any spare space frames the arrangement symmetrically. */
+  .ph-rows {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: ${PHOTO_GAP_MM}mm;
+  }
+  .ph-jrow { display: flex; justify-content: center; gap: ${PHOTO_GAP_MM}mm; flex: 0 0 auto; }
+  .ph-jcell { height: 100%; }
+  .ph-jimg { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: var(--pb-photo-radius); }
 
   .watermark {
     position: fixed;

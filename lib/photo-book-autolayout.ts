@@ -534,10 +534,28 @@ function groupPage(group: AutoLayoutPhoto[]): PhotoPagePlan {
   const assetIds = group.map((g) => g.assetId);
   if (group.length === 2) return { template: pairTemplate(group[0], group[1]), assetIds };
   if (group.length === 3) {
-    const template = group.every((p) => classify(p) === 'portrait') ? 'three-column' : 'three-mixed';
-    return { template, assetIds };
+    if (group.every((p) => classify(p) === 'portrait')) {
+      return { template: 'three-column', assetIds };
+    }
+    // three-mixed's dominant (first) slot spans the full width, so it must be the
+    // landscape — or failing that a square — photo (`TEMPLATE_SHAPE_RULES`,
+    // `lib/photo-book-lint.ts`); promote one to the front rather than trusting order.
+    const dominant =
+      group.find((p) => classify(p) === 'landscape') ?? group.find((p) => classify(p) === 'square') ?? group[0];
+    const rest = group.filter((p) => p !== dominant);
+    return { template: 'three-mixed', assetIds: [dominant.assetId, ...rest.map((p) => p.assetId)] };
   }
-  if (group.length === 4) return { template: 'collage-4', assetIds };
+  if (group.length === 4) {
+    // Exactly one landscape among four reads best as the dominant full-width photo with
+    // the other three justified below it (mirrors `templateForGroup` in
+    // `lib/photo-book-repair.ts`); any other mix balances fine as a 2+2 grid.
+    const landscapes = group.filter((p) => classify(p) === 'landscape');
+    if (landscapes.length === 1) {
+      const rest = group.filter((p) => p !== landscapes[0]);
+      return { template: 'four-mixed', assetIds: [landscapes[0].assetId, ...rest.map((p) => p.assetId)] };
+    }
+    return { template: 'collage-4', assetIds };
+  }
   return { template: 'collage-5', assetIds };
 }
 

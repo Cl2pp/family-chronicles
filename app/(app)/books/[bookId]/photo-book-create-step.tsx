@@ -27,6 +27,7 @@ import {
   IconCircle,
   IconCircleCheck,
   IconExternalLink,
+  IconInfoCircle,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
   IconMessageCircle,
@@ -183,9 +184,19 @@ function PhotoBookConfigPanel({
         )}
       </Box>
       <Box>
-        <Text fz={13} fw={500} mb={6}>
-          {tp.style}
-        </Text>
+        {/* "Stil" says nothing by itself — the info bubble explains what a style even
+            changes, and the line under the picker describes the currently selected one
+            (same pattern as the grouping hint above). */}
+        <Group gap={4} mb={6} align="center">
+          <Text fz={13} fw={500}>
+            {tp.style}
+          </Text>
+          <Tooltip label={tp.styleIntro} multiline w={280} events={{ hover: true, focus: true, touch: true }}>
+            <Text component="span" c="dimmed" lh={0} style={{ cursor: 'help' }} aria-label={tp.styleIntro}>
+              <IconInfoCircle size={15} />
+            </Text>
+          </Tooltip>
+        </Group>
         <Group gap={8}>
           {PHOTO_BOOK_STYLES.map((style) => (
             <Button
@@ -199,6 +210,9 @@ function PhotoBookConfigPanel({
             </Button>
           ))}
         </Group>
+        <Text fz={11} c="dimmed" mt={6}>
+          {tp.styleDescriptions[book.style]}
+        </Text>
       </Box>
       <Box>
         <Text fz={13} fw={500} mb={6}>

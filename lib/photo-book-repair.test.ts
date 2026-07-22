@@ -239,3 +239,81 @@ describe('repair regressions', () => {
     expect(checkPhotoBookPlanConsistency(repaired, contentOf(photos))).toEqual([]);
   });
 });
+
+describe('templateForGroup — four-mixed / collage-6', () => {
+  it('promotes a lone landscape among four to four-mixed, landscape first', () => {
+    const { template, ordered } = templateForGroup([portrait('a'), landscape('b'), portrait('c'), portrait('d')]);
+    expect(template).toBe('four-mixed');
+    expect(ordered[0].assetId).toBe('b');
+  });
+
+  it('keeps four photos with several landscapes as a collage-4', () => {
+    const { template } = templateForGroup([landscape('a'), landscape('b'), portrait('c'), portrait('d')]);
+    expect(template).toBe('collage-4');
+  });
+
+  it('maps six photos to collage-6', () => {
+    const { template } = templateForGroup([
+      portrait('a'), portrait('b'), portrait('c'), portrait('d'), portrait('e'), portrait('f'),
+    ]);
+    expect(template).toBe('collage-6');
+  });
+});
+
+describe('blank divider pages (the empty-pages bug)', () => {
+  it('coerce drops a model-emitted photo-less divider page', () => {
+    const photos = [landscape('hero'), portrait('a'), portrait('b')];
+    const raw = {
+      style: 'classic',
+      cover: { heroAssetId: 'hero', title: 'Buch' },
+      sections: [
+        {
+          title: 'Tag 1',
+          pages: [
+            { template: 'divider', assetIds: [] },
+            { template: 'two-vertical', assetIds: ['a', 'b'] },
+          ],
+        },
+      ],
+    };
+    const result = coercePhotoBookPlan(raw, { photos, fallbackTitle: 'Buch', fallbackStyle: 'classic' });
+    expect(result).not.toBeNull();
+    expect(result!.plan.sections[0].pages).toHaveLength(1);
+    expect(result!.plan.sections[0].pages[0].template).toBe('two-vertical');
+    expect(result!.changes.some((c) => c.includes('divider'))).toBe(true);
+  });
+
+  it('coerce re-groups a model-emitted divider that holds a photo into a real photo page', () => {
+    const photos = [landscape('hero'), portrait('a')];
+    const raw = {
+      style: 'classic',
+      cover: { heroAssetId: 'hero', title: 'Buch' },
+      sections: [{ title: 'Tag 1', pages: [{ template: 'divider', assetIds: ['a'] }] }],
+    };
+    const result = coercePhotoBookPlan(raw, { photos, fallbackTitle: 'Buch', fallbackStyle: 'classic' });
+    expect(result).not.toBeNull();
+    const [page] = result!.plan.sections[0].pages;
+    expect(page.template).not.toBe('divider');
+    expect(page.assetIds).toEqual(['a']);
+  });
+
+  it('repair drops a stored photo-less divider page instead of keeping the blank page', () => {
+    const photos = [landscape('hero'), portrait('a')];
+    const plan = planOf(
+      [
+        {
+          title: 'Tag 1',
+          pages: [
+            { template: 'divider', assetIds: [] },
+            { template: 'full-framed', assetIds: ['a'] },
+          ],
+        },
+      ],
+      { heroAssetId: 'hero' },
+    );
+    const { plan: repaired, changes } = repairPhotoBookPlan(plan, { photos });
+    expect(repaired.sections[0].pages).toHaveLength(1);
+    expect(repaired.sections[0].pages[0].template).toBe('full-framed');
+    expect(changes.some((c) => c.includes('blank divider'))).toBe(true);
+  });
+});

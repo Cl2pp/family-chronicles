@@ -67,6 +67,7 @@ import {
   applyPhotoLayoutOp,
   findMergeSectionsIndexHazard,
   removePhotoFromPlan,
+  sweepBlankPages,
   type PhotoLayoutOp,
 } from '@/lib/photo-book-ops';
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
@@ -1380,6 +1381,11 @@ export async function updatePhotoBookLayout(input: {
       plan = result.plan;
       if (result.coverAssetId !== undefined) coverAssetId = result.coverAssetId;
     }
+
+    // Emptied pages survive as photo-less dividers DURING the batch (index stability —
+    // see `shrinkPage`), but a photo-less divider renders as a blank page, and the book
+    // must never contain blank pages — drop them before the plan is persisted.
+    plan = sweepBlankPages(plan);
 
     const validated = validatePhotoBookPlan(plan);
     if (!validated.ok) return err(`That change would leave the layout invalid: ${validated.error}`);

@@ -1113,3 +1113,32 @@ describe('buildPhotoBookAutoLayout — userDecision overrides (re-include fix re
     }
   });
 });
+
+describe('buildPhotoBookAutoLayout — mixed-orientation grouping (four-mixed / three-mixed order)', () => {
+  it('turns a leftover group of one landscape + three portraits into four-mixed, landscape first', () => {
+    const photos = [
+      photo({ assetId: 'opener', position: 0, takenAt: new Date(t0), width: 3000, height: 2000 }),
+      photo({ assetId: 'p1', position: 1, takenAt: new Date(t0 + HOUR), width: 1000, height: 1600 }),
+      photo({ assetId: 'l1', position: 2, takenAt: new Date(t0 + 2 * HOUR), width: 1600, height: 1000 }),
+      photo({ assetId: 'p2', position: 3, takenAt: new Date(t0 + 3 * HOUR), width: 1000, height: 1600 }),
+      photo({ assetId: 'p3', position: 4, takenAt: new Date(t0 + 4 * HOUR), width: 1000, height: 1600 }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
+    const group = plan.sections[0].pages.find((p) => p.assetIds.length === 4);
+    expect(group?.template).toBe('four-mixed');
+    expect(group?.assetIds[0]).toBe('l1');
+  });
+
+  it('puts the landscape first in a three-mixed group regardless of its incoming order', () => {
+    const photos = [
+      photo({ assetId: 'opener', position: 0, takenAt: new Date(t0), width: 3000, height: 2000 }),
+      photo({ assetId: 'p1', position: 1, takenAt: new Date(t0 + HOUR), width: 1000, height: 1600 }),
+      photo({ assetId: 'l1', position: 2, takenAt: new Date(t0 + 2 * HOUR), width: 1600, height: 1000 }),
+      photo({ assetId: 'p2', position: 3, takenAt: new Date(t0 + 3 * HOUR), width: 1000, height: 1600 }),
+    ];
+    const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
+    const trio = plan.sections[0].pages.find((p) => p.assetIds.length === 3);
+    expect(trio?.template).toBe('three-mixed');
+    expect(trio?.assetIds[0]).toBe('l1');
+  });
+});

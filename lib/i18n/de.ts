@@ -732,6 +732,8 @@ export const de: Dictionary = {
         preview: 'Vorschau',
         previewHint: 'Automatisch aus deinen Fotos erstellt — wähle einen Stil und generiere jederzeit neu.',
         style: 'Stil',
+        styleIntro:
+          'Der Stil bestimmt das ganze Erscheinungsbild deines Buches: Schriften, Farben, Seitenhintergrund und wie Fotos gerahmt werden. Du kannst ihn jederzeit wechseln — deine Fotos und das Layout bleiben gleich.',
         styleNames: {
           classic: 'Klassisch',
           modern: 'Modern',
@@ -739,6 +741,14 @@ export const de: Dictionary = {
           heirloom: 'Erbstück',
           bold: 'Mutig',
           journal: 'Reisetagebuch',
+        },
+        styleDescriptions: {
+          classic: 'Zeitlos und warm: Serifenschrift, Cremetöne, Fotos mit feinem weißen Passepartout und zartem Rahmen.',
+          modern: 'Klar und modern: serifenlose Schrift, weiße Seiten, Fotos randlos und ohne Schnörkel.',
+          gallery: 'Wie ein Ausstellungskatalog: reines Weiß, viel Raum, die Fotos sprechen für sich.',
+          heirloom: 'Nostalgisch wie ein altes Familienalbum: warme Pergamenttöne, breite Passepartouts, Zierlinien.',
+          bold: 'Dramatisch und plakativ: schwarze Seiten, weiße Schrift — lässt Farben leuchten.',
+          journal: 'Verspielt wie ein Reisetagebuch: Papieroptik, Handschrift-Überschriften, Fotos wie eingeklebt.',
         },
         regenerate: 'Neu erstellen',
         regenerating: 'Wird erstellt…',
