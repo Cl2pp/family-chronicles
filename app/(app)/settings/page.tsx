@@ -10,6 +10,7 @@ import { getActiveChronicle } from '@/lib/active-chronicle';
 import { canManage, type AccessRole } from '@/lib/permissions';
 import { getI18n } from '@/lib/i18n/server';
 import { LOCALE_BCP47 } from '@/lib/i18n/config';
+import { ChronicleSwitcher } from '@/components/chronicle-switcher';
 import { BooksLinkCard } from './books-link-card';
 import { ChangePasswordForm } from './change-password-form';
 import { ChroniclesCard } from './chronicles-card';
@@ -70,6 +71,16 @@ export default async function SettingsPage() {
       <Title order={1} mb="lg">
         {t.settings.title}
       </Title>
+
+      {/* Mobile's only home for the space switcher — the sidebar that carries it on
+          desktop is collapsed away there, and putting it above the content on every
+          screen cost the chat view its viewport. */}
+      <Box hiddenFrom="sm" mb="lg">
+        <ChronicleSwitcher
+          chronicles={chronicles.map((c) => ({ id: c.id, name: c.name }))}
+          activeChronicleId={active?.id ?? null}
+        />
+      </Box>
 
       <SettingsTabs
         account={
