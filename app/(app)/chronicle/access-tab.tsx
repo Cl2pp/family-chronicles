@@ -9,6 +9,7 @@ import {
   CopyButton,
   Group,
   Modal,
+  Radio,
   Select,
   Stack,
   Table,
@@ -17,18 +18,22 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconCopy, IconMailPlus } from '@tabler/icons-react';
+import { IconCopy, IconLink, IconMailPlus } from '@tabler/icons-react';
 import type { AccessRole } from '@/lib/permissions';
 import { useI18n } from '@/lib/i18n/client';
 import { personFullName } from '@/lib/person-name';
 import {
+  approveJoinRequestAction,
+  createJoinLinkAction,
+  declineJoinRequestAction,
   invite,
   linkMemberPersonAction,
   resendInviteAction,
   revokeInviteAction,
+  revokeJoinLinkAction,
   unlinkMemberPersonAction,
 } from './actions';
-import type { InviteRow, MemberRow } from './types';
+import type { InviteRow, JoinLinkRow, JoinRequestRow, MemberRow } from './types';
 import { initials } from './utils';
 
 /** A person of the active chronicle's tree, for the link pickers. */
@@ -43,12 +48,17 @@ export function AccessTab({
   chronicleId,
   members,
   invites,
+  joinLink,
+  joinRequests,
   canManage: manage,
   treePeople,
 }: {
   chronicleId: string;
   members: MemberRow[];
   invites: InviteRow[];
+  /** The chronicle's signup link — only ever sent to owners. */
+  joinLink: JoinLinkRow | null;
+  joinRequests: JoinRequestRow[];
   canManage: boolean;
   treePeople: TreePersonOption[];
 }) {
@@ -66,6 +76,23 @@ export function AccessTab({
   const [revokeTarget, setRevokeTarget] = useState<InviteRow | null>(null);
   const [linkTarget, setLinkTarget] = useState<MemberRow | null>(null);
   const [linkPersonId, setLinkPersonId] = useState<string | null>(null);
+  const [joinLinkPending, startJoinLinkTransition] = useTransition();
+  const [createJoinLinkOpen, setCreateJoinLinkOpen] = useState(false);
+  const [revokeJoinLinkOpen, setRevokeJoinLinkOpen] = useState(false);
+  // The mode is fixed once the link exists, so this only ever drives the create
+  // modal. Approval is the default: it is the safe half of the choice.
+  const [joinLinkMode, setJoinLinkMode] = useState<'approval' | 'open'>('approval');
+  const [joinLinkRole, setJoinLinkRole] = useState<AccessRole>('contributor');
+  // Same reasoning as the invite rows: only the request being decided reacts.
+  const [busyRequestId, setBusyRequestId] = useState<string | null>(null);
+  const [, startRequestTransition] = useTransition();
+  // Role picked per request, defaulting to contributor like a fresh invite.
+  const [requestRoles, setRequestRoles] = useState<Record<string, AccessRole>>({});
+  // Same origin trick as the invite link. Safe to read during render here: the
+  // access panel is `keepMounted={false}`, so it only ever mounts in the browser
+  // — there is no server render of this to disagree with.
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const joinUrl = joinLink ? `${origin}/join/${joinLink.token}` : null;
   const form = useForm({
     initialValues: { email: '', role: 'contributor' as AccessRole, personId: '' },
     validate: {
@@ -76,6 +103,16 @@ export function AccessTab({
   // Only tree people without an account can be linked ('' = not in the tree yet).
   const unlinkedPeople = treePeople.filter((p) => !p.userId);
   const personOptions = unlinkedPeople.map((p) => ({ value: p.id, label: personFullName(p) }));
+
+  const roleOptions = [
+    { value: 'viewer', label: t.roles.viewer },
+    { value: 'contributor', label: t.roles.contributor },
+    { value: 'owner', label: t.roles.owner },
+  ];
+  // An open link is a standing grant to anyone it reaches, so ownership is off
+  // the menu there (the server refuses it too). Approving a named person as
+  // owner stays possible — that is a decision about someone, not about a link.
+  const openLinkRoleOptions = roleOptions.filter((r) => r.value !== 'owner');
 
   function openInvite() {
     form.reset();
@@ -120,6 +157,89 @@ export function AccessTab({
         });
       } finally {
         setBusyInviteId(null);
+      }
+    });
+  }
+
+  function openCreateJoinLink() {
+    setJoinLinkMode('approval');
+    setJoinLinkRole('contributor');
+    setCreateJoinLinkOpen(true);
+  }
+
+  /** The link itself arrives via the page's revalidation, not from the return value. */
+  function handleCreateJoinLink() {
+    startJoinLinkTransition(async () => {
+      try {
+        const { created } = await createJoinLinkAction({
+          chronicleId,
+          requiresApproval: joinLinkMode === 'approval',
+          role: joinLinkRole,
+        });
+        setCreateJoinLinkOpen(false);
+        // The settings just picked only took effect if this actually made the
+        // link — say so plainly rather than let the card contradict the toast.
+        notifications.show({
+          message: created ? t.access.signupLinkCreated : t.access.signupLinkAlreadyExisted,
+        });
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : t.access.couldNotCreateSignupLink,
+        });
+      }
+    });
+  }
+
+  function handleRevokeJoinLink() {
+    startJoinLinkTransition(async () => {
+      try {
+        await revokeJoinLinkAction({ chronicleId });
+        setRevokeJoinLinkOpen(false);
+        notifications.show({ message: t.access.signupLinkRevoked });
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : t.access.couldNotRevokeSignupLink,
+        });
+      }
+    });
+  }
+
+  function handleApproveRequest(row: JoinRequestRow) {
+    setBusyRequestId(row.id);
+    startRequestTransition(async () => {
+      try {
+        await approveJoinRequestAction({
+          chronicleId,
+          requestId: row.id,
+          role: requestRoles[row.id] ?? 'contributor',
+        });
+        notifications.show({ message: t.access.requestApproved });
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : t.access.couldNotApproveRequest,
+        });
+      } finally {
+        setBusyRequestId(null);
+      }
+    });
+  }
+
+  function handleDeclineRequest(row: JoinRequestRow) {
+    setBusyRequestId(row.id);
+    startRequestTransition(async () => {
+      try {
+        await declineJoinRequestAction({ chronicleId, requestId: row.id });
+        notifications.show({ message: t.access.requestDeclined });
+      } catch (e) {
+        notifications.show({
+          color: 'red',
+          message: e instanceof Error ? e.message : t.access.couldNotDeclineRequest,
+        });
+      } finally {
+        setBusyRequestId(null);
       }
     });
   }
@@ -249,6 +369,134 @@ export function AccessTab({
         </Table>
       </Card>
 
+      {manage && (
+        <div>
+          <Text size="sm" fw={600} mb="xs">
+            {t.access.signupLinkTitle}
+          </Text>
+          <Card withBorder radius="md" p="md">
+            <Stack gap="sm">
+              <Text size="xs" c="dimmed">
+                {t.access.signupLinkHint}
+              </Text>
+              {joinUrl && joinLink ? (
+                <>
+                  {/* What the link actually does is the one thing an owner must
+                      not have to guess, so it sits above the URL, not in a
+                      tooltip. Revoking is the only way to change it. */}
+                  <Group gap="xs">
+                    <Badge
+                      variant="light"
+                      color={joinLink.requiresApproval ? 'brand' : 'orange'}
+                    >
+                      {joinLink.requiresApproval
+                        ? t.access.signupLinkModeApprovalBadge
+                        : t.access.signupLinkModeOpenBadge}
+                    </Badge>
+                    {!joinLink.requiresApproval && (
+                      <Badge variant="outline" color="slate">
+                        {t.access.signupLinkGrantsRole(t.roles[joinLink.role])}
+                      </Badge>
+                    )}
+                  </Group>
+                  <TextInput value={joinUrl} readOnly aria-label={t.access.signupLinkTitle} />
+                  <Group justify="flex-end" gap="xs">
+                    <Button
+                      variant="light"
+                      color="red"
+                      onClick={() => setRevokeJoinLinkOpen(true)}
+                    >
+                      {t.access.revokeSignupLink}
+                    </Button>
+                    <CopyButton value={joinUrl}>
+                      {({ copied, copy }) => (
+                        <Button
+                          leftSection={<IconCopy size={16} />}
+                          color={copied ? 'teal' : 'brand'}
+                          onClick={copy}
+                        >
+                          {copied ? t.access.copied : t.access.copyLink}
+                        </Button>
+                      )}
+                    </CopyButton>
+                  </Group>
+                </>
+              ) : (
+                <Group justify="flex-end">
+                  <Button
+                    leftSection={<IconLink size={16} />}
+                    variant="light"
+                    onClick={openCreateJoinLink}
+                  >
+                    {t.access.createSignupLink}
+                  </Button>
+                </Group>
+              )}
+            </Stack>
+          </Card>
+        </div>
+      )}
+
+      {manage && joinRequests.length > 0 && (
+        <div>
+          <Text size="sm" fw={600} mb="xs">
+            {t.access.joinRequests}
+          </Text>
+          <Card withBorder radius="md" p={0}>
+            <Table verticalSpacing="sm" horizontalSpacing="md">
+              <Table.Tbody>
+                {joinRequests.map((r) => (
+                  <Table.Tr key={r.id}>
+                    <Table.Td>
+                      <Text size="sm">{r.name}</Text>
+                      <Text size="xs" c="dimmed">
+                        {r.email}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: 'right' }}>
+                      {/* Allowed to wrap: side by side where there is room,
+                          stacked on a phone rather than clipped at the edge. */}
+                      <Group justify="flex-end" gap="xs">
+                        <Select
+                          size="xs"
+                          w={150}
+                          aria-label={t.access.role}
+                          data={roleOptions}
+                          value={requestRoles[r.id] ?? 'contributor'}
+                          onChange={(value) =>
+                            setRequestRoles((roles) => ({
+                              ...roles,
+                              [r.id]: (value as AccessRole) ?? 'contributor',
+                            }))
+                          }
+                          allowDeselect={false}
+                        />
+                        <Button
+                          size="xs"
+                          loading={busyRequestId === r.id}
+                          onClick={() => handleApproveRequest(r)}
+                        >
+                          {t.access.approveRequest}
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="light"
+                          color="red"
+                          disabled={busyRequestId === r.id}
+                          onClick={() => handleDeclineRequest(r)}
+                        >
+                          {t.access.declineRequest}
+                        </Button>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Card>
+        </div>
+      )}
+
       {invites.length > 0 && (
         <div>
           <Text size="sm" fw={600} mb="xs">
@@ -365,11 +613,7 @@ export function AccessTab({
               />
               <Select
                 label={t.access.role}
-                data={[
-                  { value: 'viewer', label: t.roles.viewer },
-                  { value: 'contributor', label: t.roles.contributor },
-                  { value: 'owner', label: t.roles.owner },
-                ]}
+                data={roleOptions}
                 allowDeselect={false}
                 {...form.getInputProps('role')}
               />
@@ -412,6 +656,72 @@ export function AccessTab({
               loading={revokeTarget !== null && busyInviteId === revokeTarget.id}
             >
               {t.access.revokeInvitation}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={createJoinLinkOpen}
+        onClose={() => setCreateJoinLinkOpen(false)}
+        title={t.access.createSignupLinkModalTitle}
+        radius="md"
+      >
+        <Stack>
+          <Radio.Group
+            value={joinLinkMode}
+            onChange={(value) => setJoinLinkMode(value as 'approval' | 'open')}
+            label={t.access.signupLinkModeLabel}
+          >
+            <Stack gap="sm" mt="xs">
+              <Radio
+                value="approval"
+                label={t.access.signupLinkModeApproval}
+                description={t.access.signupLinkModeApprovalHint}
+              />
+              <Radio
+                value="open"
+                label={t.access.signupLinkModeOpen}
+                description={t.access.signupLinkModeOpenHint}
+              />
+            </Stack>
+          </Radio.Group>
+          {/* Only the open mode needs a role up front — in approval mode the
+              owner picks one per request, where they know who is asking. */}
+          {joinLinkMode === 'open' && (
+            <Select
+              label={t.access.signupLinkRoleLabel}
+              data={openLinkRoleOptions}
+              value={joinLinkRole}
+              onChange={(value) => setJoinLinkRole((value as AccessRole) ?? 'contributor')}
+              allowDeselect={false}
+            />
+          )}
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={() => setCreateJoinLinkOpen(false)}>
+              {t.common.cancel}
+            </Button>
+            <Button onClick={handleCreateJoinLink} loading={joinLinkPending}>
+              {t.access.createSignupLink}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={revokeJoinLinkOpen}
+        onClose={() => setRevokeJoinLinkOpen(false)}
+        title={t.access.revokeSignupLinkModalTitle}
+        radius="md"
+      >
+        <Stack>
+          <Text size="sm">{t.access.revokeSignupLinkConfirmText}</Text>
+          <Group justify="flex-end" mt="sm">
+            <Button variant="default" onClick={() => setRevokeJoinLinkOpen(false)}>
+              {t.common.cancel}
+            </Button>
+            <Button color="red" onClick={handleRevokeJoinLink} loading={joinLinkPending}>
+              {t.access.revokeSignupLink}
             </Button>
           </Group>
         </Stack>

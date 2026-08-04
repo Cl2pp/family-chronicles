@@ -248,6 +248,54 @@ export const invitations = pgTable(
   (t) => [index('invitations_chronicle_idx').on(t.chronicleId)],
 );
 
+/**
+ * A chronicle's reusable signup link. Unlike an invitation it names no
+ * recipient and never expires — anyone holding it can sign up through it.
+ * Revoking is simply deleting the row.
+ *
+ * The owner picks one of two modes when creating it, and it keeps that mode for
+ * life: changing your mind means revoking and creating a new link, so a link
+ * you handed out can never quietly turn into a more permissive one.
+ */
+export const joinLinks = pgTable('join_links', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  /** Unique: one link per chronicle, so sharing it twice shares the same URL. */
+  chronicleId: uuid('chronicle_id')
+    .notNull()
+    .unique()
+    .references(() => chronicles.id, { onDelete: 'cascade' }),
+  token: text('token').notNull().unique(),
+  /** True = holding the link only buys you a place in the owner's approval queue. */
+  requiresApproval: boolean('requires_approval').notNull().default(true),
+  /** Role granted on a direct join; ignored in approval mode, where the owner picks per request. */
+  accessRole: accessRole('access_role').notNull().default('contributor'),
+  createdBy: text('created_by')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
+/**
+ * A signed-up user waiting on an approval-mode signup link. There is no status
+ * column: a pending request IS the row, and deciding it — approve (which writes
+ * the membership) or decline — deletes it again.
+ */
+export const joinRequests = pgTable(
+  'join_requests',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    chronicleId: uuid('chronicle_id')
+      .notNull()
+      .references(() => chronicles.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  /** Asking twice leaves one row — the second insert hits this and does nothing. */
+  (t) => [uniqueIndex('join_requests_chronicle_user_uq').on(t.chronicleId, t.userId)],
+);
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Stories — each one belongs to exactly one chronicle
  * ────────────────────────────────────────────────────────────────────────── */

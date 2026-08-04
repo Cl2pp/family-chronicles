@@ -383,6 +383,39 @@ export const en = {
     invitationRevoked: 'Invitation revoked',
     couldNotRevokeInvitation: 'Could not revoke that invitation',
     inviteExpired: 'Expired',
+    signupLinkTitle: 'Signup link',
+    signupLinkHint:
+      'One link you can share with anyone — in a message, a group chat, on a card. You decide when creating it whether people get in straight away or wait for your confirmation.',
+    createSignupLink: 'Create signup link',
+    createSignupLinkModalTitle: 'Create a signup link',
+    signupLinkModeLabel: 'What happens when someone uses the link?',
+    signupLinkModeApproval: 'I confirm every request',
+    signupLinkModeApprovalHint:
+      'They sign up and land in a list here. Nobody sees anything until you say yes, and you pick their role then.',
+    signupLinkModeOpen: 'Anyone with the link is in',
+    signupLinkModeOpenHint:
+      'They sign up and have access right away. Handy for a whole family at once — but anyone the link is forwarded to gets in too.',
+    signupLinkModeApprovalBadge: 'You confirm each request',
+    signupLinkModeOpenBadge: 'Instant access',
+    signupLinkRoleLabel: 'Role everyone joining gets',
+    signupLinkGrantsRole: (role: string) => `Joins as ${role}`,
+    signupLinkCreated: 'Signup link created',
+    signupLinkAlreadyExisted:
+      'This chronicle already had a signup link, so that one is still in use. Revoke it first to set it up differently.',
+    couldNotCreateSignupLink: 'Could not create the signup link',
+    revokeSignupLink: 'Revoke link',
+    revokeSignupLinkModalTitle: 'Revoke the signup link?',
+    revokeSignupLinkConfirmText:
+      'The link stops working for everyone you shared it with. Requests already waiting stay in your list, and you can create a new link at any time.',
+    signupLinkRevoked: 'Signup link revoked',
+    couldNotRevokeSignupLink: 'Could not revoke the signup link',
+    joinRequests: 'Join requests',
+    approveRequest: 'Approve',
+    declineRequest: 'Decline',
+    requestApproved: 'Request approved',
+    requestDeclined: 'Request declined',
+    couldNotApproveRequest: 'Could not approve that request',
+    couldNotDeclineRequest: 'Could not decline that request',
     treePersonLabel: 'Who is this in the family tree?',
     treePersonPlaceholder: 'Pick a person',
     notInTreeYet: 'Not in the tree yet',
@@ -881,6 +914,24 @@ export const en = {
       'You now have access to the chronicle, and your place in the family tree is linked to your account.',
     acceptedLinkFailedText:
       'You now have access to the chronicle — but your place in the family tree could not be linked automatically. Ask an owner to link your account on the Access tab.',
+  },
+  join: {
+    title: 'Join a chronicle',
+    notFound: 'This signup link is not valid any more.',
+    goToChronicles: 'Go to your chronicles',
+    confirmText: (chronicle: string) => `You can ask to join “${chronicle}”.`,
+    confirmApprovalText:
+      'An owner of the chronicle has to confirm your request before you can see anything.',
+    confirmRequest: 'Ask to join',
+    confirmTextOpen: (chronicle: string) => `You’ve been invited to “${chronicle}”.`,
+    confirmOpenText: 'One click and you’re in — nothing else to wait for.',
+    confirmJoin: 'Join',
+    pendingTitle: 'Request sent',
+    pendingText:
+      'An owner of the chronicle now has to confirm it. As soon as they do, the chronicle shows up here for you.',
+    alreadyMemberTitle: 'You’re already in',
+    alreadyMemberText: (chronicle: string) =>
+      `You already have access to “${chronicle}” — nothing to do here.`,
   },
   offline: {
     title: 'You’re offline',
