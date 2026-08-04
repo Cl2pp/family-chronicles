@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { listChroniclesForUser } from '@/lib/chronicles';
 import { addMessage, resolveDraftCard } from '@/lib/conversations';
 import { listChroniclePeople } from '@/lib/people';
 import { matchPeopleByName } from '@/lib/person-match';
@@ -8,19 +7,16 @@ import {
   addPeopleToStory,
   applyStoryEdit,
   canUserEditStory,
-  chroniclesForStory,
   claimChatAssetsForStory,
   listChronicleStoryTexts,
   listStoriesForUser,
   listStoryPeople,
   removePeopleFromStory,
-  shareStoryToChronicle,
   type StoryListItem,
 } from '@/lib/stories';
 import { saveProposalAsStory } from '@/lib/story-save';
 import { findLikelyDuplicates } from '@/lib/story-similarity';
 import { eventDateToParts } from '@/lib/dates';
-import { canContribute, type AccessRole } from '@/lib/permissions';
 import { defineTool, type ToolContext } from './types';
 import { ensureContributor, resolvePerson } from './util';
 
@@ -36,12 +32,16 @@ function carriedEventDate(
     : current;
 }
 
-/** Find one of the user's stories by exact title (case-insensitive) or id. */
+/** Find one of the ACTIVE CHRONICLE's stories by exact title (case-insensitive) or id.
+ *  Hard-scoped: a chronicle's stories are never visible from a chat in another one. */
 async function resolveStory(
   ctx: ToolContext,
   ref: string,
 ): Promise<{ story: StoryListItem } | { error: string }> {
-  const stories = await listStoriesForUser(ctx.userId);
+  if (!ctx.activeChronicleId) {
+    return { error: 'There is no active chronicle yet. Use create_chronicle first.' };
+  }
+  const stories = await listStoriesForUser(ctx.userId, ctx.activeChronicleId);
   const wanted = ref.trim().toLowerCase();
   const matches = stories.filter((s) => s.id === ref.trim() || s.title.toLowerCase() === wanted);
   if (matches.length === 0) return { error: `No story titled "${ref}" was found.` };
@@ -185,44 +185,6 @@ export const draftStoryTool = defineTool({
   },
 });
 
-/** share_story — also share an existing story into another of the user's chronicles. */
-export const shareStoryTool = defineTool({
-  name: 'share_story',
-  description:
-    'Share an existing story into another chronicle the user belongs to. Identify the story by its ' +
-    'title (or id) and the target chronicle by name. Requires contributor access in the target chronicle.',
-  schema: z.object({
-    story: z.string().min(1).describe('The story title (or id) to share.'),
-    chronicleName: z.string().min(1).describe('The chronicle to share it into.'),
-  }),
-  async execute(args, ctx) {
-    const found = await resolveStory(ctx, args.story);
-    if ('error' in found) return { ok: false, error: found.error };
-    const story = found.story;
-
-    const chronicles = await listChroniclesForUser(ctx.userId);
-    const wantedChronicle = args.chronicleName.trim().toLowerCase();
-    const chronicleMatches = chronicles.filter((f) => f.name.toLowerCase() === wantedChronicle);
-    if (chronicleMatches.length === 0) return { ok: false, error: `You are not in a chronicle named "${args.chronicleName}".` };
-    if (chronicleMatches.length > 1) return { ok: false, error: `Several chronicles are named "${args.chronicleName}" — be more specific.` };
-    const chronicle = chronicleMatches[0];
-
-    if (story.chronicleIds.includes(chronicle.id)) {
-      return { ok: false, error: `"${story.title}" is already shared with ${chronicle.name}.` };
-    }
-    if (!canContribute(chronicle.role as AccessRole)) {
-      return { ok: false, error: `You need contributor access in ${chronicle.name} to share into it.` };
-    }
-
-    await shareStoryToChronicle(story.id, chronicle.id, ctx.userId);
-    return {
-      ok: true,
-      message: `Shared "${story.title}" into ${chronicle.name}.`,
-      receipt: { label: `Shared "${story.title}" with ${chronicle.name}`, href: `/stories/${story.id}` },
-    };
-  },
-});
-
 /** get_story — read tool: one story in full, for answering questions or before an edit. */
 export const getStoryTool = defineTool({
   name: 'get_story',
@@ -316,7 +278,8 @@ export const updateStoryTool = defineTool({
       return { ok: false, error: "Only the story's author or a chronicle owner can edit it." };
     }
 
-    const chronicles = await chroniclesForStory(s.id);
+    // A story lives in exactly one chronicle now, and resolveStory only ever finds one
+    // in the active chronicle — so that's it, no separate lookup needed.
     const date = carriedEventDate(s, args);
     return {
       ok: true,
@@ -334,8 +297,8 @@ export const updateStoryTool = defineTool({
           people: [],
           sourceText: args.newSourceText ?? null,
         },
-        chronicleId: chronicles[0]?.id ?? '',
-        chronicleName: chronicles[0]?.name ?? 'your chronicle',
+        chronicleId: s.chronicleId,
+        chronicleName: ctx.activeChronicleName ?? 'your chronicle',
       },
     };
   },
@@ -594,16 +557,17 @@ export const untagStoryPeopleTool = defineTool({
   },
 });
 
-/** list_stories — read tool: the user's recent stories across all their chronicles. */
+/** list_stories — read tool: the active chronicle's recent stories. */
 export const listStoriesTool = defineTool({
   name: 'list_stories',
   description:
-    "List the user's recent stories across all their chronicles (title, summary, year, status, id). " +
-    'Use to find a story to share, to answer questions about what has been recorded, or to check ' +
-    'whether an event is already recorded before drafting a new story about it.',
+    "List the active chronicle's recent stories (title, summary, year, status, id). Use to find a " +
+    'story to update or tag, to answer questions about what has been recorded, or to check whether ' +
+    'an event is already recorded before drafting a new story about it.',
   schema: z.object({}),
   async execute(_args, ctx) {
-    const stories = await listStoriesForUser(ctx.userId);
+    if (!ctx.activeChronicleId) return { ok: true, message: JSON.stringify([]) };
+    const stories = await listStoriesForUser(ctx.userId, ctx.activeChronicleId);
     return {
       ok: true,
       message: JSON.stringify(

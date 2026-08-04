@@ -50,8 +50,6 @@ export function progressLabel(t: ChatDict, tool: string, args: Record<string, st
     case 'list_stories':
     case 'get_story':
       return p.readingStories;
-    case 'share_story':
-      return p.sharingStory;
     case 'tag_story_people':
     case 'untag_story_people':
       return p.taggingPeople;

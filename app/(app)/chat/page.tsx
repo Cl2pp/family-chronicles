@@ -17,7 +17,9 @@ export default async function ChatPage({
   const cookieValue = (await cookies()).get('activeChronicleId')?.value;
   const { active } = await resolveActiveChronicle(user.id, cookieValue);
 
-  const convo = await resumableConversation(user.id);
+  // No active chronicle yet (a brand-new sign-up) means no chat can have been
+  // persisted to resume — see respondBootstrap in ./respond for why.
+  const convo = active ? await resumableConversation(user.id, active.id) : null;
   const initialMessages = convo ? await buildChatMessages(convo.id) : [];
 
   return (

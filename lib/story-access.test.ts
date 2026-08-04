@@ -158,17 +158,18 @@ describe('computeVisiblePersonIds', () => {
 function ctx(over: Partial<StoryAccessContext> = {}): StoryAccessContext {
   return {
     userId: 'user-anna',
+    chronicleId: 'fam', // 'fam' is a family-mode chronicle
     personId: 'anna',
     visiblePersonIds: computeVisiblePersonIds('anna', FAMILY),
-    ownerChronicleIds: new Set(),
-    openChronicleIds: new Set(),
-    memberChronicleIds: new Set(['fam']), // 'fam' is a family-mode chronicle
+    isMember: true,
+    isOwner: false,
+    isOpenMode: false,
     ...over,
   };
 }
 
 function story(over: Partial<StoryAccessInput> = {}): StoryAccessInput {
-  return { submittedBy: 'user-other', chronicleIds: ['fam'], personIds: [], ...over };
+  return { submittedBy: 'user-other', chronicleId: 'fam', personIds: [], ...over };
 }
 
 describe('canReadStory', () => {
@@ -181,7 +182,7 @@ describe('canReadStory', () => {
     const owner = ctx({
       personId: null,
       visiblePersonIds: new Set(),
-      ownerChronicleIds: new Set(['fam']),
+      isOwner: true,
     });
     expect(canReadStory(owner, story({ personIds: ['stranger'] }))).toBe(true);
     expect(canReadStory(owner, story({ personIds: [] }))).toBe(true);
@@ -191,14 +192,14 @@ describe('canReadStory', () => {
     const author = ctx({
       personId: null,
       visiblePersonIds: new Set(),
-      memberChronicleIds: new Set(),
+      isMember: false,
     });
     expect(canReadStory(author, story({ submittedBy: 'user-anna' }))).toBe(true);
   });
 
   it('lets every member read every story in an open-mode chronicle', () => {
     const member = ctx({
-      openChronicleIds: new Set(['fam']),
+      isOpenMode: true,
       visiblePersonIds: new Set(['anna']),
     });
     expect(canReadStory(member, story({ personIds: ['stranger'] }))).toBe(true);
@@ -208,7 +209,7 @@ describe('canReadStory', () => {
   it('restricts zero-people stories to author and owners in family mode', () => {
     const zero = story({ personIds: [] });
     expect(canReadStory(ctx(), zero)).toBe(false); // plain member
-    expect(canReadStory(ctx({ ownerChronicleIds: new Set(['fam']) }), zero)).toBe(true);
+    expect(canReadStory(ctx({ isOwner: true }), zero)).toBe(true);
     expect(canReadStory(ctx(), story({ personIds: [], submittedBy: 'user-anna' }))).toBe(true);
   });
 
@@ -218,24 +219,23 @@ describe('canReadStory', () => {
     expect(canReadStory(unlinked, story({ submittedBy: 'user-anna' }))).toBe(true);
   });
 
-  it('grants access when ANY of the story’s chronicles does (open membership wins)', () => {
-    const member = ctx({
-      memberChronicleIds: new Set(['fam', 'open']),
-      openChronicleIds: new Set(['open']),
-    });
-    const shared = story({ chronicleIds: ['fam', 'open'], personIds: ['stranger'] });
-    expect(canReadStory(member, shared)).toBe(true);
-    // Without the open share, the family-mode chronicle alone denies it.
-    expect(canReadStory(member, story({ personIds: ['stranger'] }))).toBe(false);
+  it('denies access when the viewer is not a member of the story’s chronicle', () => {
+    const outsider = ctx({ isMember: false });
+    expect(canReadStory(outsider, story({ personIds: ['anna'] }))).toBe(false);
+    // Owner/open flags on a context the viewer doesn't hold membership under don't help.
+    expect(canReadStory(ctx({ isMember: false, isOwner: true }), story())).toBe(false);
+    expect(canReadStory(ctx({ isMember: false, isOpenMode: true }), story())).toBe(false);
+    // Author bypass still wins regardless of membership.
+    expect(canReadStory(outsider, story({ submittedBy: 'user-anna' }))).toBe(true);
   });
 
-  it('grants nothing through chronicles the user is not a member of', () => {
-    // Even a story tagged with a visible person is invisible when it is only
-    // shared into chronicles outside the user's memberships.
-    const foreign = story({ chronicleIds: ['elsewhere'], personIds: ['anna'] });
+  it('denies a story that lives in a different chronicle than the context was loaded for', () => {
+    // A story tagged with a visible person is still invisible when it lives in a
+    // chronicle other than the one this context was scoped to.
+    const foreign = story({ chronicleId: 'elsewhere', personIds: ['anna'] });
     expect(canReadStory(ctx(), foreign)).toBe(false);
-    // Owner role elsewhere doesn't help either.
-    const owner = ctx({ ownerChronicleIds: new Set(['fam']) });
+    // Owner role in 'fam' doesn't help either — it's not the story's chronicle.
+    const owner = ctx({ isOwner: true });
     expect(canReadStory(owner, foreign)).toBe(false);
   });
 });
@@ -246,7 +246,7 @@ describe('filterReadableStories', () => {
       { id: 's1', ...story({ personIds: ['clara'] }) },
       { id: 's2', ...story({ personIds: ['stranger'] }) },
       { id: 's3', ...story({ submittedBy: 'user-anna' }) },
-      { id: 's4', ...story({ chronicleIds: ['elsewhere'], personIds: ['anna'] }) },
+      { id: 's4', ...story({ chronicleId: 'elsewhere', personIds: ['anna'] }) },
     ];
     expect(filterReadableStories(ctx(), stories).map((s) => s.id)).toEqual(['s1', 's3']);
   });

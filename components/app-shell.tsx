@@ -1,5 +1,6 @@
 'use client';
 
+import { useTransition } from 'react';
 import {
   AppShell,
   Avatar,
@@ -14,6 +15,7 @@ import {
   IconBinaryTree2,
   IconBook2,
   IconBooks,
+  IconChevronDown,
   IconLogout,
   IconMessageCircle,
   IconSettings,
@@ -25,9 +27,20 @@ import { authClient } from '@/lib/auth-client';
 import { useI18n } from '@/lib/i18n/client';
 import type { Dictionary } from '@/lib/i18n';
 import { BrandGlyph } from '@/components/brand-glyph';
+import { setActiveChronicle } from '@/app/(app)/settings/actions';
 
 /** Space reserved under content for the fixed mobile tab bar (60px bar + breathing room). */
 export const MOBILE_TABBAR_OFFSET = 72;
+
+/** Height of the persistent top bar holding the chronicle switcher (see AppShell.Header
+ * below) — Mantine offsets AppShell.Main and AppShell.Navbar by this automatically, so
+ * no manual padding constant like MOBILE_TABBAR_OFFSET is needed for it. */
+const HEADER_HEIGHT = 52;
+
+export interface ChronicleOption {
+  id: string;
+  name: string;
+}
 
 const NAV = [
   { href: '/chat', label: (t: Dictionary) => t.nav.chat, icon: IconMessageCircle },
@@ -59,11 +72,91 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/**
+ * Always-visible "which space am I in" switcher — chronicles are now hard-isolated,
+ * so without this a user has no way to tell why their stories "disappeared" after a
+ * switch. Renders in AppShell.Header, which is visible on both desktop and mobile
+ * (unlike AppShell.Navbar, which collapses on mobile).
+ */
+function ChronicleSwitcher({
+  chronicles,
+  activeChronicleId,
+}: {
+  chronicles: ChronicleOption[];
+  activeChronicleId: string | null;
+}) {
+  const router = useRouter();
+  const { t } = useI18n();
+  const [, startTransition] = useTransition();
+
+  // Brand-new user: no chronicle to switch to yet — point at creating the first
+  // one instead of rendering a switcher with nothing in it.
+  if (chronicles.length === 0) {
+    return (
+      <UnstyledButton component={Link} href="/chronicle/new">
+        <Text fz={13} fw={600} c="brand.7">
+          {t.chroniclesCard.startYourChronicle}
+        </Text>
+      </UnstyledButton>
+    );
+  }
+
+  const active = chronicles.find((c) => c.id === activeChronicleId) ?? chronicles[0];
+
+  function switchTo(id: string) {
+    if (id === active.id) return;
+    startTransition(async () => {
+      await setActiveChronicle(id);
+      router.refresh();
+    });
+  }
+
+  // Only one chronicle: nothing to switch to, so show the name without menu chrome.
+  if (chronicles.length === 1) {
+    return (
+      <Text fz={13} fw={600} truncate maw={240}>
+        {active.name}
+      </Text>
+    );
+  }
+
+  return (
+    <Menu position="bottom-start" withArrow width={220}>
+      <Menu.Target>
+        <UnstyledButton aria-label={t.chronicleSwitcher.ariaLabel}>
+          <Group gap={4} wrap="nowrap">
+            <Text fz={13} fw={600} truncate maw={200}>
+              {active.name}
+            </Text>
+            <IconChevronDown size={14} stroke={1.8} />
+          </Group>
+        </UnstyledButton>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Label>{t.settings.chroniclesTitle}</Menu.Label>
+        {chronicles.map((c) => (
+          <Menu.Item
+            key={c.id}
+            fw={c.id === active.id ? 600 : undefined}
+            onClick={() => switchTo(c.id)}
+          >
+            {c.name}
+          </Menu.Item>
+        ))}
+      </Menu.Dropdown>
+    </Menu>
+  );
+}
+
 export function AppChrome({
   user,
+  chronicles,
+  activeChronicleId,
   children,
 }: {
   user: { name: string; email: string; avatarUrl?: string | null };
+  chronicles: ChronicleOption[];
+  activeChronicleId: string | null;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -78,9 +171,17 @@ export function AppChrome({
 
   return (
     <AppShell
+      header={{ height: HEADER_HEIGHT }}
       navbar={{ width: 220, breakpoint: 'sm', collapsed: { mobile: true } }}
       padding={0}
     >
+      {/* ── Top bar (chronicle switcher — desktop and mobile) ──── */}
+      <AppShell.Header withBorder>
+        <Group h="100%" px="md" wrap="nowrap">
+          <ChronicleSwitcher chronicles={chronicles} activeChronicleId={activeChronicleId} />
+        </Group>
+      </AppShell.Header>
+
       {/* ── Sidebar ─────────────────────────────────────────── */}
       <AppShell.Navbar
         p="sm"

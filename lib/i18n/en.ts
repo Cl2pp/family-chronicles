@@ -13,7 +13,6 @@ export const en = {
     undo: 'Undo',
     undone: 'Undone',
     retry: 'Retry',
-    share: 'Share',
     appUpdatedReloading: 'The app was updated — reloading the latest version…',
   },
   nav: {
@@ -225,7 +224,7 @@ export const en = {
     uiLanguageDescription: 'The language of menus, buttons, and pages on this device.',
     chroniclesTitle: 'Chronicles',
     chroniclesHint:
-      'The selected chronicle is the one Chat, Stories and Tree open with. Expand a chronicle to edit its settings.',
+      "The selected chronicle is the space you're in — Chat, Stories and Tree only ever show its data. Expand a chronicle to edit its settings.",
     onlyOwners: 'Only owners can change these settings.',
     chronicleName: 'Chronicle name',
     chronicleNameRequired: 'A chronicle name is required',
@@ -253,6 +252,9 @@ export const en = {
     installTitle: 'Add to home screen',
     appTitle: 'App',
   },
+  chronicleSwitcher: {
+    ariaLabel: 'Switch chronicle',
+  },
   chroniclesCard: {
     noChroniclesYet: 'No chronicles yet',
     createFirstHint: 'Create a chronicle to start collecting stories and building your tree.',
@@ -279,7 +281,6 @@ export const en = {
   },
   tree: {
     pageTitle: 'Family Tree',
-    activeChronicleAria: 'Active chronicle',
     tabTree: 'Tree',
     tabAccess: 'Access',
     familiesTitle: 'Families',
@@ -480,7 +481,6 @@ export const en = {
       updatingStory: 'Revising the story…',
       savingStory: 'Saving the story…',
       readingStories: 'Reading the stories…',
-      sharingStory: 'Sharing the story…',
       taggingPeople: 'Noting who was there…',
       invitingMember: 'Preparing the invitation…',
       settingUpChronicle: 'Setting up the chronicle…',
@@ -531,7 +531,6 @@ export const en = {
       "Pick the family members this story is about — they drive the story's family names.",
     peoplePlaceholder: 'Search family members…',
     peopleNoneFound: 'No matching family member',
-    sharedWith: 'Shared with',
     failedTitle: 'Something went wrong retelling this story',
     photos: 'Photos',
     theStory: 'The story',
@@ -556,7 +555,6 @@ export const en = {
     editStoryLabel: 'Story',
     editStoryDescription: 'Edits change the retold story; the original transcript stays untouched.',
     recordedOn: (date: string) => `Recorded on ${date}`,
-    sharePlaceholder: 'Share to another chronicle…',
     addPhotos: 'Add photos',
     photoUploadFailed: 'Upload failed. Please try again.',
     viewPhoto: 'View photo',

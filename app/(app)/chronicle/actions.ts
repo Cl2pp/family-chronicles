@@ -6,7 +6,6 @@ import { revalidatePath } from 'next/cache';
 import { requireUser } from '@/lib/session';
 import { createChronicle, requireContributor, requireOwner } from '@/lib/chronicles';
 import {
-  addPersonToChronicle,
   canUserEditPerson,
   connectPeople,
   createPerson,
@@ -87,10 +86,6 @@ export async function addPersonAction(input: AddPersonInput) {
     chronicleId: input.chronicleId,
   });
 
-  // Make sure the person is in the family tree (createPerson already does this,
-  // but stay defensive in case chronicleId handling changes).
-  await addPersonToChronicle(input.chronicleId, person.id);
-
   if (input.connectTo) {
     const { personId: target, relation } = input.connectTo;
     await connectPeople({
@@ -140,7 +135,7 @@ export async function editPersonAction(input: {
   revalidatePath('/chronicle');
 }
 
-/** Remove a single kinship edge between two people the user may edit. Contributor+. */
+/** Remove a single kinship edge between two people in the same chronicle. Contributor+. */
 export async function removeRelationshipAction(input: {
   type: 'parent' | 'spouse';
   personFromId: string;
@@ -148,13 +143,9 @@ export async function removeRelationshipAction(input: {
 }) {
   const user = await requireUser();
 
-  // The tree is merged across chronicles, so authorize per person: the user must be
-  // able to contribute to a chronicle containing each endpoint.
-  const [canFrom, canTo] = await Promise.all([
-    canUserEditPerson(user.id, input.personFromId),
-    canUserEditPerson(user.id, input.personToId),
-  ]);
-  if (!canFrom || !canTo) {
+  // A kinship edge never spans two chronicles (connectPeople's invariant), so
+  // checking either endpoint is enough to authorize removing it.
+  if (!(await canUserEditPerson(user.id, input.personFromId))) {
     throw new Error('You do not have permission to change this connection.');
   }
 

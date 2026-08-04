@@ -2,7 +2,7 @@ import 'dotenv/config';
 import sharp from 'sharp';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/db';
-import { assets, chronicles, memberships, stories, storyChronicles, user } from '@/db/schema';
+import { assets, chronicles, memberships, stories, user } from '@/db/schema';
 import { putObjectBuffer } from '@/lib/s3';
 
 /**
@@ -95,8 +95,7 @@ async function main() {
     const [existing] = await db
       .select({ id: stories.id })
       .from(stories)
-      .innerJoin(storyChronicles, eq(storyChronicles.storyId, stories.id))
-      .where(and(eq(storyChronicles.chronicleId, m.chronicleId), eq(stories.title, title)))
+      .where(and(eq(stories.chronicleId, m.chronicleId), eq(stories.title, title)))
       .limit(1);
     return !!existing;
   }
@@ -109,6 +108,7 @@ async function main() {
     const [story] = await db
       .insert(stories)
       .values({
+        chronicleId: m.chronicleId,
         submittedBy: u.id,
         title: demo.title,
         summary: demo.title,
@@ -120,11 +120,6 @@ async function main() {
         eventDatePrecision: 'year',
       })
       .returning();
-    await db.insert(storyChronicles).values({
-      storyId: story.id,
-      chronicleId: m.chronicleId,
-      sharedBy: u.id,
-    });
     const photo = await makePhoto(demo.photoLabel, demo.color);
     const key = `photos/demo-${story.id}.jpg`;
     await putObjectBuffer(key, photo, 'image/jpeg');
@@ -148,6 +143,7 @@ async function main() {
     const [story] = await db
       .insert(stories)
       .values({
+        chronicleId: m.chronicleId,
         submittedBy: u.id,
         title: multi.title,
         summary: multi.title,
@@ -159,11 +155,6 @@ async function main() {
         eventDatePrecision: 'year',
       })
       .returning();
-    await db.insert(storyChronicles).values({
-      storyId: story.id,
-      chronicleId: m.chronicleId,
-      sharedBy: u.id,
-    });
     for (const [i, p] of multi.photos.entries()) {
       const photo = await makePhoto(p.label, multi.color, p.width, p.height);
       const key = `photos/demo-${story.id}-${i}.jpg`;

@@ -1,5 +1,6 @@
 import { Box, Card, Stack, Text, Title } from '@mantine/core';
 import { requireUser } from '@/lib/session';
+import { requireActiveChronicle } from '@/lib/active-chronicle';
 import { listBooksForUser } from '@/lib/books';
 import { getI18n } from '@/lib/i18n/server';
 import { BooksView } from './books-view';
@@ -8,7 +9,8 @@ import { NewBookButton } from './new-book-button';
 export default async function BooksPage() {
   const user = await requireUser();
   const { t } = await getI18n();
-  const books = await listBooksForUser(user.id);
+  const active = await requireActiveChronicle(user.id);
+  const books = await listBooksForUser(user.id, active.id);
 
   return (
     <Box p="lg" maw={960} mx="auto">

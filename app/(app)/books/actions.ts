@@ -2,9 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { cookies } from 'next/headers';
 import { requireUser } from '@/lib/session';
-import { resolveActiveChronicle } from '@/lib/chronicles';
+import { getActiveChronicle } from '@/lib/active-chronicle';
 import {
   addBookPhotos,
   createBook,
@@ -43,8 +42,7 @@ import { compressForTranscription, TRANSCRIBE_COMPRESS_THRESHOLD_BYTES } from '@
 /** Create a book for the active chronicle (all ready stories) and open the builder. */
 export async function createBookAction(): Promise<{ error: string } | never> {
   const user = await requireUser();
-  const activeCookie = (await cookies()).get('activeChronicleId')?.value;
-  const { active } = await resolveActiveChronicle(user.id, activeCookie);
+  const { active } = await getActiveChronicle(user.id);
   const { t } = await getI18n();
   if (!active) return { error: t.books.needStories };
 
@@ -65,8 +63,7 @@ export async function createBookAction(): Promise<{ error: string } | never> {
 /** Create a photo book (empty — the bulk uploader adds photos) and open its builder. */
 export async function createPhotoBookAction(): Promise<{ error: string } | never> {
   const user = await requireUser();
-  const activeCookie = (await cookies()).get('activeChronicleId')?.value;
-  const { active } = await resolveActiveChronicle(user.id, activeCookie);
+  const { active } = await getActiveChronicle(user.id);
   const { t } = await getI18n();
   if (!active) return { error: t.books.needChronicle };
 

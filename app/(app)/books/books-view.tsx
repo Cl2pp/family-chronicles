@@ -23,43 +23,53 @@ export function BooksView({ books }: { books: BookListItem[] }) {
         <NewBookButton label={t.books.newBook} />
       </Group>
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-        {books.map((b) => (
-          <Card
-            key={b.id}
-            withBorder
-            radius="md"
-            p="md"
-            component={Link}
-            href={`/books/${b.id}`}
-            style={{ color: 'inherit', textDecoration: 'none' }}
-          >
-            <Group justify="space-between" wrap="nowrap">
-              <Group gap={10} wrap="nowrap" style={{ minWidth: 0 }}>
-                {b.kind === 'photo' ? (
-                  <IconPhoto size={22} stroke={1.6} color="var(--mantine-color-brand-6)" />
-                ) : (
-                  <IconBook2 size={22} stroke={1.6} color="var(--mantine-color-brand-6)" />
-                )}
-                <Stack gap={2} style={{ minWidth: 0 }}>
-                  <Text fw={600} truncate>
-                    {b.title}
-                  </Text>
-                  <Text fz={12} c="dimmed" truncate>
-                    {b.chronicleName}
-                    {b.kind === 'story' ? ` · ${t.books.storyCount(b.storyCount)}` : ''}
-                    {b.pageCount ? ` · ${t.books.pageCount(b.pageCount)}` : ''}
-                  </Text>
-                </Stack>
+        {books.map((b) => {
+          // Every book here already belongs to the one active chronicle, so the
+          // subtitle line is just story/page counts — no chronicle name to disambiguate.
+          const meta = [
+            b.kind === 'story' ? t.books.storyCount(b.storyCount) : null,
+            b.pageCount ? t.books.pageCount(b.pageCount) : null,
+          ]
+            .filter(Boolean)
+            .join(' · ');
+          return (
+            <Card
+              key={b.id}
+              withBorder
+              radius="md"
+              p="md"
+              component={Link}
+              href={`/books/${b.id}`}
+              style={{ color: 'inherit', textDecoration: 'none' }}
+            >
+              <Group justify="space-between" wrap="nowrap">
+                <Group gap={10} wrap="nowrap" style={{ minWidth: 0 }}>
+                  {b.kind === 'photo' ? (
+                    <IconPhoto size={22} stroke={1.6} color="var(--mantine-color-brand-6)" />
+                  ) : (
+                    <IconBook2 size={22} stroke={1.6} color="var(--mantine-color-brand-6)" />
+                  )}
+                  <Stack gap={2} style={{ minWidth: 0 }}>
+                    <Text fw={600} truncate>
+                      {b.title}
+                    </Text>
+                    {meta && (
+                      <Text fz={12} c="dimmed" truncate>
+                        {meta}
+                      </Text>
+                    )}
+                  </Stack>
+                </Group>
+                <Group gap={8} wrap="nowrap">
+                  <Badge color={STATUS_COLORS[b.status]} variant="light">
+                    {t.books.status[b.status]}
+                  </Badge>
+                  <IconChevronRight size={16} color="var(--mantine-color-slate-4)" />
+                </Group>
               </Group>
-              <Group gap={8} wrap="nowrap">
-                <Badge color={STATUS_COLORS[b.status]} variant="light">
-                  {t.books.status[b.status]}
-                </Badge>
-                <IconChevronRight size={16} color="var(--mantine-color-slate-4)" />
-              </Group>
-            </Group>
-          </Card>
-        ))}
+            </Card>
+          );
+        })}
       </SimpleGrid>
     </Stack>
   );

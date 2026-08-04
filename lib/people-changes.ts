@@ -173,7 +173,8 @@ export async function applyPeopleChanges(
           continue;
         }
 
-        // createPerson also inserts the chronicle_members row when given chronicleId.
+        // chronicleId anchors the new person to this chronicle permanently — see
+        // createPerson's comment.
         const person = await createPerson({
           firstName: change.firstName,
           familyName: change.familyName,

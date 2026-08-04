@@ -15,11 +15,10 @@ import {
   messages,
   people,
   stories,
-  storyChronicles,
   storyPeople,
   user,
 } from '@/db/schema';
-import { ensurePersonForUser, connectPeople, addPersonToChronicle } from '@/lib/people';
+import { ensurePersonForUser, connectPeople } from '@/lib/people';
 import { putObjectBuffer } from '@/lib/s3';
 import { generateThumbnail } from '@/lib/thumbnails';
 import { openrouter } from '@/lib/ai/client';
@@ -659,13 +658,14 @@ async function main() {
     const fullName = `${spec.firstName} ${spec.familyName}`;
     let personId: string;
     if (spec.isSelf) {
-      personId = await ensurePersonForUser({ userId: u.id, name: spec.firstName });
+      personId = await ensurePersonForUser({ chronicleId, userId: u.id, name: spec.firstName });
     } else {
       const [existing] = await db
         .select({ id: people.id })
         .from(people)
         .where(
           and(
+            eq(people.chronicleId, chronicleId),
             eq(people.firstName, spec.firstName),
             eq(people.familyName, spec.familyName),
             eq(people.createdBy, u.id),
@@ -692,11 +692,10 @@ async function main() {
     } else {
       const [created] = await db
         .insert(people)
-        .values({ ...values, createdBy: u.id })
+        .values({ ...values, chronicleId, createdBy: u.id })
         .returning({ id: people.id });
       personId = created.id;
     }
-    await addPersonToChronicle(chronicleId, personId);
     personIds.set(spec.key, personId);
 
     const [row] = await db.select({ avatar: people.avatarS3Key }).from(people).where(eq(people.id, personId)).limit(1);
@@ -744,8 +743,7 @@ async function main() {
     const [existing] = await db
       .select({ id: stories.id })
       .from(stories)
-      .innerJoin(storyChronicles, eq(storyChronicles.storyId, stories.id))
-      .where(and(eq(storyChronicles.chronicleId, chronicleId), eq(stories.title, spec.title)))
+      .where(and(eq(stories.chronicleId, chronicleId), eq(stories.title, spec.title)))
       .limit(1);
     if (existing) {
       storyIds.push(existing.id);
@@ -756,6 +754,7 @@ async function main() {
     const [story] = await db
       .insert(stories)
       .values({
+        chronicleId,
         submittedBy: u.id,
         title: spec.title,
         summary: spec.summary,
@@ -769,7 +768,6 @@ async function main() {
       })
       .returning();
     storyIds.push(story.id);
-    await db.insert(storyChronicles).values({ storyId: story.id, chronicleId, sharedBy: u.id });
     await db
       .insert(storyPeople)
       .values(spec.people.map((key) => ({ storyId: story.id, personId: personIds.get(key)! })))

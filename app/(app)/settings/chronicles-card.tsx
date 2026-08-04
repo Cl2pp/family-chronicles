@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
 import {
   ActionIcon,
   Badge,
@@ -22,6 +22,7 @@ import { canManage, type AccessRole } from '@/lib/permissions';
 import { useI18n } from '@/lib/i18n/client';
 import type { StoryAccessMode } from '@/lib/chronicles';
 import { ChronicleSettingsForm } from './chronicle-settings-form';
+import { setActiveChronicle } from './actions';
 
 export interface ChronicleRow {
   id: string;
@@ -52,11 +53,14 @@ export function ChroniclesCard({
   const router = useRouter();
   const { t } = useI18n();
   const [expandedId, setExpandedId] = useState<string | null>(activeId);
+  const [, startTransition] = useTransition();
 
   function setActive(id: string) {
-    document.cookie = `activeChronicleId=${id}; path=/; max-age=31536000; samesite=lax`;
     setExpandedId(id);
-    router.refresh();
+    startTransition(async () => {
+      await setActiveChronicle(id);
+      router.refresh();
+    });
   }
 
   function toggleExpanded(id: string) {

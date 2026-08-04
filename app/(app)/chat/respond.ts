@@ -32,7 +32,13 @@ import { captureServerEvent } from '@/lib/posthog-server';
  */
 
 export interface SendResult {
-  conversationId: string;
+  /**
+   * Null only when there is still no active chronicle to attach a conversation to —
+   * `conversations.chronicleId` is NOT NULL, so a brand-new user's turn(s) before they
+   * (or a tool this same turn) create their first chronicle are never persisted. See
+   * `respondBootstrap`.
+   */
+  conversationId: string | null;
   reply: string;
   receipts: Receipt[];
   storyDraft: StoryDraft | null;
@@ -68,19 +74,33 @@ export function makeContext(
   return ctx;
 }
 
-/** Resolve the conversation to use (existing, owned) or create a new one. */
+/**
+ * Resolve the conversation this turn belongs to: the supplied id if it's still valid —
+ * owned by the caller AND still in the caller's ACTIVE chronicle — else a fresh one in
+ * the active chronicle. A supplied id from a chronicle the user has since switched away
+ * from (a stale id left over client-side) is treated the same as having no id at all —
+ * start a new conversation, never keep writing into the old space's — only a genuinely
+ * missing/foreign conversation is an error.
+ *
+ * Returns null when there is no active chronicle to create one in yet:
+ * `conversations.chronicleId` is NOT NULL, so a brand-new user with no chronicle at all
+ * has nowhere to persist a conversation to until one exists — see `respondBootstrap`.
+ */
 async function resolveConversation(
   conversationId: string | null,
   chronicleId: string | null,
   userId: string,
-): Promise<string> {
-  if (!conversationId) {
-    const convo = await createConversation(userId, chronicleId);
-    return convo.id;
+): Promise<string | null> {
+  if (conversationId) {
+    const convo = await getConversation(conversationId);
+    if (!convo || convo.userId !== userId) throw new Error('Conversation not found');
+    if (convo.chronicleId === chronicleId) return convo.id;
+    // Belongs to a different (or no longer active) chronicle — fall through to start a
+    // fresh one instead of writing this turn into the wrong space.
   }
-  const convo = await getConversation(conversationId);
-  if (!convo || convo.userId !== userId) throw new Error('Conversation not found');
-  return convo.id;
+  if (!chronicleId) return null;
+  const created = await createConversation(userId, chronicleId);
+  return created.id;
 }
 
 /**
@@ -219,6 +239,89 @@ export async function respondAndStore(
   };
 }
 
+/**
+ * Handle a turn from a user with NO active chronicle yet — a brand-new sign-up's first
+ * message(s), before they (or a tool call this very turn) create their first chronicle.
+ * `conversations.chronicleId` is NOT NULL, so there is nothing to persist this turn to
+ * until one exists: the agent runs over just this one message (there is no stored
+ * history to read yet). If it creates a chronicle (`create_chronicle`), the conversation
+ * is created right then and this turn is written as its first two messages, so every
+ * later turn resumes it exactly like any other conversation. If it doesn't, nothing is
+ * stored — the next message starts the same way. The system prompt repeats the "no
+ * chronicle yet" guidance every turn regardless, so a multi-turn setup dialog before the
+ * chronicle exists only costs continuity of the exact prior words, not the agent's
+ * ability to help (it can always re-check current state via list_chronicles etc.).
+ */
+async function respondBootstrap(
+  user: { id: string; name: string },
+  ctx: ToolContext,
+  userText: string,
+  emit?: AgentEmit,
+): Promise<SendResult> {
+  const result = await runAgent([{ role: 'user', content: userText }], ctx, emit);
+  const peopleDraft = result.peopleDraft?.changes.length ? result.peopleDraft : null;
+
+  let conversationId: string | null = null;
+  let peopleDraftMessageId: string | null = null;
+  if (ctx.activeChronicleId) {
+    // A tool created a chronicle this turn — persist retroactively so this exchange
+    // becomes the conversation's real first two messages.
+    const convo = await createConversation(user.id, ctx.activeChronicleId);
+    conversationId = convo.id;
+    await addMessage(conversationId, 'user', userText);
+    const metadata =
+      result.receipts.length || result.storyDraft || peopleDraft
+        ? {
+            ...(result.receipts.length ? { receipts: result.receipts } : {}),
+            ...(result.storyDraft ? { storyDraft: result.storyDraft } : {}),
+            ...(peopleDraft ? { peopleDraft } : {}),
+          }
+        : undefined;
+    const assistantMessage = await addMessage(conversationId, 'assistant', result.reply, metadata);
+    peopleDraftMessageId = peopleDraft ? assistantMessage.id : null;
+    // Same system-event notes respondAndStore leaves for a normal turn, so a later turn
+    // knows these cards already exist and won't re-offer or re-stage them.
+    if (result.storyDraft) {
+      const draftTitle = result.storyDraft.proposal.title;
+      await addMessage(
+        conversationId,
+        'system',
+        `[A story draft card "${draftTitle}" is now showing. Only the user can save or discard it ` +
+          'on the card; a note will appear here once they do. Do not draft it again or offer to save it.]',
+      );
+    }
+    if (peopleDraft) {
+      await addMessage(
+        conversationId,
+        'system',
+        `[A tree-changes card with ${peopleDraft.changes.length} staged change` +
+          `${peopleDraft.changes.length === 1 ? '' : 's'} is now showing — the COMPLETE set, replacing ` +
+          'any earlier card. Only the user can apply or discard it on the card (or say so explicitly ' +
+          'in chat); a note will appear here once they do. Nothing has been applied yet — do not claim ' +
+          'it has, and do not stage the same changes again.]',
+      );
+    }
+    // Same caveat as respondAndStore: effective only on the server-action recovery
+    // path — a streaming response can no longer set cookies, so the client persists
+    // this itself via the returned activeChronicleChanged.
+    (await cookies()).set('activeChronicleId', ctx.activeChronicleId, { path: '/' });
+    if (result.receipts.length) {
+      revalidatePath('/chronicle');
+      revalidatePath('/stories');
+    }
+  }
+
+  return {
+    conversationId,
+    reply: result.reply,
+    receipts: result.receipts,
+    storyDraft: result.storyDraft,
+    peopleDraft,
+    peopleDraftMessageId,
+    activeChronicleChanged: ctx.activeChronicleId,
+  };
+}
+
 /** Persist the user's message (+ any photos), then run the agent for a reply + actions. */
 export async function runTextTurn(
   user: { id: string; name: string },
@@ -235,6 +338,12 @@ export async function runTextTurn(
   const ctx = makeContext(user.id, user.name, active);
 
   const conversationId = await resolveConversation(input.conversationId, ctx.activeChronicleId, user.id);
+  if (!conversationId) {
+    // No chronicle yet — see respondBootstrap. Attachments have nowhere to be stored
+    // before a chronicle exists, so they're dropped here; a first-ever message that
+    // also attaches photos is a vanishingly rare combination in practice.
+    return respondBootstrap(user, ctx, text, emit);
+  }
   ctx.conversationId = conversationId;
   // Take the generation claim BEFORE the user turn becomes visible in storage: from
   // that moment a recovery `syncChat` (a backgrounded mobile tab reconnecting) would
@@ -347,6 +456,15 @@ export async function runVoiceTurn(
   const ctx = makeContext(user.id, user.name, active);
 
   const conversationId = await resolveConversation(input.conversationId, ctx.activeChronicleId, user.id);
+  if (!conversationId) {
+    // No chronicle yet (see runTextTurn/respondBootstrap). Voice needs a stored message
+    // to transcribe into and retry against, which doesn't exist before a chronicle does
+    // — ask for a typed first message instead rather than building a whole parallel
+    // path for what is, in practice, a vanishingly rare way to start.
+    throw new Error(
+      'Please send your first message as text — once your chronicle exists, voice messages work too.',
+    );
+  }
   ctx.conversationId = conversationId;
   // Claim before the user turn is stored — see runTextTurn for why.
   await claimPendingReply(conversationId);

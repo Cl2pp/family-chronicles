@@ -6,9 +6,7 @@ import {
   bookPhotos,
   bookStories,
   chronicles,
-  memberships,
   stories,
-  storyChronicles,
   storyPeople,
   user,
 } from '@/db/schema';
@@ -88,41 +86,37 @@ async function ensureBookAccess(
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Story read access for books (docs/STORY_ACCESS_PLAN.md, Books section).
- * Every story in a book is shared into the book's chronicle, so when the
- * acting user OWNS that chronicle or it's in 'open' mode, membership alone
- * grants every chapter — the fast path that skips loading per-story
- * people/chronicle facts (and, inside loadStoryAccessContext, the kinship
- * graph) entirely. Everything behaves exactly as before when all chronicles
- * are 'open' (the default).
+ * Every story in a book lives in the book's chronicle (`stories.chronicle_id`),
+ * so when the acting user OWNS that chronicle or it's in 'open' mode, membership
+ * alone grants every chapter — the fast path that skips loading per-story
+ * people facts (and, inside loadStoryAccessContext, the kinship graph)
+ * entirely. Everything behaves exactly as before when all chronicles are
+ * 'open' (the default).
  * ────────────────────────────────────────────────────────────────────────── */
 
-/** Fast path: the user reads every story of this chronicle regardless of tagging. */
-function readsWholeChronicle(ctx: StoryAccessContext, chronicleId: string): boolean {
-  return ctx.ownerChronicleIds.has(chronicleId) || ctx.openChronicleIds.has(chronicleId);
+/** Fast path: the user reads every story of this chronicle regardless of tagging.
+ *  `ctx` must have been loaded for this same chronicle (`loadStoryAccessContext`'s
+ *  second argument) — its owner/open flags are scoped to that one chronicle. */
+function readsWholeChronicle(ctx: StoryAccessContext): boolean {
+  return ctx.isOwner || ctx.isOpenMode;
 }
 
-/** The ids among `storyRows` the user may read, per the full three-clause rule
- *  (loads each story's chronicles + tagged people; no fast path — callers check that). */
+/** The ids among `storyRows` (all stories of `chronicleId`) the user may read, per
+ *  the full read rule (loads tagged people; no fast path — callers check that). */
 async function readableStoryIds(
   ctx: StoryAccessContext,
+  chronicleId: string,
   storyRows: Array<{ id: string; submittedBy: string }>,
 ): Promise<Set<string>> {
   const ids = storyRows.map((s) => s.id);
   if (ids.length === 0) return new Set();
-  const [chronicleRows, personRows] = await Promise.all([
-    db
-      .select({ storyId: storyChronicles.storyId, chronicleId: storyChronicles.chronicleId })
-      .from(storyChronicles)
-      .where(inArray(storyChronicles.storyId, ids)),
-    db
-      .select({ storyId: storyPeople.storyId, personId: storyPeople.personId })
-      .from(storyPeople)
-      .where(inArray(storyPeople.storyId, ids)),
-  ]);
+  const personRows = await db
+    .select({ storyId: storyPeople.storyId, personId: storyPeople.personId })
+    .from(storyPeople)
+    .where(inArray(storyPeople.storyId, ids));
   const facts = new Map<string, StoryAccessInput>(
-    storyRows.map((s) => [s.id, { submittedBy: s.submittedBy, chronicleIds: [], personIds: [] }]),
+    storyRows.map((s) => [s.id, { submittedBy: s.submittedBy, chronicleId, personIds: [] }]),
   );
-  for (const r of chronicleRows) facts.get(r.storyId)?.chronicleIds.push(r.chronicleId);
   for (const r of personRows) facts.get(r.storyId)?.personIds.push(r.personId);
 
   const out = new Set<string>();
@@ -136,8 +130,8 @@ async function readableStoryIds(
 /**
  * Shared validation for every path that puts stories into a book (create, replace —
  * the UI actions and the agent's tools all funnel here): each story must be ready,
- * shared into the book's chronicle, and readable by the ACTING user, so nobody can
- * put a story they can't read into a book (and thereby leak it via preview/PDF).
+ * live in the book's chronicle, and readable by the ACTING user, so nobody can put a
+ * story they can't read into a book (and thereby leak it via preview/PDF).
  */
 async function ensureUsableBookStories(
   chronicleId: string,
@@ -147,11 +141,10 @@ async function ensureUsableBookStories(
   const unique = [...new Set(storyIds)];
   const valid = await db
     .select({ id: stories.id, title: stories.title, submittedBy: stories.submittedBy })
-    .from(storyChronicles)
-    .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
+    .from(stories)
     .where(
       and(
-        eq(storyChronicles.chronicleId, chronicleId),
+        eq(stories.chronicleId, chronicleId),
         inArray(stories.id, unique),
         eq(stories.status, 'ready'),
       ),
@@ -161,8 +154,8 @@ async function ensureUsableBookStories(
   if (missing.length) {
     return err(`Not ready stories of this chronicle: ${missing.join(', ')}`);
   }
-  if (!readsWholeChronicle(ctx, chronicleId)) {
-    const readable = await readableStoryIds(ctx, valid);
+  if (!readsWholeChronicle(ctx)) {
+    const readable = await readableStoryIds(ctx, chronicleId, valid);
     const offending = valid.filter((v) => !readable.has(v.id));
     if (offending.length) {
       // Ids, not titles: the actor can't read these stories, so even a title
@@ -191,8 +184,14 @@ export interface BookListItem {
   updatedAt: Date;
 }
 
-/** Books across every chronicle the user belongs to. */
-export async function listBooksForUser(userId: string): Promise<BookListItem[]> {
+/** Books in one chronicle, gated to members of it. */
+export async function listBooksForUser(
+  userId: string,
+  chronicleId: string,
+): Promise<BookListItem[]> {
+  const m = await getMembership(chronicleId, userId);
+  if (!m) return [];
+
   const rows = await db
     .select({
       id: books.id,
@@ -208,8 +207,7 @@ export async function listBooksForUser(userId: string): Promise<BookListItem[]> 
     })
     .from(books)
     .innerJoin(chronicles, eq(books.chronicleId, chronicles.id))
-    .innerJoin(memberships, eq(memberships.chronicleId, books.chronicleId))
-    .where(eq(memberships.userId, userId))
+    .where(eq(books.chronicleId, chronicleId))
     .orderBy(desc(books.updatedAt));
 
   const ids = rows.map((r) => r.id);
@@ -339,13 +337,14 @@ export async function getBookForUser(
     .orderBy(asc(bookStories.position));
 
   // Per-viewer read model: hide chapters the viewer can't read. Fast path when the
-  // viewer owns the chronicle or it's 'open' — every book story is shared into the
-  // book's chronicle, so membership alone grants everything (no extra queries).
-  const ctx = accessCtx ?? (await loadStoryAccessContext(userId));
+  // viewer owns the chronicle or it's 'open' — every book story lives in the book's
+  // chronicle, so membership alone grants everything (no extra queries).
+  const ctx = accessCtx ?? (await loadStoryAccessContext(userId, row.book.chronicleId));
   let visibleChapters = chapterRows;
-  if (!readsWholeChronicle(ctx, row.book.chronicleId)) {
+  if (!readsWholeChronicle(ctx)) {
     const readable = await readableStoryIds(
       ctx,
+      row.book.chronicleId,
       chapterRows.map((c) => ({ id: c.storyId, submittedBy: c.submittedBy })),
     );
     visibleChapters = chapterRows.filter((c) => readable.has(c.storyId));
@@ -441,16 +440,17 @@ export async function readyStoriesForChronicle(
       submitterName: user.name,
       submittedBy: stories.submittedBy,
     })
-    .from(storyChronicles)
-    .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
+    .from(stories)
     .innerJoin(user, eq(stories.submittedBy, user.id))
-    .where(and(eq(storyChronicles.chronicleId, chronicleId), eq(stories.status, 'ready')))
+    .where(and(eq(stories.chronicleId, chronicleId), eq(stories.status, 'ready')))
     .orderBy(asc(stories.eventDate), asc(stories.createdAt));
 
-  const ctx = accessCtx ?? (await loadStoryAccessContext(userId));
-  const visible = readsWholeChronicle(ctx, chronicleId)
+  const ctx = accessCtx ?? (await loadStoryAccessContext(userId, chronicleId));
+  const visible = readsWholeChronicle(ctx)
     ? rows
-    : await readableStoryIds(ctx, rows).then((readable) => rows.filter((r) => readable.has(r.id)));
+    : await readableStoryIds(ctx, chronicleId, rows).then((readable) =>
+        rows.filter((r) => readable.has(r.id)),
+      );
   // `submittedBy` was only fetched for the access check — don't hand it out.
   return visible.map((r) => ({
     id: r.id,
@@ -474,7 +474,7 @@ export async function createBook(input: {
 }): Promise<Result<{ bookId: string }>> {
   const gate = await ensureBookAccess(input.chronicleId, input.userId);
   if (!gate.ok) return gate;
-  const ctx = await loadStoryAccessContext(input.userId);
+  const ctx = await loadStoryAccessContext(input.userId, input.chronicleId);
 
   let storyIds = input.storyIds;
   if (!storyIds) {
@@ -1749,7 +1749,15 @@ async function editableBook(
 ): Promise<
   { ok: true; book: BookDetail; ctx: StoryAccessContext } | { ok: false; error: string }
 > {
-  const ctx = await loadStoryAccessContext(userId);
+  // The access context is chronicle-scoped, so the book's chronicle has to be known
+  // before it can be loaded — a cheap lookup ahead of the full `getBookForUser` query.
+  const [row] = await db
+    .select({ chronicleId: books.chronicleId })
+    .from(books)
+    .where(eq(books.id, bookId))
+    .limit(1);
+  if (!row) return err('Book not found.');
+  const ctx = await loadStoryAccessContext(userId, row.chronicleId);
   const book = await getBookForUser(bookId, userId, ctx);
   if (!book) return err('Book not found.');
   const gate = await ensureBookAccess(book.chronicleId, userId);

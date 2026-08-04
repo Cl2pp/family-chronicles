@@ -17,11 +17,10 @@ export interface AttachmentInput {
   durationSec?: number | null;
 }
 
-export async function createConversation(userId: string, chronicleId?: string | null) {
-  const [created] = await db
-    .insert(conversations)
-    .values({ userId, chronicleId: chronicleId ?? null })
-    .returning();
+/** A conversation always belongs to exactly one chronicle (hard isolation:
+ *  `conversations.chronicleId` is NOT NULL) — there is no more "= all" conversation. */
+export async function createConversation(userId: string, chronicleId: string) {
+  const [created] = await db.insert(conversations).values({ userId, chronicleId }).returning();
   return created;
 }
 
@@ -30,12 +29,14 @@ export async function getConversation(id: string) {
 }
 
 /**
- * The conversation the chat page should resume: the user's most recent one, but only
- * if it saw activity within the idle window and wasn't explicitly closed via "New
- * chat". Older/closed conversations stay in the DB as history (stories link back via
- * `stories.conversationId`) — they're just not resumed.
+ * The conversation the chat page should resume: the user's most recent one IN THE
+ * GIVEN CHRONICLE, but only if it saw activity within the idle window and wasn't
+ * explicitly closed via "New chat". Scoped to `chronicleId` so switching the active
+ * chronicle and reloading never resumes a chat that belongs to a different space —
+ * older/closed conversations (of this or any other chronicle) stay in the DB as
+ * history (stories link back via `stories.conversationId`) — they're just not resumed.
  */
-export async function resumableConversation(userId: string) {
+export async function resumableConversation(userId: string, chronicleId: string) {
   const cutoff = new Date(Date.now() - CONVERSATION_IDLE_MS);
   const rows = await db
     .select()
@@ -43,6 +44,7 @@ export async function resumableConversation(userId: string) {
     .where(
       and(
         eq(conversations.userId, userId),
+        eq(conversations.chronicleId, chronicleId),
         isNull(conversations.closedAt),
         gt(conversations.updatedAt, cutoff),
       ),

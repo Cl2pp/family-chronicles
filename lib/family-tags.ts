@@ -1,6 +1,6 @@
-import { inArray, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import { db } from '@/db';
-import { chronicleMembers, storyPeople } from '@/db/schema';
+import { people, storyPeople } from '@/db/schema';
 
 /**
  * Derived "family" tags — families are never set up or stored. A person belongs to:
@@ -9,6 +9,14 @@ import { chronicleMembers, storyPeople } from '@/db/schema';
  *  - each spouse's surname (marrying in: an Ortlepp with a Hartwick spouse is a Hartwick too).
  * A tag is the trimmed surname as written on the person; people with no surname
  * anywhere in that set simply carry no tags.
+ *
+ * Chronicles are hard-isolated: every step below (recursive lineage walk, spouse join)
+ * carries the root's `chronicle_id` along and re-checks it at each hop. That's
+ * defense-in-depth, not the primary guard — `connectPeople` (lib/people.ts) already
+ * refuses to create a relationship whose two endpoints aren't in the same chronicle,
+ * so a well-formed graph never needs it. It exists so a bad/corrupt edge can never
+ * walk these queries across a chronicle boundary and leak a surname into a space it
+ * doesn't belong to.
  */
 
 /** Hard cap on ancestor recursion; also guards against accidental cycles in the graph. */
@@ -27,33 +35,40 @@ export async function familyTagsByPerson(
 
   const result = await db.execute(sql`
     WITH RECURSIVE roots AS (
-      SELECT unnest(${idArrayLiteral}::uuid[]) AS root_id
+      SELECT p.id AS root_id, p.chronicle_id AS chronicle_id
+      FROM people p
+      WHERE p.id = ANY(${idArrayLiteral}::uuid[])
     ),
     lineage AS (
-      SELECT root_id, root_id AS person_id, 0 AS depth FROM roots
+      SELECT root_id, chronicle_id, root_id AS person_id, 0 AS depth FROM roots
       UNION
-      SELECT l.root_id, r.person_from_id, l.depth + 1
+      SELECT l.root_id, l.chronicle_id, r.person_from_id, l.depth + 1
       FROM lineage l
-      JOIN relationships r ON r.type = 'parent' AND r.person_to_id = l.person_id
+      JOIN relationships r
+        ON r.type = 'parent'
+       AND r.person_to_id = l.person_id
+       AND r.chronicle_id = l.chronicle_id
       WHERE l.depth < ${sql.raw(String(MAX_GENERATIONS))}
     ),
     tagged AS (
       -- own + ancestor surnames
       SELECT l.root_id, p.family_name AS tag
       FROM lineage l
-      JOIN people p ON p.id = l.person_id
+      JOIN people p ON p.id = l.person_id AND p.chronicle_id = l.chronicle_id
       UNION
       -- spouse surnames (spouse edges are stored in canonical order — match both ends)
       SELECT ro.root_id, sp.family_name
       FROM roots ro
       JOIN relationships r
         ON r.type = 'spouse'
+       AND r.chronicle_id = ro.chronicle_id
        AND (r.person_from_id = ro.root_id OR r.person_to_id = ro.root_id)
       JOIN people sp
         ON sp.id = CASE
              WHEN r.person_from_id = ro.root_id THEN r.person_to_id
              ELSE r.person_from_id
            END
+       AND sp.chronicle_id = ro.chronicle_id
     )
     SELECT root_id, array_agg(DISTINCT trim(tag)) AS tags
     FROM tagged
@@ -99,38 +114,44 @@ export async function closeFamilyTagsByPerson(
 
   const result = await db.execute(sql`
     WITH roots AS (
-      SELECT unnest(${idArrayLiteral}::uuid[]) AS root_id
+      SELECT p.id AS root_id, p.chronicle_id AS chronicle_id
+      FROM people p
+      WHERE p.id = ANY(${idArrayLiteral}::uuid[])
     ),
     tagged AS (
       -- the person's own surname + birth surname
       SELECT ro.root_id, p.family_name AS tag
-      FROM roots ro JOIN people p ON p.id = ro.root_id
+      FROM roots ro JOIN people p ON p.id = ro.root_id AND p.chronicle_id = ro.chronicle_id
       UNION
       SELECT ro.root_id, p.birth_family_name
-      FROM roots ro JOIN people p ON p.id = ro.root_id
+      FROM roots ro JOIN people p ON p.id = ro.root_id AND p.chronicle_id = ro.chronicle_id
       UNION
       -- each spouse's own + birth surname (spouse edges are symmetric — match both ends)
       SELECT ro.root_id, sp.family_name
       FROM roots ro
       JOIN relationships r
         ON r.type = 'spouse'
+       AND r.chronicle_id = ro.chronicle_id
        AND (r.person_from_id = ro.root_id OR r.person_to_id = ro.root_id)
       JOIN people sp
         ON sp.id = CASE
              WHEN r.person_from_id = ro.root_id THEN r.person_to_id
              ELSE r.person_from_id
            END
+       AND sp.chronicle_id = ro.chronicle_id
       UNION
       SELECT ro.root_id, sp.birth_family_name
       FROM roots ro
       JOIN relationships r
         ON r.type = 'spouse'
+       AND r.chronicle_id = ro.chronicle_id
        AND (r.person_from_id = ro.root_id OR r.person_to_id = ro.root_id)
       JOIN people sp
         ON sp.id = CASE
              WHEN r.person_from_id = ro.root_id THEN r.person_to_id
              ELSE r.person_from_id
            END
+       AND sp.chronicle_id = ro.chronicle_id
     )
     SELECT root_id, array_agg(DISTINCT trim(tag)) AS tags
     FROM tagged
@@ -184,9 +205,9 @@ export interface FamilyTagCount {
 /** All family tags across a chronicle's people, with member counts (for legends/filters). */
 export async function listFamilyTags(chronicleId: string): Promise<FamilyTagCount[]> {
   const members = await db
-    .select({ personId: chronicleMembers.personId })
-    .from(chronicleMembers)
-    .where(inArray(chronicleMembers.chronicleId, [chronicleId]));
+    .select({ personId: people.id })
+    .from(people)
+    .where(eq(people.chronicleId, chronicleId));
 
   const byPerson = await familyTagsByPerson(members.map((m) => m.personId));
   const counts = new Map<string, number>();
