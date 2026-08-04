@@ -14,8 +14,13 @@ export async function requestJoinAction(token: string) {
   }
 
   const result = await requestJoin(token, session.user.id);
-  // Already a member: nothing to redeem, so skip straight past the queue.
-  if (result.status === 'already_member') redirect('/chat');
+  // Already a member: nothing to redeem, so skip straight past the queue —
+  // with this chronicle active, since this link is what they came here for.
+  if (result.status === 'already_member') {
+    const cookieStore = await cookies();
+    cookieStore.set('activeChronicleId', result.chronicleId, { path: '/' });
+    redirect('/chat');
+  }
   // Revoked meanwhile — re-render the join page, which re-reads the link and
   // shows the "not valid" panel.
   if (result.status === 'not_found') redirect(`/join/${token}`);

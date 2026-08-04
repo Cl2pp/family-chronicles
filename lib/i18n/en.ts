@@ -904,7 +904,7 @@ export const en = {
     notFound: 'This invitation link is not valid.',
     expired: 'This invitation has expired. Ask for a new invite.',
     used: 'This invitation has already been used.',
-    goToChat: 'Go to the chat',
+    goToChat: 'Go to Chat',
     confirmText: (chronicle: string) => `You've been invited to join “${chronicle}”.`,
     confirmPerson: (name: string) =>
       `Your account will be linked to ${name} in the family tree.`,
@@ -918,7 +918,7 @@ export const en = {
   join: {
     title: 'Join a chronicle',
     notFound: 'This signup link is not valid any more.',
-    goToChat: 'Go to the chat',
+    goToChat: 'Go to Chat',
     confirmText: (chronicle: string) => `You can ask to join “${chronicle}”.`,
     confirmApprovalText:
       'An owner of the chronicle has to confirm your request before you can see anything.',
