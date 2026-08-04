@@ -20,5 +20,5 @@ export async function acceptInviteAction(token: string) {
 
   if (result.personLinked) redirect(`/invite/${token}?outcome=linked`);
   if (result.personLinkFailed) redirect(`/invite/${token}?outcome=link-failed`);
-  redirect('/chronicle');
+  redirect('/chat');
 }

@@ -923,7 +923,7 @@ export const de: Dictionary = {
     notFound: 'Dieser Einladungslink ist nicht gültig.',
     expired: 'Diese Einladung ist abgelaufen. Bitte um eine neue Einladung.',
     used: 'Diese Einladung wurde bereits verwendet.',
-    goToChronicles: 'Zu deinen Familienwerken',
+    goToChat: 'Zum Chat',
     confirmText: (chronicle: string) => `Du wurdest eingeladen, „${chronicle}“ beizutreten.`,
     confirmPerson: (name: string) =>
       `Dein Konto wird im Stammbaum mit ${name} verknüpft.`,
@@ -937,7 +937,7 @@ export const de: Dictionary = {
   join: {
     title: 'Einem Familienwerk beitreten',
     notFound: 'Dieser Anmeldelink ist nicht mehr gültig.',
-    goToChronicles: 'Zu deinen Familienwerken',
+    goToChat: 'Zum Chat',
     confirmText: (chronicle: string) => `Du kannst anfragen, „${chronicle}“ beizutreten.`,
     confirmApprovalText:
       'Ein Eigentümer des Familienwerks muss deine Anfrage bestätigen, bevor du etwas sehen kannst.',
