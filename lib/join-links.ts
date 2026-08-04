@@ -111,7 +111,7 @@ export async function getJoinLinkByToken(token: string): Promise<JoinLinkPreview
 export type JoinRequestResult =
   | { status: 'joined'; chronicleId: string; chronicleName: string }
   | { status: 'pending'; chronicleName: string }
-  | { status: 'already_member' }
+  | { status: 'already_member'; chronicleId: string }
   | { status: 'not_found' };
 
 /**
@@ -127,8 +127,10 @@ export async function requestJoin(token: string, userId: string): Promise<JoinRe
   if (link.status !== 'ok') return { status: 'not_found' };
 
   // Already in — nothing to redeem, so the page sends them straight to the
-  // chronicle rather than parking them on a request that never resolves.
-  if (await getMembership(link.chronicleId, userId)) return { status: 'already_member' };
+  // chat rather than parking them on a request that never resolves.
+  if (await getMembership(link.chronicleId, userId)) {
+    return { status: 'already_member', chronicleId: link.chronicleId };
+  }
 
   if (link.requiresApproval) {
     await db

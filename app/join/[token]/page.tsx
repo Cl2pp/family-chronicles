@@ -36,8 +36,8 @@ export default async function JoinPage({
     return (
       <JoinCard title={t.join.title}>
         <Text c="dimmed">{t.join.notFound}</Text>
-        <Button component="a" href="/chronicle">
-          {t.join.goToChronicles}
+        <Button component="a" href="/chat">
+          {t.join.goToChat}
         </Button>
       </JoinCard>
     );
@@ -49,8 +49,8 @@ export default async function JoinPage({
     return (
       <JoinCard title={t.join.alreadyMemberTitle}>
         <Text c="dimmed">{t.join.alreadyMemberText(link.chronicleName)}</Text>
-        <Button component="a" href="/chronicle">
-          {t.join.goToChronicles}
+        <Button component="a" href="/chat">
+          {t.join.goToChat}
         </Button>
       </JoinCard>
     );
@@ -61,8 +61,8 @@ export default async function JoinPage({
     return (
       <JoinCard title={t.join.pendingTitle}>
         <Text c="dimmed">{t.join.pendingText}</Text>
-        <Button component="a" href="/chronicle">
-          {t.join.goToChronicles}
+        <Button component="a" href="/chat">
+          {t.join.goToChat}
         </Button>
       </JoinCard>
     );

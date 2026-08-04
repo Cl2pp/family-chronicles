@@ -29,8 +29,8 @@ export default async function InvitePage({
         <Text c="dimmed">
           {outcome === 'linked' ? t.invite.acceptedLinkedText : t.invite.acceptedLinkFailedText}
         </Text>
-        <Button component="a" href="/chronicle">
-          {t.invite.goToChronicles}
+        <Button component="a" href="/chat">
+          {t.invite.goToChat}
         </Button>
       </InviteCard>
     );
@@ -48,8 +48,8 @@ export default async function InvitePage({
     return (
       <InviteCard title={t.invite.title}>
         <Text c="dimmed">{messages[invite.status]}</Text>
-        <Button component="a" href="/chronicle">
-          {t.invite.goToChronicles}
+        <Button component="a" href="/chat">
+          {t.invite.goToChat}
         </Button>
       </InviteCard>
     );

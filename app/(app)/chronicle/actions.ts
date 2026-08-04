@@ -31,7 +31,7 @@ import type { AccessRole } from '@/lib/permissions';
 import { partsToEventDate, type EventDateParts } from '@/lib/dates';
 import { captureServerEvent } from '@/lib/posthog-server';
 
-/** Create a chronicle, make it active, and go to the chronicle screen. */
+/** Create a chronicle, make it active, and go to the chat. */
 export async function createChronicleAction(formData: FormData) {
   const user = await requireUser();
   const name = String(formData.get('name') ?? '').trim();
@@ -52,7 +52,7 @@ export async function createChronicleAction(formData: FormData) {
 
   revalidatePath('/chronicle');
   captureServerEvent(user.id, 'chronicle_created', { chronicle_id: chronicle.id });
-  redirect('/chronicle');
+  redirect('/chat');
 }
 
 export interface AddPersonInput {
