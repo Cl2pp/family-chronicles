@@ -22,13 +22,17 @@ import { ensureContributor } from './util';
  * Deliberately absent: place_order. Ordering stays a human click on /books/[id]/order.
  */
 
-/** Find one of the user's books by exact title (case-insensitive) or id. */
+/** Find one of the ACTIVE CHRONICLE's books by exact title (case-insensitive) or id.
+ *  Hard-scoped: a chronicle's books are never visible from a chat in another one. */
 async function resolveBook(
   ctx: ToolContext,
   ref: string,
   access?: StoryAccessContext,
 ): Promise<{ book: BookDetail } | { error: string }> {
-  const all = await listBooksForUser(ctx.userId);
+  if (!ctx.activeChronicleId) {
+    return { error: 'There is no active chronicle yet. Use create_chronicle first.' };
+  }
+  const all = await listBooksForUser(ctx.userId, ctx.activeChronicleId);
   const wanted = ref.trim().toLowerCase();
   const matches = all.filter((b) => b.id === ref.trim() || b.title.toLowerCase() === wanted);
   if (matches.length === 0) return { error: `No book titled "${ref}" was found.` };
@@ -74,11 +78,12 @@ async function bookSummary(book: BookDetail) {
 export const listBooksTool = defineTool({
   name: 'list_books',
   description:
-    "List the user's books across their chronicles (title, status, format, story count, id). " +
+    "List the active chronicle's books (title, status, format, story count, id). " +
     'A book turns selected stories into a printable hardcover. Use this before editing a book.',
   schema: z.object({}),
   async execute(_args, ctx) {
-    const books = await listBooksForUser(ctx.userId);
+    if (!ctx.activeChronicleId) return { ok: true, message: JSON.stringify([]) };
+    const books = await listBooksForUser(ctx.userId, ctx.activeChronicleId);
     return {
       ok: true,
       message: JSON.stringify(
@@ -107,8 +112,11 @@ export const getBookTool = defineTool({
     book: z.string().min(1).describe('The book title (or id) to read.'),
   }),
   async execute(args, ctx) {
+    if (!ctx.activeChronicleId) {
+      return { ok: false, error: 'There is no active chronicle yet. Use create_chronicle first.' };
+    }
     // One story-access context for both the book read and the layout summary.
-    const access = await loadStoryAccessContext(ctx.userId);
+    const access = await loadStoryAccessContext(ctx.userId, ctx.activeChronicleId);
     const found = await resolveBook(ctx, args.book, access);
     if ('error' in found) return { ok: false, error: found.error };
     return { ok: true, message: JSON.stringify(await bookSummary(found.book)) };

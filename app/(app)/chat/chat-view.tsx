@@ -168,7 +168,7 @@ export function ChatView({
     }
   }
 
-  function adoptConversation(id: string) {
+  function adoptConversation(id: string | null) {
     conversationRef.current = id;
     setConversationId(id);
   }

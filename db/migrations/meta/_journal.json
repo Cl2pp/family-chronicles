@@ -183,6 +183,13 @@
       "when": 1784733307622,
       "tag": "0025_retire_legacy_layouts",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785836022440,
+      "tag": "0026_chronicle_isolation",
+      "breakpoints": true
     }
   ]
 }

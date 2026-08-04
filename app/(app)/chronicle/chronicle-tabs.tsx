@@ -1,7 +1,6 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   ActionIcon,
   Badge,
@@ -9,7 +8,6 @@ import {
   Collapse,
   Group,
   Paper,
-  Select,
   Stack,
   Tabs,
   Text,
@@ -54,7 +52,6 @@ function familyColor(i: number): string {
 interface ChronicleTabsProps {
   active: ChronicleRow;
   role: AccessRole;
-  chronicles: ChronicleRow[];
   tree: MergedTree;
   members: MemberRow[];
   invites: InviteRow[];
@@ -64,13 +61,11 @@ interface ChronicleTabsProps {
 export function ChronicleTabs({
   active,
   role,
-  chronicles,
   tree,
   members,
   invites,
   currentUserId,
 }: ChronicleTabsProps) {
-  const router = useRouter();
   const { t } = useI18n();
   const [addState, setAddState] = useState<{ opened: boolean; target?: AddTarget }>({
     opened: false,
@@ -118,11 +113,6 @@ export function ChronicleTabs({
   const rawHighlight = hoverTag ?? pinnedTag;
   const highlightTag = rawHighlight && knownTags.has(rawHighlight) ? rawHighlight : null;
 
-  function switchChronicle(id: string) {
-    document.cookie = `activeChronicleId=${id}; path=/; max-age=31536000; samesite=lax`;
-    router.refresh();
-  }
-
   const colorByTag: Record<string, string> = {};
   familyTags.forEach((family, i) => {
     colorByTag[family.tag] = familyColor(i);
@@ -133,20 +123,7 @@ export function ChronicleTabs({
 
   return (
     <Stack gap="lg">
-      <Group justify="space-between" align="flex-start">
-        <Title order={2}>{t.tree.pageTitle}</Title>
-        {chronicles.length > 1 && (
-          <Select
-            aria-label={t.tree.activeChronicleAria}
-            w={200}
-            allowDeselect={false}
-            value={active.id}
-            onChange={(id) => id && switchChronicle(id)}
-            data={chronicles.map((f) => ({ value: f.id, label: f.name }))}
-            comboboxProps={{ withinPortal: true }}
-          />
-        )}
-      </Group>
+      <Title order={2}>{t.tree.pageTitle}</Title>
 
       <Tabs defaultValue="tree" keepMounted={false}>
         <Tabs.List>
@@ -264,7 +241,7 @@ export function ChronicleTabs({
             invites={invites}
             canManage={canManage(role)}
             treePeople={(tree.people as TreePerson[])
-              .filter((p) => p.chronicleIds.includes(active.id))
+              .filter((p) => p.chronicleId === active.id)
               .map((p) => ({
                 id: p.id,
                 firstName: p.firstName,

@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
-import { chronicleMembers, memberships, people, user } from '@/db/schema';
+import { memberships, people, user } from '@/db/schema';
 import { linkUserToPersonIfFree } from '@/lib/people';
 import { personFullName } from '@/lib/person-name';
 
@@ -30,37 +30,45 @@ async function chronicleIdsForUser(userId: string): Promise<string[]> {
   return rows.map((r) => r.chronicleId);
 }
 
-/** Unlinked people in the trees of the given chronicles, deduped by person. */
+/** Unlinked people directly in the given chronicles (each person belongs to exactly one). */
 async function unlinkedTreePeople(chronicleIds: string[]) {
   if (chronicleIds.length === 0) return [];
   return db
-    .selectDistinctOn([people.id], {
+    .select({
       id: people.id,
       firstName: people.firstName,
       familyName: people.familyName,
     })
-    .from(chronicleMembers)
-    .innerJoin(people, eq(chronicleMembers.personId, people.id))
-    .where(and(inArray(chronicleMembers.chronicleId, chronicleIds), isNull(people.userId)))
+    .from(people)
+    .where(and(inArray(people.chronicleId, chronicleIds), isNull(people.userId)))
     .orderBy(people.id);
 }
 
 async function suggest() {
-  // Every distinct membership user, minus those already linked to a person.
+  // Every distinct membership user.
   const users = await db
     .selectDistinctOn([user.id], { id: user.id, name: user.name, email: user.email })
     .from(memberships)
     .innerJoin(user, eq(memberships.userId, user.id))
     .orderBy(user.id);
-  const linkedRows = await db.select({ userId: people.userId }).from(people);
-  const linkedUserIds = new Set(linkedRows.map((r) => r.userId).filter(Boolean));
 
   let unlinkedUsers = 0;
   for (const u of users) {
-    if (linkedUserIds.has(u.id)) continue;
+    const chronicleIds = await chronicleIdsForUser(u.id);
+    if (chronicleIds.length === 0) continue;
+
+    // Chronicles where this user already has a linked person — at most one per
+    // chronicle (people_chronicle_user_uq), so "linked" is per-chronicle, not global.
+    const linkedRows = await db
+      .select({ chronicleId: people.chronicleId })
+      .from(people)
+      .where(and(inArray(people.chronicleId, chronicleIds), eq(people.userId, u.id)));
+    const linkedChronicleIds = new Set(linkedRows.map((r) => r.chronicleId));
+    const unlinkedChronicleIds = chronicleIds.filter((id) => !linkedChronicleIds.has(id));
+    if (unlinkedChronicleIds.length === 0) continue;
     unlinkedUsers += 1;
 
-    const candidates = await unlinkedTreePeople(await chronicleIdsForUser(u.id));
+    const candidates = await unlinkedTreePeople(unlinkedChronicleIds);
     const byName = candidates.filter(
       (p) => personFullName(p).trim().toLowerCase() === u.name.trim().toLowerCase(),
     );
@@ -74,7 +82,7 @@ async function suggest() {
       console.log(`${u.email} → ${personFullName(p)} (${p.id})${marker}`);
     }
   }
-  console.log(`\n${unlinkedUsers} membership user(s) without a linked person.`);
+  console.log(`\n${unlinkedUsers} membership user(s) with at least one chronicle missing a linked person.`);
 }
 
 async function link(email: string, personId: string) {
@@ -91,30 +99,20 @@ async function link(email: string, personId: string) {
   if (person.userId) {
     throw new Error(`${personFullName(person)} (${person.id}) is already linked to another account.`);
   }
-  const existing = await db.query.people.findFirst({ where: eq(people.userId, u.id) });
+  const existing = await db.query.people.findFirst({
+    where: and(eq(people.chronicleId, person.chronicleId), eq(people.userId, u.id)),
+  });
   if (existing) {
     throw new Error(
-      `${u.email} is already linked to ${personFullName(existing)} (${existing.id}) — unlink first.`,
+      `${u.email} is already linked to ${personFullName(existing)} (${existing.id}) in this chronicle — unlink first.`,
     );
   }
 
-  // Same guard as the app: the person must be a tree member of one of the user's chronicles.
+  // Same guard as the app: the person must belong to one of the user's chronicles.
   const chronicleIds = await chronicleIdsForUser(u.id);
-  const inTree = chronicleIds.length
-    ? await db
-        .select({ id: chronicleMembers.id })
-        .from(chronicleMembers)
-        .where(
-          and(
-            inArray(chronicleMembers.chronicleId, chronicleIds),
-            eq(chronicleMembers.personId, personId),
-          ),
-        )
-        .limit(1)
-    : [];
-  if (inTree.length === 0) {
+  if (!chronicleIds.includes(person.chronicleId)) {
     throw new Error(
-      `${personFullName(person)} (${person.id}) is not a tree member of any of ${u.email}'s chronicles.`,
+      `${personFullName(person)} (${person.id}) is not in any of ${u.email}'s chronicles.`,
     );
   }
 

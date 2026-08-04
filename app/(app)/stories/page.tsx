@@ -1,6 +1,7 @@
 import { Box, Button, Card, Stack, Text, Title } from '@mantine/core';
 import { IconMessageCircle2 } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
+import { requireActiveChronicle } from '@/lib/active-chronicle';
 import { loadStoryAccessContext } from '@/lib/story-access';
 import { listStoriesForUser } from '@/lib/stories';
 import { getI18n } from '@/lib/i18n/server';
@@ -11,18 +12,16 @@ export default async function StoriesPage() {
   const user = await requireUser();
   const { t } = await getI18n();
 
-  const accessCtx = await loadStoryAccessContext(user.id);
-  const stories = await listStoriesForUser(user.id, accessCtx);
+  const active = await requireActiveChronicle(user.id);
+  const accessCtx = await loadStoryAccessContext(user.id, active.id);
+  const stories = await listStoriesForUser(user.id, active.id, accessCtx);
 
-  // In a 'family'-mode chronicle, an account with no person in the tree only
-  // sees its own stories — tell the user why (an owner has to place them).
+  // In this active chronicle, if it's 'family'-mode, an account with no person in
+  // ITS tree only sees its own stories — tell the user why (an owner has to place
+  // them). Owners read everything regardless of linking, so the banner never
+  // applies to them.
   const showUnlinkedBanner =
-    accessCtx.personId === null &&
-    // ...in some family-mode chronicle where they aren't the owner (owners
-    // read everything regardless of linking).
-    [...accessCtx.memberChronicleIds].some(
-      (id) => !accessCtx.openChronicleIds.has(id) && !accessCtx.ownerChronicleIds.has(id),
-    );
+    accessCtx.personId === null && !accessCtx.isOpenMode && !accessCtx.isOwner;
 
   return (
     <Box p="lg" maw={960} mx="auto">

@@ -1,7 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { db } from '@/db';
-import { chronicles, chronicleMembers, memberships, people, user } from '@/db/schema';
+import { chronicles, memberships, people, user } from '@/db/schema';
 import { type AccessRole, canContribute, canManage } from '@/lib/permissions';
 import { ensurePersonForUser } from '@/lib/people';
 import { personFullName } from '@/lib/person-name';
@@ -60,14 +60,12 @@ export async function createChronicle(input: {
       accessRole: 'owner',
     });
 
-    const personId = await ensurePersonForUser(
-      { userId: input.userId, name: input.userName },
+    // A new chronicle always gets the owner a NEW, independent person node — never
+    // one borrowed from another chronicle they belong to (see ensurePersonForUser).
+    await ensurePersonForUser(
+      { chronicleId: created.id, userId: input.userId, name: input.userName },
       tx,
     );
-    await tx
-      .insert(chronicleMembers)
-      .values({ chronicleId: created.id, personId })
-      .onConflictDoNothing();
 
     return created;
   });
@@ -119,7 +117,10 @@ export async function listMembers(chronicleId: string) {
     })
     .from(memberships)
     .innerJoin(user, eq(memberships.userId, user.id))
-    .leftJoin(people, eq(people.userId, user.id))
+    // Scoped to THIS chronicle, not just `people.userId = user.id` — a user linked in
+    // several chronicles has several person rows, one per chronicle, and an unscoped
+    // join would fan this member out into one duplicate row per OTHER chronicle too.
+    .leftJoin(people, and(eq(people.userId, user.id), eq(people.chronicleId, chronicleId)))
     .where(eq(memberships.chronicleId, chronicleId))
     .orderBy(memberships.createdAt);
 

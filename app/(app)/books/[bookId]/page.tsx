@@ -25,10 +25,12 @@ export default async function BookBuilderPage({
 }) {
   const { bookId } = await params;
   const user = await requireUser();
-  // One access-context load per request, shared by every per-viewer read below.
-  const access = await loadStoryAccessContext(user.id);
-  const book = await getBookForUser(bookId, user.id, access);
+  const book = await getBookForUser(bookId, user.id);
   if (!book) notFound();
+
+  // One access-context load per request, shared by every per-viewer read below —
+  // scoped to the book's own chronicle, only known once the book itself is loaded.
+  const access = await loadStoryAccessContext(user.id, book.chronicleId);
 
   // Lazy healer: enqueues analysis jobs for any photo whose pipeline never ran or got
     // lost (e.g. mirror rows the PR A migration backfilled, or an enqueue lost to a

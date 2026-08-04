@@ -64,7 +64,7 @@ export async function saveProposalAsStory(input: {
     status: 'ready',
     ...partsToEventDate({ year: p.eventYear, month: p.eventMonth, day: p.eventDay }),
     conversationId: input.conversationId,
-    chronicleIds: [input.chronicleId],
+    chronicleId: input.chronicleId,
     personIds,
   });
 

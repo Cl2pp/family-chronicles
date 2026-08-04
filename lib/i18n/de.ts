@@ -11,7 +11,6 @@ export const de: Dictionary = {
     undo: 'Rückgängig',
     undone: 'Rückgängig gemacht',
     retry: 'Erneut versuchen',
-    share: 'Teilen',
     appUpdatedReloading: 'Die App wurde aktualisiert — die neueste Version wird geladen …',
   },
   nav: {
@@ -225,7 +224,7 @@ export const de: Dictionary = {
     uiLanguageDescription: 'Die Sprache von Menüs, Buttons und Seiten auf diesem Gerät.',
     chroniclesTitle: 'Familienwerke',
     chroniclesHint:
-      'Das ausgewählte Familienwerk ist das, mit dem Chat, Geschichten und Stammbaum öffnen. Klappe ein Familienwerk auf, um seine Einstellungen zu bearbeiten.',
+      'Das ausgewählte Familienwerk ist der Raum, in dem du gerade bist — Chat, Geschichten und Stammbaum zeigen nur seine Daten. Klappe ein Familienwerk auf, um seine Einstellungen zu bearbeiten.',
     onlyOwners: 'Nur Eigentümer können diese Einstellungen ändern.',
     chronicleName: 'Name des Familienwerks',
     chronicleNameRequired: 'Ein Name für das Familienwerk ist erforderlich',
@@ -252,6 +251,9 @@ export const de: Dictionary = {
     aboutDescription: 'Ein privater Ort für die Geschichten und den Stammbaum deiner Familie.',
     installTitle: 'Zum Home-Bildschirm hinzufügen',
     appTitle: 'App',
+  },
+  chronicleSwitcher: {
+    ariaLabel: 'Familienwerk wechseln',
   },
   chroniclesCard: {
     noChroniclesYet: 'Noch keine Familienwerke',
@@ -280,7 +282,6 @@ export const de: Dictionary = {
   },
   tree: {
     pageTitle: 'Stammbaum',
-    activeChronicleAria: 'Aktives Familienwerk',
     tabTree: 'Baum',
     tabAccess: 'Zugriff',
     familiesTitle: 'Familien',
@@ -493,7 +494,6 @@ export const de: Dictionary = {
       updatingStory: 'Überarbeite die Geschichte…',
       savingStory: 'Speichere die Geschichte…',
       readingStories: 'Lese in den Geschichten…',
-      sharingStory: 'Teile die Geschichte…',
       taggingPeople: 'Halte fest, wer dabei war…',
       invitingMember: 'Bereite die Einladung vor…',
       settingUpChronicle: 'Richte die Chronik ein…',
@@ -544,7 +544,6 @@ export const de: Dictionary = {
       'Wähle die Familienmitglieder aus, um die es in dieser Geschichte geht – sie bestimmen die Familiennamen der Geschichte.',
     peoplePlaceholder: 'Familienmitglieder suchen…',
     peopleNoneFound: 'Kein passendes Familienmitglied',
-    sharedWith: 'Geteilt mit',
     failedTitle: 'Beim Nacherzählen dieser Geschichte ist etwas schiefgelaufen',
     photos: 'Fotos',
     theStory: 'Die Geschichte',
@@ -570,7 +569,6 @@ export const de: Dictionary = {
     editStoryDescription:
       'Änderungen betreffen die nacherzählte Geschichte; das Original-Transkript bleibt unberührt.',
     recordedOn: (date: string) => `Festgehalten am ${date}`,
-    sharePlaceholder: 'In ein anderes Familienwerk teilen…',
     addPhotos: 'Fotos hinzufügen',
     photoUploadFailed: 'Hochladen fehlgeschlagen. Bitte versuch es noch einmal.',
     viewPhoto: 'Foto ansehen',

@@ -2,7 +2,6 @@ import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { db } from '@/db';
 import {
   assets,
-  chronicleMembers,
   chronicles,
   contributions,
   memberships,
@@ -10,7 +9,6 @@ import {
   messages,
   people,
   stories,
-  storyChronicles,
   storyPeople,
   user,
 } from '@/db/schema';
@@ -32,30 +30,18 @@ export type StoryStatus = 'draft' | 'processing' | 'ready' | 'failed';
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-async function linkChroniclesAndPeople(
-  tx: Tx,
-  storyId: string,
-  userId: string,
-  chronicleIds: string[],
-  personIds: string[],
-) {
-  if (chronicleIds.length) {
-    await tx
-      .insert(storyChronicles)
-      .values(chronicleIds.map((chronicleId) => ({ storyId, chronicleId, sharedBy: userId })))
-      .onConflictDoNothing();
-  }
-  if (personIds.length) {
-    await tx
-      .insert(storyPeople)
-      .values(personIds.map((personId) => ({ storyId, personId })))
-      .onConflictDoNothing();
-  }
+async function linkPeopleToStory(tx: Tx, storyId: string, personIds: string[]) {
+  if (personIds.length === 0) return;
+  await tx
+    .insert(storyPeople)
+    .values(personIds.map((personId) => ({ storyId, personId })))
+    .onConflictDoNothing();
 }
 
-/** Create a story shared into one or more chronicles. */
+/** Create a story in its chronicle. */
 export async function createStory(input: {
   userId: string;
+  chronicleId: string;
   title: string;
   summary?: string | null;
   bodyOriginal?: string | null;
@@ -65,13 +51,13 @@ export async function createStory(input: {
   eventDate?: Date | null;
   eventDatePrecision?: DatePrecision | null;
   conversationId?: string | null;
-  chronicleIds: string[];
   personIds?: string[];
 }) {
   return db.transaction(async (tx) => {
     const [created] = await tx
       .insert(stories)
       .values({
+        chronicleId: input.chronicleId,
         submittedBy: input.userId,
         title: input.title,
         summary: input.summary ?? null,
@@ -84,13 +70,7 @@ export async function createStory(input: {
         conversationId: input.conversationId ?? null,
       })
       .returning();
-    await linkChroniclesAndPeople(
-      tx,
-      created.id,
-      input.userId,
-      input.chronicleIds,
-      input.personIds ?? [],
-    );
+    await linkPeopleToStory(tx, created.id, input.personIds ?? []);
     // The initial source material is the first entry of the story's contribution timeline.
     if (input.bodyOriginal?.trim()) {
       await tx.insert(contributions).values({
@@ -101,14 +81,6 @@ export async function createStory(input: {
     }
     return created;
   });
-}
-
-/** Share an existing story into another chronicle. */
-export async function shareStoryToChronicle(storyId: string, chronicleId: string, userId: string) {
-  await db
-    .insert(storyChronicles)
-    .values({ storyId, chronicleId, sharedBy: userId })
-    .onConflictDoNothing();
 }
 
 /** People tagged in a story (they drive the story's derived family tags). */
@@ -129,11 +101,9 @@ export async function listStoryPeople(storyId: string) {
 }
 
 /**
- * People a given user may tag in a story: the tree members of the chronicles the story
- * is shared into AND that the user is a member of. Scoping to the user's own chronicles
- * keeps the picker from exposing (or letting an editor tag) people who live only in a
- * chronicle the actor can't access — a story can be co-shared into chronicles the actor
- * has no part in. The currently tagged subset comes from {@link listStoryPeople}.
+ * People a given user may tag in a story: the tree members of the story's chronicle,
+ * gated to users who are themselves a member of it. The currently tagged subset comes
+ * from {@link listStoryPeople}.
  */
 export async function listStoryPeopleCandidates(storyId: string, userId: string) {
   const rows = await db
@@ -143,17 +113,13 @@ export async function listStoryPeopleCandidates(storyId: string, userId: string)
       familyName: people.familyName,
       birthFamilyName: people.birthFamilyName,
     })
-    .from(storyChronicles)
+    .from(stories)
     .innerJoin(
       memberships,
-      and(
-        eq(memberships.chronicleId, storyChronicles.chronicleId),
-        eq(memberships.userId, userId),
-      ),
+      and(eq(memberships.chronicleId, stories.chronicleId), eq(memberships.userId, userId)),
     )
-    .innerJoin(chronicleMembers, eq(chronicleMembers.chronicleId, storyChronicles.chronicleId))
-    .innerJoin(people, eq(people.id, chronicleMembers.personId))
-    .where(eq(storyChronicles.storyId, storyId))
+    .innerJoin(people, eq(people.chronicleId, stories.chronicleId))
+    .where(eq(stories.id, storyId))
     .orderBy(asc(people.firstName));
   return rows;
 }
@@ -313,6 +279,7 @@ export async function setAssetCaption(storyId: string, assetId: string, caption:
 
 const storyListColumns = {
   id: stories.id,
+  chronicleId: stories.chronicleId,
   title: stories.title,
   summary: stories.summary,
   status: stories.status,
@@ -327,6 +294,7 @@ const storyListColumns = {
 
 export interface StoryListItem {
   id: string;
+  chronicleId: string;
   title: string;
   summary: string | null;
   status: StoryStatus;
@@ -337,7 +305,6 @@ export interface StoryListItem {
   eventDatePrecision: DatePrecision | null;
   createdAt: Date;
   submitterName: string;
-  chronicleIds: string[];
   /** Derived family tags: the union of the tags of everyone in the story. */
   familyTags: string[];
   photoCount: number;
@@ -345,7 +312,7 @@ export interface StoryListItem {
   bannerPhotoUrls: string[];
 }
 
-type StoryRow = Omit<StoryListItem, 'chronicleIds' | 'familyTags' | 'photoCount' | 'bannerPhotoUrls'>;
+type StoryRow = Omit<StoryListItem, 'familyTags' | 'photoCount' | 'bannerPhotoUrls'>;
 
 /** How many photos a story-list banner shows at most. */
 const BANNER_PHOTO_LIMIT = 3;
@@ -353,17 +320,6 @@ const BANNER_PHOTO_LIMIT = 3;
 async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
   const ids = rows.map((r) => r.id);
   if (ids.length === 0) return [];
-
-  const fam = await db
-    .select({ storyId: storyChronicles.storyId, chronicleId: storyChronicles.chronicleId })
-    .from(storyChronicles)
-    .where(inArray(storyChronicles.storyId, ids));
-  const chronByStory = new Map<string, string[]>();
-  for (const f of fam) {
-    const arr = chronByStory.get(f.storyId) ?? [];
-    arr.push(f.chronicleId);
-    chronByStory.set(f.storyId, arr);
-  }
 
   const photos = await db
     .select({
@@ -404,7 +360,6 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
 
   return rows.map((r) => ({
     ...r,
-    chronicleIds: chronByStory.get(r.id) ?? [],
     familyTags: tagsByStory.get(r.id) ?? [],
     photoCount: photosByStory.get(r.id)?.length ?? 0,
     bannerPhotoUrls: bannerByStory.get(r.id) ?? [],
@@ -412,38 +367,33 @@ async function decorateStories(rows: StoryRow[]): Promise<StoryListItem[]> {
 }
 
 /**
- * True when every chronicle the user belongs to is 'open' — the legacy behavior,
- * where membership alone grants reads and the kinship rule never has to run.
+ * True when the viewer reads every story of this chronicle without the kinship rule
+ * having to run: they own the chronicle, or it's in 'open' mode.
  */
-function allChroniclesOpen(ctx: StoryAccessContext): boolean {
-  return ctx.openChronicleIds.size === ctx.memberChronicleIds.size;
+function readsWholeChronicle(ctx: StoryAccessContext): boolean {
+  return ctx.isOwner || ctx.isOpenMode;
 }
 
 /**
- * The per-story facts `canReadStory` consumes (submitter, shared chronicles,
- * tagged people), batched for a candidate set. Only loaded on the family-mode
- * path — 'open'-only users never pay for it.
+ * The per-story facts `canReadStory` consumes (submitter, chronicle, tagged people),
+ * batched for a candidate set. Only loaded on the family-mode path — 'open'-only
+ * users never pay for it.
  */
 async function storyAccessFacts(storyIds: string[]): Promise<Map<string, StoryAccessInput>> {
   if (storyIds.length === 0) return new Map();
-  const [submitters, shares, tags] = await Promise.all([
+  const [rows, tags] = await Promise.all([
     db
-      .select({ id: stories.id, submittedBy: stories.submittedBy })
+      .select({ id: stories.id, submittedBy: stories.submittedBy, chronicleId: stories.chronicleId })
       .from(stories)
       .where(inArray(stories.id, storyIds)),
-    db
-      .select({ storyId: storyChronicles.storyId, chronicleId: storyChronicles.chronicleId })
-      .from(storyChronicles)
-      .where(inArray(storyChronicles.storyId, storyIds)),
     db
       .select({ storyId: storyPeople.storyId, personId: storyPeople.personId })
       .from(storyPeople)
       .where(inArray(storyPeople.storyId, storyIds)),
   ]);
-  const facts = new Map<string, { submittedBy: string; chronicleIds: string[]; personIds: string[] }>(
-    submitters.map((s) => [s.id, { submittedBy: s.submittedBy, chronicleIds: [], personIds: [] }]),
+  const facts = new Map<string, StoryAccessInput>(
+    rows.map((s) => [s.id, { submittedBy: s.submittedBy, chronicleId: s.chronicleId, personIds: [] }]),
   );
-  for (const s of shares) facts.get(s.storyId)?.chronicleIds.push(s.chronicleId);
   for (const t of tags) facts.get(t.storyId)?.personIds.push(t.personId);
   return facts;
 }
@@ -461,38 +411,37 @@ async function filterRowsByAccess<T extends { id: string }>(
 }
 
 /**
- * Stories across every chronicle the user belongs to (deduped), restricted to
- * what the user may read (lib/story-access.ts). Pass a pre-loaded `accessCtx`
- * when the caller already has one, so it is loaded at most once per request.
+ * Every story of one chronicle, restricted to what the user may read
+ * (lib/story-access.ts). Pass a pre-loaded `accessCtx` when the caller already has
+ * one (scoped to the same `chronicleId`), so it is loaded at most once per request.
  */
 export async function listStoriesForUser(
   userId: string,
+  chronicleId: string,
   accessCtx?: StoryAccessContext,
 ): Promise<StoryListItem[]> {
-  const ctx = accessCtx ?? (await loadStoryAccessContext(userId));
-  const chronicleIds = [...ctx.memberChronicleIds];
-  if (chronicleIds.length === 0) return [];
+  const ctx = accessCtx ?? (await loadStoryAccessContext(userId, chronicleId));
+  if (!ctx.isMember) return [];
 
   let rows = (await db
-    .selectDistinct(storyListColumns)
-    .from(storyChronicles)
-    .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
+    .select(storyListColumns)
+    .from(stories)
     .innerJoin(user, eq(stories.submittedBy, user.id))
-    .where(inArray(storyChronicles.chronicleId, chronicleIds))
+    .where(eq(stories.chronicleId, chronicleId))
     // Newest-added first — the "recent stories" default that list_stories (AI tool) and
     // the duplicate guard rely on. The stories timeline view re-groups by event year and
     // re-sorts client-side, so its chronological ordering is owned there, not here.
     .orderBy(desc(stories.createdAt))) as StoryRow[];
-  if (!allChroniclesOpen(ctx)) {
+  if (!readsWholeChronicle(ctx)) {
     rows = await filterRowsByAccess(ctx, rows);
   }
   return decorateStories(rows);
 }
 
 /**
- * Lightweight text of every story shared into a chronicle, for duplicate checks.
- * Restricted to stories the acting user may read — the duplicate guard must not
- * echo titles or text of stories that are hidden from them.
+ * Lightweight text of every story in a chronicle, for duplicate checks. Restricted
+ * to stories the acting user may read — the duplicate guard must not echo titles or
+ * text of stories that are hidden from them.
  */
 export async function listChronicleStoryTexts(chronicleId: string, userId: string) {
   const rows = await db
@@ -504,31 +453,20 @@ export async function listChronicleStoryTexts(chronicleId: string, userId: strin
       bodyStyled: stories.bodyStyled,
       eventDate: stories.eventDate,
       submittedBy: stories.submittedBy,
+      chronicleId: stories.chronicleId,
     })
-    .from(storyChronicles)
-    .innerJoin(stories, eq(storyChronicles.storyId, stories.id))
-    .where(eq(storyChronicles.chronicleId, chronicleId));
-  const ctx = await loadStoryAccessContext(userId);
-  // Fast path: a member of this chronicle in 'open' mode (or its owner) reads
-  // everything shared into it — no per-story facts needed.
-  if (ctx.openChronicleIds.has(chronicleId) || ctx.ownerChronicleIds.has(chronicleId)) {
-    return rows;
-  }
+    .from(stories)
+    .where(eq(stories.chronicleId, chronicleId));
+  const ctx = await loadStoryAccessContext(userId, chronicleId);
+  // Fast path: an 'open'-mode member (or the chronicle's owner) reads every story
+  // in it — no per-story facts needed.
+  if (readsWholeChronicle(ctx)) return rows;
   return filterRowsByAccess(ctx, rows);
 }
 
-/** Chronicles a story is shared into (id + name), for chips. */
-export async function chroniclesForStory(storyId: string) {
-  return db
-    .select({ id: chronicles.id, name: chronicles.name })
-    .from(storyChronicles)
-    .innerJoin(chronicles, eq(storyChronicles.chronicleId, chronicles.id))
-    .where(eq(storyChronicles.storyId, storyId));
-}
-
 /**
- * A story with submitter, gated to users who can access ≥1 of its chronicles
- * and (for family-mode chronicles) may read it under the kinship rule.
+ * A story with submitter, gated to users who are members of its chronicle and (in
+ * family-mode chronicles) may read it under the kinship rule.
  */
 export async function getStoryForUser(storyId: string, userId: string) {
   const rows = await db
@@ -545,18 +483,15 @@ export async function getStoryForUser(storyId: string, userId: string) {
   const story = rows[0];
   if (!story) return null;
 
-  const access = await db
-    .select({ id: storyChronicles.id })
-    .from(storyChronicles)
-    .innerJoin(memberships, eq(storyChronicles.chronicleId, memberships.chronicleId))
-    .where(and(eq(storyChronicles.storyId, storyId), eq(memberships.userId, userId)))
-    .limit(1);
-  if (access.length === 0) return null;
+  // Membership in the story's chronicle is a hard prerequisite here (unlike the pure
+  // rule's unconditional author bypass) — a user who has left a chronicle no longer
+  // sees a story page for it, even one they wrote themselves.
+  const ctx = await loadStoryAccessContext(userId, story.chronicleId);
+  if (!ctx.isMember) return null;
 
-  // Membership alone is enough only while every chronicle of the user is 'open';
+  // Membership alone is enough only in 'open' mode / for the chronicle's owner;
   // otherwise the kinship rule decides (denied reads look like a missing story).
-  const ctx = await loadStoryAccessContext(userId);
-  if (!allChroniclesOpen(ctx)) {
+  if (!readsWholeChronicle(ctx)) {
     const fact = (await storyAccessFacts([storyId])).get(storyId);
     if (fact === undefined || !canReadStory(ctx, fact)) return null;
   }
@@ -564,10 +499,10 @@ export async function getStoryForUser(storyId: string, userId: string) {
   return story;
 }
 
-/** Whether the user may edit a story: its submitter, or an owner of a chronicle it's shared into. */
+/** Whether the user may edit a story: its submitter, or an owner of its chronicle. */
 export async function canUserEditStory(storyId: string, userId: string): Promise<boolean> {
   const rows = await db
-    .select({ submittedBy: stories.submittedBy })
+    .select({ submittedBy: stories.submittedBy, chronicleId: stories.chronicleId })
     .from(stories)
     .where(eq(stories.id, storyId))
     .limit(1);
@@ -576,12 +511,11 @@ export async function canUserEditStory(storyId: string, userId: string): Promise
   if (story.submittedBy === userId) return true;
 
   const owner = await db
-    .select({ id: storyChronicles.id })
-    .from(storyChronicles)
-    .innerJoin(memberships, eq(storyChronicles.chronicleId, memberships.chronicleId))
+    .select({ id: memberships.id })
+    .from(memberships)
     .where(
       and(
-        eq(storyChronicles.storyId, storyId),
+        eq(memberships.chronicleId, story.chronicleId),
         eq(memberships.userId, userId),
         eq(memberships.accessRole, 'owner'),
       ),
@@ -683,7 +617,7 @@ export async function listContributions(storyId: string): Promise<StoryContribut
 }
 
 /**
- * Permanently delete a story (rows cascade: shares, people links, assets).
+ * Permanently delete a story (rows cascade: people links, assets).
  * Stored objects are removed too, except ones still referenced by chat
  * attachments — those must keep rendering in the conversation history.
  */
@@ -728,21 +662,20 @@ export async function resetStoryForRetry(storyId: string) {
 }
 
 /**
- * Styling context (style guide + story language) from the first chronicle a story
- * is shared into. Deliberately carries NO other stories' text: if example passages
- * are ever added to the styling prompt, they must be filtered to stories the
- * SUBMITTER can read (`loadStoryAccessContext(story.submittedBy)` + `canReadStory`),
- * or family-mode chronicles would leak hidden stories through the prompt.
+ * Styling context (style guide + story language) from the story's chronicle.
+ * Deliberately carries NO other stories' text: if example passages are ever added
+ * to the styling prompt, they must be filtered to stories the SUBMITTER can read
+ * (`loadStoryAccessContext(story.submittedBy, chronicleId)` + `canReadStory`), or
+ * family-mode chronicles would leak hidden stories through the prompt.
  */
 export async function styleContextForStory(
   storyId: string,
 ): Promise<{ styleGuide: string | null; storyLanguage: string | null }> {
   const rows = await db
     .select({ styleGuide: chronicles.styleGuide, storyLanguage: chronicles.storyLanguage })
-    .from(storyChronicles)
-    .innerJoin(chronicles, eq(storyChronicles.chronicleId, chronicles.id))
-    .where(eq(storyChronicles.storyId, storyId))
-    .orderBy(storyChronicles.sharedAt)
+    .from(stories)
+    .innerJoin(chronicles, eq(stories.chronicleId, chronicles.id))
+    .where(eq(stories.id, storyId))
     .limit(1);
   return {
     styleGuide: rows[0]?.styleGuide ?? null,

@@ -18,14 +18,7 @@ import {
   Title,
   UnstyledButton,
 } from '@mantine/core';
-import {
-  IconArrowsSort,
-  IconBook,
-  IconMicrophone,
-  IconPhoto,
-  IconPlus,
-  IconUsers,
-} from '@tabler/icons-react';
+import { IconArrowsSort, IconBook, IconMicrophone, IconPhoto, IconPlus } from '@tabler/icons-react';
 import { formatEventDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
 import { useI18n } from '@/lib/i18n/client';
@@ -131,7 +124,6 @@ function StoryCard({ story }: { story: StoryListItem }) {
   const meta = storyStatusMeta(story.status, t);
   const date = formatEventDate(story.eventDate, story.eventDatePrecision, locale);
   const excerpt = (story.summary ?? story.bodyStyled ?? story.bodyOriginal ?? '').slice(0, 160);
-  const shared = story.chronicleIds.length > 1;
 
   return (
     <Card
@@ -179,14 +171,6 @@ function StoryCard({ story }: { story: StoryListItem }) {
               <IconPhoto size={15} />
               <Text size="xs" c="dimmed">
                 {story.photoCount}
-              </Text>
-            </Group>
-          )}
-          {shared && (
-            <Group gap={2} wrap="nowrap">
-              <IconUsers size={15} />
-              <Text size="xs" c="dimmed">
-                {story.chronicleIds.length}
               </Text>
             </Group>
           )}

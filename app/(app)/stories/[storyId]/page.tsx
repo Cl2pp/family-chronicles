@@ -4,7 +4,6 @@ import { IconAlertTriangle, IconArrowLeft } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
 import {
   canUserEditStory,
-  chroniclesForStory,
   getStoryForUser,
   listAssets,
   listContributions,
@@ -12,7 +11,6 @@ import {
   listStoryPeopleCandidates,
 } from '@/lib/stories';
 import { familyTagsByStory } from '@/lib/family-tags';
-import { listChroniclesForUser } from '@/lib/chronicles';
 import { eventDateToParts, formatEventDate, formatFullDate } from '@/lib/dates';
 import { storyStatusMeta } from '@/lib/story-status';
 import { getI18n } from '@/lib/i18n/server';
@@ -20,7 +18,6 @@ import { presignGet } from '@/lib/s3';
 import { CollapsibleSection } from '@/components/collapsible-section';
 import { RetryButton } from './retry-button';
 import { SourceTimeline, type ContributionView } from './source-timeline';
-import { ShareControl } from './share-control';
 import { EditControl } from './edit-control';
 import { AddPhotosControl } from './add-photos-control';
 import { PhotoGallery } from './photo-gallery';
@@ -44,31 +41,16 @@ export default async function StoryDetailPage({
   const story = await getStoryForUser(storyId, user.id);
   if (!story) notFound();
 
-  const [
-    shareChronicles,
-    assets,
-    userChronicles,
-    canEdit,
-    tagsByStory,
-    contributions,
-    storyPeople,
-    peopleCandidates,
-  ] = await Promise.all([
-    chroniclesForStory(storyId),
-    listAssets(storyId),
-    listChroniclesForUser(user.id),
-    canUserEditStory(storyId, user.id),
-    familyTagsByStory([storyId]),
-    listContributions(storyId),
-    listStoryPeople(storyId),
-    listStoryPeopleCandidates(storyId, user.id),
-  ]);
+  const [assets, canEdit, tagsByStory, contributions, storyPeople, peopleCandidates] =
+    await Promise.all([
+      listAssets(storyId),
+      canUserEditStory(storyId, user.id),
+      familyTagsByStory([storyId]),
+      listContributions(storyId),
+      listStoryPeople(storyId),
+      listStoryPeopleCandidates(storyId, user.id),
+    ]);
   const familyTags = tagsByStory.get(storyId) ?? [];
-
-  const sharedIds = new Set(shareChronicles.map((f) => f.id));
-  const shareCandidates = userChronicles
-    .filter((f) => !sharedIds.has(f.id))
-    .map((f) => ({ id: f.id, name: f.name }));
 
   const photoAssets = assets.filter((a) => a.kind === 'photo');
   const audioAssets = assets.filter((a) => a.kind === 'audio');
@@ -204,19 +186,6 @@ export default async function StoryDetailPage({
               canEdit={canEdit}
             />
           )}
-          {shareChronicles.length > 1 && (
-            <Group gap="xs" align="center">
-              <Text size="sm" c="dimmed">
-                {t.story.sharedWith}
-              </Text>
-              {shareChronicles.map((f) => (
-                <Badge key={f.id} variant="outline" color="slate" radius="sm">
-                  {f.name}
-                </Badge>
-              ))}
-            </Group>
-          )}
-          <ShareControl storyId={story.id} candidates={shareCandidates} />
           {canEdit && story.status === 'ready' && (
             <EditControl
               storyId={story.id}

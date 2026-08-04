@@ -95,11 +95,22 @@ export const messageRole = pgEnum('message_role', ['user', 'assistant', 'system'
  * Genealogy layer (global, chronicle-agnostic): people + kinship edges
  * ────────────────────────────────────────────────────────────────────────── */
 
-/** A person — a node in the kinship graph. May or may not have an app account. */
+/**
+ * A person — a node in the kinship graph, belonging to exactly ONE chronicle.
+ *
+ * Chronicles are hard-isolated spaces: the same human appearing in two chronicles is
+ * two independent person rows with no link between them. That is deliberate — a
+ * chronicle is a private space, and nothing (not a name, not an account, not a photo)
+ * may be used to correlate a person across two of them.
+ */
 export const people = pgTable(
   'people',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    /** The one chronicle this person belongs to. */
+    chronicleId: uuid('chronicle_id')
+      .notNull()
+      .references((): AnyPgColumn => chronicles.id, { onDelete: 'cascade' }),
     /** First name(s) only — the surname lives in familyName. Display = firstName + familyName. */
     firstName: text('first_name').notNull(),
     /** Surname — the source of derived family tags (see lib/family-tags.ts). */
@@ -121,14 +132,31 @@ export const people = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('people_user_uq').on(t.userId)],
+  (t) => [
+    // One account gets at most one person per chronicle — but the SAME account may
+    // (and usually does) have a separate person node in every chronicle it belongs to.
+    // Replaces the old global-unique `people_user_uq`, which allowed only one person
+    // per account across the entire install.
+    uniqueIndex('people_chronicle_user_uq').on(t.chronicleId, t.userId),
+    index('people_chronicle_idx').on(t.chronicleId),
+  ],
 );
 
-/** Global kinship edge. `parent`: from = parent, to = child. `spouse`: symmetric. */
+/**
+ * A kinship edge. `parent`: from = parent, to = child. `spouse`: symmetric.
+ *
+ * Both endpoints ALWAYS live in `chronicleId` — an edge never spans two chronicles.
+ * The column is denormalised from the endpoints so the family-tag CTE and the
+ * story-access graph load can filter with one predicate instead of joining `people`
+ * twice; `connectPeople` (lib/people.ts) is what enforces the two stay in agreement.
+ */
 export const relationships = pgTable(
   'relationships',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    chronicleId: uuid('chronicle_id')
+      .notNull()
+      .references((): AnyPgColumn => chronicles.id, { onDelete: 'cascade' }),
     type: relationshipType('type').notNull(),
     personFromId: uuid('person_from_id')
       .notNull()
@@ -143,6 +171,7 @@ export const relationships = pgTable(
     uniqueIndex('relationships_uq').on(t.type, t.personFromId, t.personToId),
     index('relationships_from_idx').on(t.personFromId),
     index('relationships_to_idx').on(t.personToId),
+    index('relationships_chronicle_idx').on(t.chronicleId),
   ],
 );
 
@@ -189,26 +218,9 @@ export const memberships = pgTable(
   (t) => [uniqueIndex('memberships_chronicle_user_uq').on(t.chronicleId, t.userId)],
 );
 
-/** Which PEOPLE are nodes in a chronicle's tree (person↔chronicle, many-to-many). */
-export const chronicleMembers = pgTable(
-  'chronicle_members',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    chronicleId: uuid('chronicle_id')
-      .notNull()
-      .references(() => chronicles.id, { onDelete: 'cascade' }),
-    personId: uuid('person_id')
-      .notNull()
-      .references(() => people.id, { onDelete: 'cascade' }),
-    /** Optional display override; role is normally derived from the tree. */
-    roleLabel: text('role_label'),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-  },
-  (t) => [
-    uniqueIndex('chronicle_members_uq').on(t.chronicleId, t.personId),
-    index('chronicle_members_chronicle_idx').on(t.chronicleId),
-  ],
-);
+/* `chronicle_members` (person↔chronicle, many-to-many) is gone: `people.chronicle_id`
+ * now says which tree a person is a node of, and under hard isolation that answer is
+ * always exactly one chronicle. */
 
 /** Pending email invitations to join a chronicle (grants a membership). */
 export const invitations = pgTable(
@@ -237,13 +249,16 @@ export const invitations = pgTable(
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
- * Stories — standalone, shareable across many chronicles
+ * Stories — each one belongs to exactly one chronicle
  * ────────────────────────────────────────────────────────────────────────── */
 
 export const conversations = pgTable('conversations', {
   id: uuid('id').defaultRandom().primaryKey(),
-  /** Chronicle context the chat was started in (nullable = "all"). */
-  chronicleId: uuid('chronicle_id').references(() => chronicles.id, { onDelete: 'set null' }),
+  /** The chronicle this chat belongs to. A chat never spans two spaces: switching the
+   *  active chronicle starts a new conversation rather than carrying the old one over. */
+  chronicleId: uuid('chronicle_id')
+    .notNull()
+    .references(() => chronicles.id, { onDelete: 'cascade' }),
   userId: text('user_id')
     .notNull()
     .references(() => user.id, { onDelete: 'cascade' }),
@@ -275,11 +290,15 @@ export const messages = pgTable(
   (t) => [index('messages_conversation_idx').on(t.conversationId)],
 );
 
-/** A single story. No longer bound to one chronicle — see story_chronicles. */
+/** A single story, belonging to exactly one chronicle. */
 export const stories = pgTable(
   'stories',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    /** The one chronicle this story lives in. */
+    chronicleId: uuid('chronicle_id')
+      .notNull()
+      .references(() => chronicles.id, { onDelete: 'cascade' }),
     submittedBy: text('submitted_by')
       .notNull()
       .references(() => user.id, { onDelete: 'restrict' }),
@@ -302,30 +321,17 @@ export const stories = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
-  (t) => [index('stories_event_date_idx').on(t.eventDate)],
-);
-
-/** A story is shared into every chronicle linked here (≥1). */
-export const storyChronicles = pgTable(
-  'story_chronicles',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    storyId: uuid('story_id')
-      .notNull()
-      .references(() => stories.id, { onDelete: 'cascade' }),
-    chronicleId: uuid('chronicle_id')
-      .notNull()
-      .references(() => chronicles.id, { onDelete: 'cascade' }),
-    sharedBy: text('shared_by').references(() => user.id, { onDelete: 'set null' }),
-    sharedAt: timestamp('shared_at').notNull().defaultNow(),
-  },
   (t) => [
-    uniqueIndex('story_chronicles_uq').on(t.storyId, t.chronicleId),
-    index('story_chronicles_chronicle_idx').on(t.chronicleId),
+    index('stories_event_date_idx').on(t.eventDate),
+    index('stories_chronicle_idx').on(t.chronicleId),
   ],
 );
 
-/** Who/what a story is about. */
+/* `story_chronicles` (story↔chronicle, many-to-many) is gone, along with the
+ * "share this story into another chronicle" feature it existed for. A story lives in
+ * exactly one chronicle: `stories.chronicle_id`. */
+
+/** Who/what a story is about. Every person here belongs to the story's own chronicle. */
 export const storyPeople = pgTable(
   'story_people',
   {

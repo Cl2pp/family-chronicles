@@ -462,17 +462,16 @@ export function FamilyTree({
 
   const selected = selectedId ? peopleById.get(selectedId) : undefined;
   const [unlinking, startUnlink] = useTransition();
-  // Edits/links act on the active family, so the person must be one of its members.
-  const canEditSelected =
-    canEdit && !!selected && selected.chronicleIds.includes(activeChronicleId);
+  // The tree is scoped to one chronicle, so every person rendered is already in it.
+  const canEditSelected = canEdit && !!selected;
   const linkCandidates = useMemo(
     () =>
       selected
         ? people
-            .filter((p) => p.id !== selected.id && p.chronicleIds.includes(activeChronicleId))
+            .filter((p) => p.id !== selected.id)
             .map((p) => ({ value: p.id, label: personFullName(p) }))
         : [],
-    [people, selected, activeChronicleId],
+    [people, selected],
   );
 
   // The selected person's existing edges, keyed from their point of view.

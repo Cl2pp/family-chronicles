@@ -20,7 +20,6 @@ import {
   getStoryTool,
   listStoriesTool,
   saveStoryTool,
-  shareStoryTool,
   tagStoryPeopleTool,
   untagStoryPeopleTool,
   updateStoryTool,
@@ -60,7 +59,6 @@ export const tools: Tool[] = [
   cancelPeopleChangesTool,
   updateChronicleSettingsTool,
   inviteMemberTool,
-  shareStoryTool,
   tagStoryPeopleTool,
   untagStoryPeopleTool,
   // books (printable memoir)

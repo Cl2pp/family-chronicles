@@ -1,4 +1,3 @@
-import { cookies } from 'next/headers';
 import { and, eq } from 'drizzle-orm';
 import { Box, Card, Group, Stack, Text, Title } from '@mantine/core';
 import { db } from '@/db';
@@ -6,7 +5,8 @@ import { account } from '@/db/schema';
 import { requireUser } from '@/lib/session';
 import { presignGet } from '@/lib/s3';
 import { imageTypeForKey } from '@/lib/uploads';
-import { listMembers, resolveActiveChronicle } from '@/lib/chronicles';
+import { listMembers } from '@/lib/chronicles';
+import { getActiveChronicle } from '@/lib/active-chronicle';
 import { canManage, type AccessRole } from '@/lib/permissions';
 import { getI18n } from '@/lib/i18n/server';
 import { LOCALE_BCP47 } from '@/lib/i18n/config';
@@ -22,10 +22,9 @@ import pkg from '@/package.json';
 export default async function SettingsPage() {
   const user = await requireUser();
   const { locale, t } = await getI18n();
-  const activeCookie = (await cookies()).get('activeChronicleId')?.value;
 
   const [{ chronicles, active }, avatarUrl, credential] = await Promise.all([
-    resolveActiveChronicle(user.id, activeCookie),
+    getActiveChronicle(user.id),
     user.image ? presignGet(user.image, imageTypeForKey(user.image)) : null,
     db.query.account.findFirst({
       where: and(eq(account.userId, user.id), eq(account.providerId, 'credential')),

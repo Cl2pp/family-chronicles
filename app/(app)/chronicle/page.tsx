@@ -1,9 +1,9 @@
-import { cookies } from 'next/headers';
 import { Box, Button, Card, Stack, Text, Title } from '@mantine/core';
 import { IconUsersPlus } from '@tabler/icons-react';
 import { requireUser } from '@/lib/session';
-import { listMembers, resolveActiveChronicle } from '@/lib/chronicles';
-import { getMergedTreeForUser } from '@/lib/people';
+import { listMembers } from '@/lib/chronicles';
+import { getActiveChronicle } from '@/lib/active-chronicle';
+import { getTreeForChronicle } from '@/lib/people';
 import { listPendingInvitations } from '@/lib/invitations';
 import type { AccessRole } from '@/lib/permissions';
 import { getI18n } from '@/lib/i18n/server';
@@ -12,10 +12,8 @@ import { ChronicleTabs } from './chronicle-tabs';
 export default async function ChroniclePage() {
   const user = await requireUser();
   const { t } = await getI18n();
-  const cookieStore = await cookies();
-  const activeCookie = cookieStore.get('activeChronicleId')?.value;
 
-  const { chronicles, active } = await resolveActiveChronicle(user.id, activeCookie);
+  const { chronicles, active } = await getActiveChronicle(user.id);
 
   if (chronicles.length === 0 || !active) {
     return (
@@ -39,7 +37,7 @@ export default async function ChroniclePage() {
   }
 
   const [tree, members, invites] = await Promise.all([
-    getMergedTreeForUser(user.id),
+    getTreeForChronicle(active.id),
     listMembers(active.id),
     listPendingInvitations(active.id),
   ]);
@@ -49,7 +47,6 @@ export default async function ChroniclePage() {
       <ChronicleTabs
         active={active}
         role={active.role as AccessRole}
-        chronicles={chronicles}
         tree={tree}
         members={members.map((m) => ({ ...m, role: m.role as AccessRole }))}
         invites={invites.map((i) => ({

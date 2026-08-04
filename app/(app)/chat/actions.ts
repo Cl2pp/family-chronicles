@@ -93,10 +93,20 @@ export type SyncChatResult =
  */
 export async function syncChat(conversationId: string | null): Promise<SyncChatResult> {
   const user = await requireUser();
+  // Scope both the "resume the newest thread" fallback and the ownership check below to
+  // the caller's CURRENT active chronicle — a conversationId (or a resumable thread)
+  // from a different space must never be reconciled into this one.
+  const activeCookie = (await cookies()).get('activeChronicleId')?.value;
+  const { active } = await resolveActiveChronicle(user.id, activeCookie);
+
   const convo = conversationId
     ? await getConversation(conversationId)
-    : await resumableConversation(user.id);
-  if (!convo || convo.userId !== user.id) return { status: 'gone' };
+    : active
+      ? await resumableConversation(user.id, active.id)
+      : null;
+  if (!convo || convo.userId !== user.id || convo.chronicleId !== active?.id) {
+    return { status: 'gone' };
+  }
   // The null-id fallback may only match a conversation the lost send itself just
   // created. An older resumable thread (e.g. "New chat" whose close request also
   // failed) is unrelated — adopting it would replace the client's fresh chat with it
@@ -142,11 +152,11 @@ export async function syncChat(conversationId: string | null): Promise<SyncChatR
           }
         }
         if (!settled) {
-          const previousChronicleId = (await cookies()).get('activeChronicleId')?.value;
-          const { active } = await resolveActiveChronicle(user.id, previousChronicleId);
+          // Already resolved to the conversation's own chronicle above (the mismatch
+          // check made that a precondition of reaching here) — no need to re-fetch it.
           const ctx = makeContext(user.id, user.name, active);
           ctx.conversationId = convo.id;
-          await respondAndStore(convo.id, ctx, previousChronicleId);
+          await respondAndStore(convo.id, ctx, activeCookie);
         }
       }
     } catch (err) {
