@@ -43,6 +43,22 @@ export interface InviteRow {
   expired: boolean;
 }
 
+/** The chronicle's signup link — owners only, it IS the shareable credential. */
+export interface JoinLinkRow {
+  token: string;
+  /** True = every signup waits for an owner's confirmation before it grants anything. */
+  requiresApproval: boolean;
+  /** Role a direct join grants; meaningless in approval mode, where the owner picks per request. */
+  role: AccessRole;
+}
+
+/** Someone who used the signup link and is waiting for an owner's decision. */
+export interface JoinRequestRow {
+  id: string;
+  name: string;
+  email: string;
+}
+
 export interface PersonRow {
   id: string;
   firstName: string;

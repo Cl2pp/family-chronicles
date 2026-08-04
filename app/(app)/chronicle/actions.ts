@@ -21,6 +21,12 @@ import {
   type PersonRelation,
 } from '@/lib/people';
 import { createInvitation, refreshInvitationLink, revokeInvitation } from '@/lib/invitations';
+import {
+  approveJoinRequest,
+  createJoinLink,
+  declineJoinRequest,
+  revokeJoinLink,
+} from '@/lib/join-links';
 import type { AccessRole } from '@/lib/permissions';
 import { partsToEventDate, type EventDateParts } from '@/lib/dates';
 import { captureServerEvent } from '@/lib/posthog-server';
@@ -272,6 +278,98 @@ export async function resendInviteAction(input: { chronicleId: string; invitatio
   revalidatePath('/chronicle');
   captureServerEvent(user.id, 'invitation_link_resent', { chronicle_id: input.chronicleId });
   return { token: refreshed.token };
+}
+
+/**
+ * Create (or re-read) the chronicle's signup link and return its token. Owner
+ * only. The mode is fixed at creation — `createJoinLink` never rewrites an
+ * existing link's settings, so switching means revoking first.
+ */
+export async function createJoinLinkAction(input: {
+  chronicleId: string;
+  requiresApproval: boolean;
+  /** Role a direct join grants; ignored when the link requires approval. */
+  role: AccessRole;
+}) {
+  const user = await requireUser();
+  await requireOwner(input.chronicleId, user.id);
+
+  // An open link is a standing grant to whoever it gets forwarded to, so it can
+  // never hand out ownership — that would let a stranger delete the chronicle.
+  // Making someone an owner stays a deliberate, per-person act (approve a
+  // request, or invite them by email).
+  if (!input.requiresApproval && input.role === 'owner') {
+    throw new Error('A link that lets people in straight away cannot grant ownership.');
+  }
+
+  const { link, created } = await createJoinLink(input.chronicleId, user.id, {
+    requiresApproval: input.requiresApproval,
+    role: input.role,
+  });
+
+  revalidatePath('/chronicle');
+  captureServerEvent(user.id, 'join_link_created', {
+    chronicle_id: input.chronicleId,
+    requires_approval: input.requiresApproval,
+  });
+  return { token: link.token, created };
+}
+
+/** Kill the chronicle's signup link. Pending requests stay. Owner only. */
+export async function revokeJoinLinkAction(input: { chronicleId: string }) {
+  const user = await requireUser();
+  await requireOwner(input.chronicleId, user.id);
+
+  await revokeJoinLink(input.chronicleId);
+
+  revalidatePath('/chronicle');
+  captureServerEvent(user.id, 'join_link_revoked', { chronicle_id: input.chronicleId });
+}
+
+/** Let a pending request in, at the chosen role. Owner only. */
+export async function approveJoinRequestAction(input: {
+  chronicleId: string;
+  requestId: string;
+  role: AccessRole;
+}) {
+  const user = await requireUser();
+  await requireOwner(input.chronicleId, user.id);
+
+  const result = await approveJoinRequest(input.chronicleId, input.requestId, input.role);
+  if (result === 'stale') {
+    // Same staleness case as revoking an invite: nothing matched because
+    // another owner decided this request since the page rendered, so drop the
+    // row the owner just clicked instead of erroring on it forever.
+    revalidatePath('/chronicle');
+    throw new Error('That request is no longer pending — it may have been decided already.');
+  }
+  if (result === 'already_member') {
+    revalidatePath('/chronicle');
+    throw new Error(
+      'That person is already a member of this chronicle — the request was cleared and their role left unchanged.',
+    );
+  }
+
+  revalidatePath('/chronicle');
+  captureServerEvent(user.id, 'join_request_approved', {
+    chronicle_id: input.chronicleId,
+    role: input.role,
+  });
+}
+
+/** Turn a pending request down. Owner only. */
+export async function declineJoinRequestAction(input: { chronicleId: string; requestId: string }) {
+  const user = await requireUser();
+  await requireOwner(input.chronicleId, user.id);
+
+  const declined = await declineJoinRequest(input.chronicleId, input.requestId);
+  if (!declined) {
+    revalidatePath('/chronicle');
+    throw new Error('That request is no longer pending — it may have been decided already.');
+  }
+
+  revalidatePath('/chronicle');
+  captureServerEvent(user.id, 'join_request_declined', { chronicle_id: input.chronicleId });
 }
 
 /** Link a member's account to an unlinked tree person. Owner only. */

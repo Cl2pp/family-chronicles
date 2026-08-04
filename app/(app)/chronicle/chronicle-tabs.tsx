@@ -22,7 +22,15 @@ import { FamilyTree } from './family-tree';
 import { AddPersonModal } from './add-person-modal';
 import { EditPersonModal } from './edit-person-modal';
 import { AccessTab } from './access-tab';
-import type { AddTarget, ChronicleRow, InviteRow, MemberRow, PersonRow } from './types';
+import type {
+  AddTarget,
+  ChronicleRow,
+  InviteRow,
+  JoinLinkRow,
+  JoinRequestRow,
+  MemberRow,
+  PersonRow,
+} from './types';
 import classes from './chronicle-tabs.module.css';
 
 // 12 hues × 3 shades = 36 distinct colors before the cycle repeats. Neighboring
@@ -55,6 +63,9 @@ interface ChronicleTabsProps {
   tree: MergedTree;
   members: MemberRow[];
   invites: InviteRow[];
+  /** The chronicle's signup link — owners only, null for everyone else. */
+  joinLink: JoinLinkRow | null;
+  joinRequests: JoinRequestRow[];
   currentUserId: string;
 }
 
@@ -64,6 +75,8 @@ export function ChronicleTabs({
   tree,
   members,
   invites,
+  joinLink,
+  joinRequests,
   currentUserId,
 }: ChronicleTabsProps) {
   const { t } = useI18n();
@@ -130,7 +143,20 @@ export function ChronicleTabs({
           <Tabs.Tab value="tree" leftSection={<IconBinaryTree2 size={16} />}>
             {t.tree.tabTree}
           </Tabs.Tab>
-          <Tabs.Tab value="access" leftSection={<IconUsers size={16} />}>
+          {/* Nothing emails an owner when someone asks to join, so the count is
+              the only cue they get — it rides on the tab they would otherwise
+              have no reason to open. Non-owners never receive the rows. */}
+          <Tabs.Tab
+            value="access"
+            leftSection={<IconUsers size={16} />}
+            rightSection={
+              joinRequests.length > 0 ? (
+                <Badge size="sm" variant="filled" color="brand" circle>
+                  {joinRequests.length}
+                </Badge>
+              ) : null
+            }
+          >
             {t.tree.tabAccess}
           </Tabs.Tab>
         </Tabs.List>
@@ -239,6 +265,8 @@ export function ChronicleTabs({
             chronicleId={active.id}
             members={members}
             invites={invites}
+            joinLink={joinLink}
+            joinRequests={joinRequests}
             canManage={canManage(role)}
             treePeople={(tree.people as TreePerson[])
               .filter((p) => p.chronicleId === active.id)

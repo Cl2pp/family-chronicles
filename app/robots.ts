@@ -17,6 +17,7 @@ export default function robots(): MetadataRoute.Robots {
         '/settings',
         '/account',
         '/invite/',
+        '/join/',
         '/offline',
       ],
     },

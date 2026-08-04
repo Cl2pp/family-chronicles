@@ -190,6 +190,13 @@
       "when": 1785836022440,
       "tag": "0026_chronicle_isolation",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1785850955959,
+      "tag": "0027_majestic_speed",
+      "breakpoints": true
     }
   ]
 }

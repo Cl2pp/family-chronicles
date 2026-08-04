@@ -385,6 +385,39 @@ export const de: Dictionary = {
     invitationRevoked: 'Einladung zurückgezogen',
     couldNotRevokeInvitation: 'Die Einladung konnte nicht zurückgezogen werden',
     inviteExpired: 'Abgelaufen',
+    signupLinkTitle: 'Anmeldelink',
+    signupLinkHint:
+      'Ein Link, den du mit allen teilen kannst — per Nachricht, in einer Gruppe, auf einer Karte. Beim Erstellen entscheidest du, ob die Leute sofort drin sind oder auf deine Bestätigung warten.',
+    createSignupLink: 'Anmeldelink erstellen',
+    createSignupLinkModalTitle: 'Anmeldelink erstellen',
+    signupLinkModeLabel: 'Was passiert, wenn jemand den Link benutzt?',
+    signupLinkModeApproval: 'Ich bestätige jede Anfrage',
+    signupLinkModeApprovalHint:
+      'Die Person meldet sich an und landet hier in einer Liste. Sie sieht nichts, bis du zustimmst — und die Rolle wählst du dann.',
+    signupLinkModeOpen: 'Wer den Link hat, ist drin',
+    signupLinkModeOpenHint:
+      'Die Person meldet sich an und hat sofort Zugriff. Praktisch für eine ganze Familie auf einmal — aber wer den Link weitergeleitet bekommt, kommt genauso rein.',
+    signupLinkModeApprovalBadge: 'Du bestätigst jede Anfrage',
+    signupLinkModeOpenBadge: 'Sofortiger Zugriff',
+    signupLinkRoleLabel: 'Rolle für alle, die beitreten',
+    signupLinkGrantsRole: (role: string) => `Beitritt als ${role}`,
+    signupLinkCreated: 'Anmeldelink erstellt',
+    signupLinkAlreadyExisted:
+      'Dieses Familienwerk hatte schon einen Anmeldelink — der gilt weiterhin. Zieh ihn zuerst zurück, wenn du ihn anders einrichten willst.',
+    couldNotCreateSignupLink: 'Der Anmeldelink konnte nicht erstellt werden',
+    revokeSignupLink: 'Link zurückziehen',
+    revokeSignupLinkModalTitle: 'Anmeldelink zurückziehen?',
+    revokeSignupLinkConfirmText:
+      'Der Link funktioniert dann für alle nicht mehr, mit denen du ihn geteilt hast. Bereits wartende Anfragen bleiben in deiner Liste, und du kannst jederzeit einen neuen Link erstellen.',
+    signupLinkRevoked: 'Anmeldelink zurückgezogen',
+    couldNotRevokeSignupLink: 'Der Anmeldelink konnte nicht zurückgezogen werden',
+    joinRequests: 'Beitrittsanfragen',
+    approveRequest: 'Bestätigen',
+    declineRequest: 'Ablehnen',
+    requestApproved: 'Anfrage bestätigt',
+    requestDeclined: 'Anfrage abgelehnt',
+    couldNotApproveRequest: 'Die Anfrage konnte nicht bestätigt werden',
+    couldNotDeclineRequest: 'Die Anfrage konnte nicht abgelehnt werden',
     treePersonLabel: 'Wer ist das im Stammbaum?',
     treePersonPlaceholder: 'Person auswählen',
     notInTreeYet: 'Noch nicht im Stammbaum',
@@ -900,6 +933,24 @@ export const de: Dictionary = {
       'Du hast jetzt Zugriff auf das Familienwerk, und dein Platz im Stammbaum ist mit deinem Konto verknüpft.',
     acceptedLinkFailedText:
       'Du hast jetzt Zugriff auf das Familienwerk — aber dein Platz im Stammbaum konnte nicht automatisch verknüpft werden. Bitte einen Eigentümer, dein Konto im Zugriff-Tab zu verknüpfen.',
+  },
+  join: {
+    title: 'Einem Familienwerk beitreten',
+    notFound: 'Dieser Anmeldelink ist nicht mehr gültig.',
+    goToChronicles: 'Zu deinen Familienwerken',
+    confirmText: (chronicle: string) => `Du kannst anfragen, „${chronicle}“ beizutreten.`,
+    confirmApprovalText:
+      'Ein Eigentümer des Familienwerks muss deine Anfrage bestätigen, bevor du etwas sehen kannst.',
+    confirmRequest: 'Beitritt anfragen',
+    confirmTextOpen: (chronicle: string) => `Du bist zu „${chronicle}“ eingeladen.`,
+    confirmOpenText: 'Ein Klick und du bist dabei — mehr braucht es nicht.',
+    confirmJoin: 'Beitreten',
+    pendingTitle: 'Anfrage gesendet',
+    pendingText:
+      'Jetzt muss ein Eigentümer des Familienwerks sie bestätigen. Sobald das passiert ist, taucht das Familienwerk hier bei dir auf.',
+    alreadyMemberTitle: 'Du bist schon dabei',
+    alreadyMemberText: (chronicle: string) =>
+      `Du hast bereits Zugriff auf „${chronicle}“ — hier gibt es nichts zu tun.`,
   },
   offline: {
     title: 'Du bist offline',

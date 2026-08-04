@@ -5,7 +5,8 @@ import { listMembers } from '@/lib/chronicles';
 import { getActiveChronicle } from '@/lib/active-chronicle';
 import { getTreeForChronicle } from '@/lib/people';
 import { listPendingInvitations } from '@/lib/invitations';
-import type { AccessRole } from '@/lib/permissions';
+import { getJoinLink, listJoinRequests } from '@/lib/join-links';
+import { canManage, type AccessRole } from '@/lib/permissions';
 import { getI18n } from '@/lib/i18n/server';
 import { ChronicleTabs } from './chronicle-tabs';
 
@@ -36,17 +37,25 @@ export default async function ChroniclePage() {
     );
   }
 
-  const [tree, members, invites] = await Promise.all([
+  const role = active.role as AccessRole;
+  // The signup link is a bearer credential and the requests are the owner's to
+  // decide, so neither is even loaded for a plain member — the gate is here, on
+  // the server, not in what the access tab chooses to render.
+  const manage = canManage(role);
+
+  const [tree, members, invites, joinLink, joinRequests] = await Promise.all([
     getTreeForChronicle(active.id),
     listMembers(active.id),
     listPendingInvitations(active.id),
+    manage ? getJoinLink(active.id) : null,
+    manage ? listJoinRequests(active.id) : [],
   ]);
 
   return (
     <Box p="lg" maw={1100} mx="auto">
       <ChronicleTabs
         active={active}
-        role={active.role as AccessRole}
+        role={role}
         tree={tree}
         members={members.map((m) => ({ ...m, role: m.role as AccessRole }))}
         invites={invites.map((i) => ({
@@ -56,6 +65,16 @@ export default async function ChroniclePage() {
           personName: i.personName,
           expired: i.expired,
         }))}
+        joinLink={
+          joinLink
+            ? {
+                token: joinLink.token,
+                requiresApproval: joinLink.requiresApproval,
+                role: joinLink.accessRole as AccessRole,
+              }
+            : null
+        }
+        joinRequests={joinRequests.map((r) => ({ id: r.id, name: r.name, email: r.email }))}
         currentUserId={user.id}
       />
     </Box>
