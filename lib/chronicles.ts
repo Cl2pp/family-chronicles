@@ -28,6 +28,7 @@ export async function listChroniclesForUser(userId: string) {
       styleGuide: chronicles.styleGuide,
       storyLanguage: chronicles.storyLanguage,
       storyAccess: chronicles.storyAccess,
+      suggestPeople: chronicles.suggestPeople,
       role: memberships.accessRole,
       createdAt: chronicles.createdAt,
     })
@@ -140,6 +141,7 @@ export async function updateChronicle(
     styleGuide?: string | null;
     storyLanguage?: string | null;
     storyAccess?: StoryAccessMode;
+    suggestPeople?: boolean;
   },
 ) {
   await db

@@ -245,6 +245,9 @@ export const en = {
       n === 1
         ? '1 member account is not linked to a person in the family tree — that member will only see their own stories. Link them on the Access tab first.'
         : `${n} member accounts are not linked to a person in the family tree — those members will only see their own stories. Link them on the Access tab first.`,
+    suggestPeople: 'Suggest people for the family tree',
+    suggestPeopleDescription:
+      'When on, the chat suggests adding people it hears about to the family tree. When off, it only changes the tree when you ask.',
     settingsSaved: 'Settings saved',
     couldNotSaveSettings: 'Could not save settings',
     aboutTitle: 'About',

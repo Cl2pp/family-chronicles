@@ -1,7 +1,7 @@
 'use client';
 
 import { useTransition } from 'react';
-import { Alert, Button, Group, Select, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { Alert, Button, Group, Select, Stack, Switch, Text, Textarea, TextInput } from '@mantine/core';
 import { IconUserQuestion } from '@tabler/icons-react';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
@@ -10,7 +10,8 @@ import { isLocale, LOCALE_NAMES, LOCALES, type Locale } from '@/lib/i18n/config'
 import type { StoryAccessMode } from '@/lib/chronicles';
 import { saveChronicleSettings } from './actions';
 
-/** Settings form of one chronicle: name, description, writing style, story language, story access. */
+/** Settings form of one chronicle: name, description, writing style, story language, story
+ *  access, and whether the chat proposes people for the tree. */
 export function ChronicleSettingsForm({
   chronicleId,
   name,
@@ -18,6 +19,7 @@ export function ChronicleSettingsForm({
   styleGuide,
   storyLanguage,
   storyAccess,
+  suggestPeople,
   unlinkedMemberCount,
   canManage: manage,
 }: {
@@ -27,6 +29,7 @@ export function ChronicleSettingsForm({
   styleGuide: string;
   storyLanguage: string | null;
   storyAccess: StoryAccessMode;
+  suggestPeople: boolean;
   /** Member accounts with no person in the tree — they'd only see their own stories in 'family' mode. */
   unlinkedMemberCount: number;
   canManage: boolean;
@@ -40,6 +43,7 @@ export function ChronicleSettingsForm({
       styleGuide,
       storyLanguage: (isLocale(storyLanguage) ? storyLanguage : 'auto') as Locale | 'auto',
       storyAccess,
+      suggestPeople,
     },
     validate: { name: (v) => (v.trim() ? null : t.settings.chronicleNameRequired) },
   });
@@ -117,6 +121,12 @@ export function ChronicleSettingsForm({
             {t.settings.storyAccessUnlinkedWarning(unlinkedMemberCount)}
           </Alert>
         )}
+        <Switch
+          label={t.settings.suggestPeople}
+          description={t.settings.suggestPeopleDescription}
+          disabled={!manage}
+          {...form.getInputProps('suggestPeople', { type: 'checkbox' })}
+        />
         {manage && (
           <Group justify="flex-end">
             <Button type="submit" loading={pending}>

@@ -57,6 +57,7 @@ export default async function SettingsPage() {
     styleGuide: f.styleGuide,
     storyLanguage: f.storyLanguage,
     storyAccess: f.storyAccess,
+    suggestPeople: f.suggestPeople,
     unlinkedMemberCount: unlinkedCounts.get(f.id) ?? 0,
     role: f.role as AccessRole,
     createdLabel: f.createdAt.toLocaleDateString(LOCALE_BCP47[locale], {
