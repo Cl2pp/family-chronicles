@@ -194,6 +194,8 @@ export const chronicles = pgTable('chronicles', {
    * existed before migration 0015 keep `open` until their owner flips them.
    */
   storyAccess: storyAccessMode('story_access').notNull().default('family'),
+  /** When false, the chat never proactively proposes adding people to the family tree. */
+  suggestPeople: boolean('suggest_people').notNull().default(true),
   createdBy: text('created_by')
     .notNull()
     .references(() => user.id, { onDelete: 'restrict' }),

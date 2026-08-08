@@ -1,0 +1,1 @@
+ALTER TABLE "chronicles" ADD COLUMN "suggest_people" boolean DEFAULT true NOT NULL;

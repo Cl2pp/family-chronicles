@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { getChronicle } from '@/lib/chronicles';
 import { addMessage, resolveDraftCard } from '@/lib/conversations';
 import { listChroniclePeople } from '@/lib/people';
 import { matchPeopleByName } from '@/lib/person-match';
@@ -84,6 +85,13 @@ async function likelyDuplicateError(
   );
 }
 
+/** Whether this chronicle wants the chat to offer adding story people to the tree. Only
+ *  read where a story actually names someone the tree doesn't have. */
+async function suggestsPeople(chronicleId: string): Promise<boolean> {
+  const chronicle = await getChronicle(chronicleId);
+  return chronicle?.suggestPeople ?? true;
+}
+
 /**
  * draft_story — compose a memoir story from the conversation and show it to the user
  * for review. This does NOT save anything; the client renders an editable card and the
@@ -93,8 +101,9 @@ export const draftStoryTool = defineTool({
   name: 'draft_story',
   description:
     'Prepare a story draft for the user to review and save. Only call this once you have enough ' +
-    'detail (who, roughly when, where). The body MUST be third-person memoir prose ("Maria ' +
-    'remembered…"), preserve every fact (names, places, dates), invent NOTHING, and keep the ' +
+    'detail (who, roughly when, where). The body is third-person memoir prose ("Maria remembered…") ' +
+    "unless the chronicle's style guide in your system prompt asks for another voice; either way it " +
+    'MUST preserve every fact (names, places, dates), invent NOTHING, and keep the ' +
     "family's original language. This shows an editable card — it does not save; only the user " +
     'can save it from the card, so never offer to save it yourself (only if the user explicitly ' +
     'asks to save without the card, use save_story instead). Keep your reply ' +
@@ -102,7 +111,10 @@ export const draftStoryTool = defineTool({
   schema: z.object({
     title: z.string().min(1).describe('A short, specific title.'),
     summary: z.string().describe('One short sentence on what the story is about.'),
-    body: z.string().min(1).describe('The third-person memoir prose.'),
+    body: z
+      .string()
+      .min(1)
+      .describe("The story prose — third-person memoir unless the chronicle's style guide says otherwise."),
     sourceText: z
       .string()
       .min(1)
@@ -158,8 +170,15 @@ export const draftStoryTool = defineTool({
           ` NOTE: ${unmatched.map((n) => `"${n}"`).join(', ')} ` +
           (unmatched.length === 1 ? 'is' : 'are') +
           ' not in the family tree, so the story cannot be connected to them (or their family) ' +
-          'when saved. Tell the user and offer to add them with add_person first — if they are ' +
-          'added before the draft is accepted, the connection will work.';
+          'when saved.';
+        // Chronicles that turned tree suggestions off get the fact, not the nudge.
+        if (await suggestsPeople(gate.chronicleId)) {
+          message +=
+            ' Tell the user and offer to add them with add_person first — if they are ' +
+            'added before the draft is accepted, the connection will work.';
+        } else {
+          message += ' Mention this briefly, but do not offer to add them to the tree.';
+        }
       }
     }
 
@@ -229,14 +248,15 @@ export const updateStoryTool = defineTool({
   description:
     'Propose a revision to an existing story — a rewrite, a correction, or new details woven in. ' +
     'Call get_story first and base the revision on the current text. The body MUST be the ' +
-    'COMPLETE revised story (not just the changes), keep the third-person memoir style, preserve ' +
+    "COMPLETE revised story (not just the changes), keep the story's voice (third-person memoir " +
+    "unless the chronicle's style guide says otherwise), preserve " +
     'every fact that is still true, invent NOTHING, and keep the original language. This shows an ' +
     'editable review card — it does not save. Keep your reply short afterwards.',
   schema: z.object({
     story: z.string().min(1).describe('The story title (or id) to update.'),
     title: z.string().min(1).describe('The (possibly unchanged) title.'),
     summary: z.string().describe('One short sentence on what the story is about.'),
-    body: z.string().min(1).describe('The complete revised third-person memoir prose.'),
+    body: z.string().min(1).describe("The complete revised story prose, in the story's existing voice."),
     newSourceText: z
       .string()
       .nullish()
@@ -316,7 +336,7 @@ export const saveStoryTool = defineTool({
     'EXPLICITLY asked you to save without reviewing (e.g. "just save it", "save it directly", or ' +
     'they say they cannot see or use the card). Never call it on your own initiative: the default ' +
     'flow is draft_story / update_story, where the user saves from the card. Pass the COMPLETE ' +
-    'story content (same memoir rules) — if a draft card was already shown, reuse its exact ' +
+    'story content (same writing rules) — if a draft card was already shown, reuse its exact ' +
     'content plus any corrections the user asked for since. To update an existing story instead ' +
     'of creating a new one, pass its title or id in "story". Any pending draft card is resolved.',
   schema: z.object({
@@ -326,7 +346,12 @@ export const saveStoryTool = defineTool({
       .describe('To update an existing story: its title (or id). Omit to create a new story.'),
     title: z.string().min(1).describe('A short, specific title.'),
     summary: z.string().describe('One short sentence on what the story is about.'),
-    body: z.string().min(1).describe('The complete third-person memoir prose.'),
+    body: z
+      .string()
+      .min(1)
+      .describe(
+        "The complete story prose — third-person memoir unless the chronicle's style guide says otherwise.",
+      ),
     sourceText: z
       .string()
       .nullish()
@@ -444,8 +469,13 @@ export const saveStoryTool = defineTool({
       message +=
         ` NOTE: ${saved.unmatchedPeople.map((n) => `"${n}"`).join(', ')} ` +
         (saved.unmatchedPeople.length === 1 ? 'is' : 'are') +
-        ' not in the family tree, so the story could not be connected to them. Offer to add them ' +
-        'with add_person and then tag_story_people.';
+        ' not in the family tree, so the story could not be connected to them.';
+      // Chronicles that turned tree suggestions off get the fact, not the nudge.
+      if (await suggestsPeople(gate.chronicleId)) {
+        message += ' Offer to add them with add_person and then tag_story_people.';
+      } else {
+        message += ' Mention this briefly, but do not offer to add them to the tree.';
+      }
     }
     return {
       ok: true,

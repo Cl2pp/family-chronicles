@@ -12,7 +12,8 @@ import {
 } from '@/lib/chronicles';
 import type { Locale } from '@/lib/i18n/config';
 
-/** Update a chronicle's name, description, writing-style guide, story language, and story access. */
+/** Update a chronicle's name, description, writing-style guide, story language, story access,
+ *  and whether the chat proposes people for the tree. */
 export async function saveChronicleSettings(input: {
   chronicleId: string;
   name: string;
@@ -22,6 +23,8 @@ export async function saveChronicleSettings(input: {
   storyLanguage: Locale | 'auto';
   /** 'open' = every member reads everything; 'family' = kinship-gated reads. */
   storyAccess: StoryAccessMode;
+  /** false = the chat never offers to add story people to the tree. */
+  suggestPeople: boolean;
 }) {
   const user = await requireUser();
   await requireOwner(input.chronicleId, user.id);
@@ -38,6 +41,7 @@ export async function saveChronicleSettings(input: {
     storyLanguage: normalizeStoryLanguage(input.storyLanguage),
     // Never trust the client string beyond the two known modes.
     storyAccess: input.storyAccess === 'family' ? 'family' : 'open',
+    suggestPeople: !!input.suggestPeople,
   });
 
   revalidatePath('/settings');

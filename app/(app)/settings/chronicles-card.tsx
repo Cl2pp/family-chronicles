@@ -31,6 +31,8 @@ export interface ChronicleRow {
   styleGuide: string | null;
   storyLanguage: string | null;
   storyAccess: StoryAccessMode;
+  /** Whether the chat may proactively propose adding story people to the tree. */
+  suggestPeople: boolean;
   /** Member accounts without a tree person (drives the 'family'-mode warning). */
   unlinkedMemberCount: number;
   role: AccessRole;
@@ -164,6 +166,7 @@ export function ChroniclesCard({
                       styleGuide={chronicle.styleGuide ?? ''}
                       storyLanguage={chronicle.storyLanguage}
                       storyAccess={chronicle.storyAccess}
+                      suggestPeople={chronicle.suggestPeople}
                       unlinkedMemberCount={chronicle.unlinkedMemberCount}
                       canManage={canManage(chronicle.role)}
                     />
