@@ -70,6 +70,29 @@ const schema = z.object({
   GELATO_PRODUCT_UID_SOFT_20X20: z.string().min(1).optional(),
   /** Flat margin (EUR) added on top of Gelato's product + shipping cost. */
   BOOK_MARGIN_EUR: z.coerce.number().default(15),
+  /**
+   * In-app Gelato ordering (lib/book-orders.ts) is gated to these account emails
+   * (comma-separated, case-insensitive). Everyone else keeps the "email us" order flow.
+   * Empty/unset = nobody can order in-app. Payment is NOT in the app: Gelato charges the
+   * card on the Gelato account that owns GELATO_API_KEY.
+   */
+  BOOK_ORDERING_ALLOWED_EMAILS: z
+    .string()
+    .default('')
+    .transform((v) =>
+      v
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  /**
+   * What the worker submits to Gelato: `draft` creates a draft order you review and
+   * convert in the Gelato dashboard (nothing is printed or charged until you do);
+   * `order` goes straight to production. Defaults to `draft` so a misconfigured or
+   * half-tested environment can never print a real book by accident — set `order` in
+   * production once the first draft has been checked.
+   */
+  GELATO_ORDER_TYPE: z.enum(['order', 'draft']).default('draft'),
   /** Shown on the order screen — users email this address to request a printed book. */
   BOOK_ORDER_CONTACT_EMAIL: z.string().email().default('clemens@mtx.studio'),
   /**

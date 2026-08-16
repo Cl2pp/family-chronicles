@@ -1,17 +1,23 @@
 import { env } from '@/lib/env';
 
 /**
- * Gelato print-on-demand integration.
+ * Gelato print-on-demand integration — the raw HTTP client, nothing else.
  *
- * v1 uses exactly ONE endpoint — the order quote — to price a book. Actual order
- * submission (POST /v4/orders with the print PDF) is deliberately not implemented
- * yet: orders end at the "order at price" screen and are handled personally.
+ * Four endpoints: the order quote (`quoteBookPrice`, prices a book), cover dimensions
+ * (`getGelatoCoverDimensions`, sizes the wraparound cover spread the print file needs —
+ * `lib/book-print-file.ts`), order creation (`createGelatoOrder`) and order lookup
+ * (`getGelatoOrder`, status + tracking). The order lifecycle around them (who may order,
+ * pinning the print file, the worker job, status mapping into `book_orders`) lives in
+ * `lib/book-orders.ts`; this module never touches the database.
  *
  * Docs: https://dashboard.gelato.com/docs/ (X-API-KEY auth). API access is included
- * in Gelato's free plan; the key lives in GELATO_API_KEY.
+ * in Gelato's free plan; the key lives in GELATO_API_KEY. Gelato bills the account
+ * that owns the key — there is no payment step on our side.
  */
 
 const QUOTE_URL = 'https://order.gelatoapis.com/v4/orders:quote';
+const ORDERS_URL = 'https://order.gelatoapis.com/v4/orders';
+const PRODUCT_URL = 'https://product.gelatoapis.com/v3/products';
 
 /** NOTE: despite the "hardcover-" prefix, these values name the SIZE/trim only (21×28 vs
  *  20×20 cm) — see `bookFormat`'s comment in db/schema.ts. The hardcover-vs-softcover
@@ -84,11 +90,29 @@ export interface BookQuote {
 }
 
 /**
- * The quote call needs a recipient; until real shipping-address collection exists
- * we quote against a fixed German address and say so in the UI ("incl. shipping
- * within Germany").
+ * A Gelato shipping recipient (their `ShippingAddressObject`, the fields we use). Field
+ * limits per their docs: first/last name ≤25 chars, address lines ≤35, city ≤30,
+ * postCode ≤15, country = ISO 3166-1 alpha-2, phone ≤25. `lib/book-orders.ts`'s
+ * `bookShippingAddressSchema` enforces those before anything reaches this module.
  */
-const QUOTE_RECIPIENT = {
+export interface GelatoRecipient {
+  firstName: string;
+  lastName: string;
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  postCode: string;
+  country: string;
+  email: string;
+  phone?: string;
+}
+
+/**
+ * The quote call needs a recipient. Callers that already know the real shipping
+ * address pass it (exact shipping cost); the order screen's price preview quotes
+ * against this fixed German address and says so ("incl. shipping within Germany").
+ */
+export const QUOTE_RECIPIENT: GelatoRecipient = {
   country: 'DE',
   addressLine1: 'Musterstrasse 1',
   city: 'Berlin',
@@ -114,6 +138,8 @@ export async function quoteBookPrice(input: {
   format: BookFormat;
   coverType: BookCoverType;
   pageCount: number;
+  /** Real recipient for an exact shipping price; defaults to `QUOTE_RECIPIENT`. */
+  recipient?: GelatoRecipient;
 }): Promise<BookQuote> {
   const productUid = productUidForFormat(input.format, input.coverType);
   const pageCount = Math.min(MAX_PAGES, Math.max(MIN_PAGES, input.pageCount));
@@ -141,7 +167,7 @@ export async function quoteBookPrice(input: {
         customerReferenceId: 'family-chronicle',
         currency: 'EUR',
         allowMultipleQuotes: false,
-        recipient: QUOTE_RECIPIENT,
+        recipient: input.recipient ?? QUOTE_RECIPIENT,
         products: [
           {
             itemReferenceId: 'book-1',
@@ -180,5 +206,228 @@ export async function quoteBookPrice(input: {
   } catch (err) {
     console.error('[gelato] quote failed:', err);
     return base;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Cover dimensions — sizes the wraparound cover spread of the Gelato print file
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** One rectangle of Gelato's cover-dimensions response, in mm, measured from the
+ *  spread's top-left. `thickness` only appears on the wraparound areas. */
+export interface GelatoCoverArea {
+  width: number;
+  height: number;
+  left: number;
+  top: number;
+  thickness?: number;
+}
+
+/**
+ * Gelato's cover-dimensions response for a photo book at a given inner page count
+ * (`GET /v3/products/{uid}/cover-dimensions?pageCount=N`), in mm. Hardcover books report
+ * the wraparound areas + joints; softcover books report `bleedSize` instead (see the
+ * per-product table in their docs). `spread` is the full page size of the cover PDF page:
+ * `wraparoundInsideSize` for hardcover, `bleedSize` for softcover.
+ */
+export interface GelatoCoverDimensions {
+  productUid: string;
+  /** Gelato's echo of the inner page count it sized the cover for. */
+  pagesCount: number;
+  spread: GelatoCoverArea;
+  wraparoundInsideSize?: GelatoCoverArea;
+  wraparoundEdgeSize?: GelatoCoverArea;
+  bleedSize?: GelatoCoverArea;
+  contentBackSize: GelatoCoverArea;
+  jointBackSize?: GelatoCoverArea;
+  spineSize: GelatoCoverArea;
+  jointFrontSize?: GelatoCoverArea;
+  contentFrontSize: GelatoCoverArea;
+}
+
+class GelatoError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'GelatoError';
+  }
+}
+export { GelatoError };
+
+function requireApiKey(): string {
+  if (!env.GELATO_API_KEY) throw new GelatoError('GELATO_API_KEY is not configured');
+  return env.GELATO_API_KEY;
+}
+
+async function gelatoFetch<T>(url: string, init: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
+  const { timeoutMs = 20_000, ...rest } = init;
+  const res = await fetch(url, {
+    ...rest,
+    headers: { 'Content-Type': 'application/json', 'X-API-KEY': requireApiKey(), ...(rest.headers ?? {}) },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 1000);
+    throw new GelatoError(`Gelato ${rest.method ?? 'GET'} ${url} failed: HTTP ${res.status} ${body}`, res.status);
+  }
+  return (await res.json()) as T;
+}
+
+/** Throws (GelatoError) on any failure — the caller (the render job) decides whether a
+ *  missing cover spread is fatal or just means "no Gelato file this render". */
+export async function getGelatoCoverDimensions(productUid: string, pageCount: number): Promise<GelatoCoverDimensions> {
+  type Raw = Omit<GelatoCoverDimensions, 'spread'> & { measureUnit?: string };
+  const url = `${PRODUCT_URL}/${encodeURIComponent(productUid)}/cover-dimensions?pageCount=${pageCount}`;
+  const raw = await gelatoFetch<Raw>(url);
+  const spread = raw.wraparoundInsideSize ?? raw.bleedSize;
+  if (!spread || !raw.contentBackSize || !raw.spineSize || !raw.contentFrontSize) {
+    throw new GelatoError(`Gelato cover-dimensions response missing areas: ${JSON.stringify(raw).slice(0, 500)}`);
+  }
+  if (raw.measureUnit && raw.measureUnit !== 'mm') {
+    throw new GelatoError(`Gelato cover-dimensions in unexpected unit "${raw.measureUnit}"`);
+  }
+  return { ...raw, spread };
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Orders — create + read back
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Gelato's order `fulfillmentStatus` values we map (their "How orders work" page). */
+export type GelatoFulfillmentStatus =
+  | 'created'
+  | 'uploading'
+  | 'passed'
+  | 'in_production'
+  | 'printed'
+  | 'draft'
+  | 'failed'
+  | 'canceled'
+  | 'pending_approval'
+  | 'on_hold'
+  | 'shipped'
+  | 'in_transit'
+  | 'delivered'
+  | 'returned'
+  | (string & {});
+
+export interface GelatoOrder {
+  id: string;
+  orderReferenceId: string;
+  orderType: 'order' | 'draft';
+  fulfillmentStatus: GelatoFulfillmentStatus;
+  financialStatus?: string;
+  /** First package's tracking, when Gelato has handed the parcel to a carrier. */
+  trackingCode: string | null;
+  trackingUrl: string | null;
+  /** Everything Gelato returned, for logging/debugging. */
+  raw: unknown;
+}
+
+interface GelatoOrderResponse {
+  id: string;
+  orderReferenceId: string;
+  orderType: 'order' | 'draft';
+  fulfillmentStatus: string;
+  financialStatus?: string;
+  shipment?: { packages?: Array<{ trackingCode?: string | null; trackingUrl?: string | null }> } | null;
+}
+
+function toGelatoOrder(raw: GelatoOrderResponse): GelatoOrder {
+  const pkg = raw.shipment?.packages?.find((p) => p.trackingCode || p.trackingUrl);
+  return {
+    id: raw.id,
+    orderReferenceId: raw.orderReferenceId,
+    orderType: raw.orderType,
+    fulfillmentStatus: raw.fulfillmentStatus,
+    financialStatus: raw.financialStatus,
+    trackingCode: pkg?.trackingCode ?? null,
+    trackingUrl: pkg?.trackingUrl ?? null,
+    raw,
+  };
+}
+
+/**
+ * Create a Gelato order for one photo book (`POST /v4/orders`). `fileUrl` must be a
+ * publicly fetchable URL (a presigned S3 GET) of the Gelato-format PDF (cover spread +
+ * endpapers + inner pages, `lib/book-print-file.ts`); `pageCount` is the INNER page
+ * count that PDF was built for. `orderType` defaults to `env.GELATO_ORDER_TYPE`
+ * (`draft` unless production explicitly says `order`). Throws GelatoError on failure —
+ * NOT idempotent on Gelato's side, so callers must guard against double submission
+ * (`orderReferenceId` is echoed back but doesn't dedupe).
+ */
+export async function createGelatoOrder(input: {
+  orderReferenceId: string;
+  customerReferenceId: string;
+  productUid: string;
+  pageCount: number;
+  fileUrl: string;
+  recipient: GelatoRecipient;
+  currency?: string;
+  orderType?: 'order' | 'draft';
+}): Promise<GelatoOrder> {
+  const raw = await gelatoFetch<GelatoOrderResponse>(ORDERS_URL, {
+    method: 'POST',
+    timeoutMs: 60_000,
+    body: JSON.stringify({
+      orderType: input.orderType ?? env.GELATO_ORDER_TYPE,
+      orderReferenceId: input.orderReferenceId,
+      customerReferenceId: input.customerReferenceId,
+      currency: input.currency ?? 'EUR',
+      items: [
+        {
+          itemReferenceId: 'book-1',
+          productUid: input.productUid,
+          pageCount: input.pageCount,
+          quantity: 1,
+          files: [{ type: 'default', url: input.fileUrl }],
+        },
+      ],
+      shippingAddress: input.recipient,
+    }),
+  });
+  return toGelatoOrder(raw);
+}
+
+/** `GET /v4/orders/{id}` — current status + tracking. Throws GelatoError on failure. */
+export async function getGelatoOrder(gelatoOrderId: string): Promise<GelatoOrder> {
+  const raw = await gelatoFetch<GelatoOrderResponse>(`${ORDERS_URL}/${encodeURIComponent(gelatoOrderId)}`);
+  return toGelatoOrder(raw);
+}
+
+/** Our `book_orders.status` vocabulary (see the table's doc comment in db/schema.ts). */
+export type BookOrderStatus =
+  | 'submitting'
+  | 'submitted'
+  | 'in_production'
+  | 'shipped'
+  | 'delivered'
+  | 'failed'
+  | 'cancelled';
+
+/**
+ * Map Gelato's `fulfillmentStatus` onto ours. Anything not listed (uploading, passed,
+ * pending_approval, on_hold, draft, …) stays `submitted` — accepted, not yet in
+ * production — and the raw value is kept in `book_orders.gelato_status` for the admin.
+ */
+export function mapGelatoStatus(status: GelatoFulfillmentStatus): BookOrderStatus {
+  switch (status) {
+    case 'in_production':
+    case 'printed':
+      return 'in_production';
+    case 'shipped':
+    case 'in_transit':
+      return 'shipped';
+    case 'delivered':
+      return 'delivered';
+    case 'canceled':
+    case 'returned':
+      return 'cancelled';
+    case 'failed':
+      return 'failed';
+    default:
+      return 'submitted';
   }
 }

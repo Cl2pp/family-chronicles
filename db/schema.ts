@@ -547,6 +547,13 @@ export const books = pgTable(
     pageCount: integer('page_count'),
     previewS3Key: text('preview_s3_key'),
     printS3Key: text('print_s3_key'),
+    /** The Gelato-format print file (`lib/book-print-file.ts`): ONE PDF whose page 1 is
+     *  the wraparound cover spread (back + spine + front, sized per Gelato's
+     *  cover-dimensions endpoint for this book's page count), page 2 a blank endpaper,
+     *  then the inner pages, then a final blank endpaper. Written by the same
+     *  `render-book` job as `printS3Key`; null when the render couldn't build it (no
+     *  GELATO_API_KEY, cover-dimensions call failed) — ordering requires it. */
+    gelatoS3Key: text('gelato_s3_key'),
     /** Layout plan (lib/book-layout-plan.ts) — what goes where; the renderer's input. */
     layoutPlan: jsonb('layout_plan'),
     /** Photo books only: how the user asked for the book to be organised — one of
@@ -615,8 +622,19 @@ export const bookStories = pgTable(
 );
 
 /**
- * One row per "Order at price" confirmation. v1 stops here: the admin is emailed
- * and handles payment/shipping personally. Stripe + Gelato submission come later.
+ * One row per placed book order (`lib/book-orders.ts`). Placing an order locks the book
+ * (`books.status = 'ordered'`), pins the Gelato print file under `orders/{id}/`, and
+ * queues the worker's `submit-book-order` job, which POSTs it to Gelato and stores the
+ * Gelato order id. There is no in-app payment: Gelato bills the account's card on
+ * submission, and ordering is gated to `BOOK_ORDERING_ALLOWED_EMAILS` (`lib/env.ts`).
+ *
+ * `status` (text, not an enum — cheap to extend): `submitting` (row written, worker job
+ * queued/running) → `submitted` (Gelato accepted it; `gelatoOrderId` set — for
+ * `GELATO_ORDER_TYPE=draft` this means a draft in the Gelato dashboard) →
+ * `in_production` → `shipped` (tracking set) → `delivered`; `failed` (submission gave up —
+ * `errorMessage` says why, admin retries) and `cancelled` are terminal. `gelatoStatus`
+ * keeps Gelato's own raw `fulfillmentStatus` for debugging. Rows predating this flow have
+ * the old default `requested` (never written in practice).
  */
 export const bookOrders = pgTable(
   'book_orders',
@@ -631,9 +649,31 @@ export const bookOrders = pgTable(
     /** Quote snapshot at order time — see BookQuote in lib/gelato.ts. */
     quote: jsonb('quote').notNull(),
     status: text('status').notNull().default('requested'),
+    /** Recipient as submitted to Gelato — `BookShippingAddress` in lib/book-orders.ts. */
+    shippingAddress: jsonb('shipping_address'),
+    /** S3 key of the pinned Gelato print file (`orders/{id}/gelato.pdf`) — a copy of the
+     *  book's `gelato_s3_key` object taken at order time so later re-renders can't change
+     *  what gets printed. */
+    printFileS3Key: text('print_file_s3_key'),
+    gelatoOrderId: text('gelato_order_id'),
+    /** Gelato's raw `fulfillmentStatus` from the last submit/poll (see lib/gelato.ts). */
+    gelatoStatus: text('gelato_status'),
+    trackingCode: text('tracking_code'),
+    trackingUrl: text('tracking_url'),
+    /** Why the last submission attempt failed (`status = 'failed'`); cleared on retry. */
+    errorMessage: text('error_message'),
+    submittedAt: timestamp('submitted_at'),
+    shippedAt: timestamp('shipped_at'),
+    deliveredAt: timestamp('delivered_at'),
+    /** Last time Gelato was asked for this order's status (lazy poll from the order page). */
+    statusCheckedAt: timestamp('status_checked_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
-  (t) => [index('book_orders_book_idx').on(t.bookId)],
+  (t) => [
+    index('book_orders_book_idx').on(t.bookId),
+    uniqueIndex('book_orders_gelato_order_uq').on(t.gelatoOrderId),
+  ],
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
