@@ -25,12 +25,19 @@ import {
   type UpdatePhotoBookSettingsOutcome,
   type BookPhotoItem,
 } from '@/lib/books';
+import {
+  placeBookOrder,
+  quoteBookForCountry,
+  retryBookOrder,
+  type BookShippingAddress,
+} from '@/lib/book-orders';
+import { env } from '@/lib/env';
 import type { PhotoBookStyle } from '@/lib/photo-book-plan';
 import type { PhotoBookGrouping } from '@/lib/photo-book-grouping';
 import { runBookAgent, type ChatTurn } from '@/lib/ai/agent';
 import type { Receipt, ToolContext } from '@/lib/ai/tools';
 import { getI18n } from '@/lib/i18n/server';
-import type { BookCoverType, BookFormat } from '@/lib/gelato';
+import type { BookCoverType, BookFormat, BookQuote } from '@/lib/gelato';
 import { captureServerEvent } from '@/lib/posthog-server';
 import { buildKey, getObjectBuffer, presignPut } from '@/lib/s3';
 import { validateUpload } from '@/lib/uploads';
@@ -240,9 +247,18 @@ export async function setBookStoriesAction(input: {
   return result.ok ? {} : { error: result.error };
 }
 
-export async function renderPreviewAction(bookId: string): Promise<{ error?: string }> {
+/** Queue the print-proof render. `ensureGelatoFile` also forces a re-render when the
+ *  book has no Gelato print file yet (the order screen's "prepare print file"). */
+export async function renderPreviewAction(
+  bookId: string,
+  opts?: { ensureGelatoFile?: boolean },
+): Promise<{ error?: string }> {
   const user = await requireUser();
-  const result = await requestPreview({ bookId, userId: user.id });
+  const result = await requestPreview({
+    bookId,
+    userId: user.id,
+    ensureGelatoFile: opts?.ensureGelatoFile,
+  });
   revalidatePath(`/books/${bookId}`);
   return result.ok ? {} : { error: result.error };
 }
@@ -398,4 +414,51 @@ export async function photoBookChatVoiceAction(input: {
 
   const result = await runPhotoBookChatTurn({ bookId: input.bookId, history: input.history, message: transcript });
   return { ...result, transcript };
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Ordering — thin wrappers over lib/book-orders.ts
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Re-price a book for the country the user just picked in the delivery form, before any
+ *  address has been typed — shipping to Vienna or Zurich costs more than within Germany,
+ *  so the total shown has to follow the country select. */
+export async function quoteBookOrderAction(
+  bookId: string,
+  country: string,
+): Promise<{ quote?: BookQuote; error?: string }> {
+  const user = await requireUser();
+  const result = await quoteBookForCountry(bookId, user.id, country);
+  return result.ok ? { quote: result.value } : { error: result.error };
+}
+
+/** Place the Gelato order for a book. Gated to BOOK_ORDERING_ALLOWED_EMAILS inside
+ *  `placeBookOrder`; there is no payment step (Gelato bills our own account). */
+export async function placeBookOrderAction(
+  bookId: string,
+  address: BookShippingAddress,
+): Promise<{ orderId?: string; error?: string }> {
+  const user = await requireUser();
+  const result = await placeBookOrder({ bookId, userId: user.id, userEmail: user.email, address });
+  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/order`);
+  if (!result.ok) return { error: result.error };
+  captureServerEvent(user.id, 'book_order_placed', {
+    book_id: bookId,
+    order_id: result.value.orderId,
+    order_type: env.GELATO_ORDER_TYPE,
+  });
+  return { orderId: result.value.orderId };
+}
+
+/** Re-queue a submission that failed before it ever reached Gelato. */
+export async function retryBookOrderAction(
+  bookId: string,
+  orderId: string,
+): Promise<{ error?: string }> {
+  const user = await requireUser();
+  const result = await retryBookOrder({ orderId, userId: user.id, userEmail: user.email });
+  revalidatePath(`/books/${bookId}`);
+  revalidatePath(`/books/${bookId}/order`);
+  return result.ok ? {} : { error: result.error };
 }

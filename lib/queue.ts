@@ -13,6 +13,7 @@ export const QUEUES = {
   photoMeta: 'photo-meta',
   photoVision: 'photo-vision',
   designPhotoBook: 'design-photo-book',
+  submitBookOrder: 'submit-book-order',
 } as const;
 
 /** Nightly, off-peak — the sweep lists every object under the upload prefixes. */
@@ -59,6 +60,12 @@ export interface DesignPhotoBookJob {
   bookId: string;
 }
 
+/** Submit a placed book order to Gelato (`lib/book-orders.ts`'s `submitBookOrder`) —
+ *  POSTs the pinned print file + recipient, stores the Gelato order id. */
+export interface SubmitBookOrderJob {
+  orderId: string;
+}
+
 /** Per-queue overrides for pg-boss's `QueueOptions` (default: no retries beyond
  *  pg-boss's own default of 2). `photo-meta` gets a bounded, backed-off retry so a
  *  transient S3/network blip recovers on its own — see `handlePhotoMeta` in
@@ -81,6 +88,11 @@ const QUEUE_OPTIONS: Partial<Record<keyof typeof QUEUES, QueueOptions>> = {
   // (`lib/photo-book-design-stage.ts`) releases the book after 20 minutes and the user can
   // ask for it again deliberately, rather than silently paying for it twice.
   designPhotoBook: { expireInSeconds: 1800, retryLimit: 0 },
+  // Order submission is NOT idempotent on Gelato's side (a retry after a timed-out POST
+  // that actually succeeded would create a second order), so pg-boss must never retry
+  // it blindly: retryLimit 0, and `submitBookOrder` (`lib/book-orders.ts`) marks the row
+  // `failed` with the reason so the admin retries deliberately from the order page.
+  submitBookOrder: { retryLimit: 0, expireInSeconds: 300 },
 };
 
 const globalForBoss = globalThis as unknown as { __boss?: Promise<PgBoss> };
@@ -157,4 +169,9 @@ export async function enqueuePhotoVision(data: PhotoVisionJob): Promise<void> {
 export async function enqueueDesignPhotoBook(data: DesignPhotoBookJob): Promise<void> {
   const boss = await getBoss();
   await boss.send(QUEUES.designPhotoBook, data);
+}
+
+export async function enqueueSubmitBookOrder(data: SubmitBookOrderJob): Promise<void> {
+  const boss = await getBoss();
+  await boss.send(QUEUES.submitBookOrder, data);
 }

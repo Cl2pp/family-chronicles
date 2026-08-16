@@ -13,10 +13,12 @@ import {
   type PhotoVisionJob,
   type RenderBookJob,
   type StyleJob,
+  type SubmitBookOrderJob,
   type ThumbnailJob,
   type TranscodeJob,
 } from '@/lib/queue';
 import { markRenderFailed, renderBook } from '@/lib/book-render';
+import { submitBookOrder } from '@/lib/book-orders';
 import { proposePhotoBookPlan } from '@/lib/photo-book-ai-layout';
 import { validatePhotoBookPlan } from '@/lib/photo-book-plan';
 import type { PhotoBookDesignStage } from '@/lib/photo-book-design-stage';
@@ -264,6 +266,21 @@ async function handlePhotoMeta(job: JobWithMetadata<PhotoMetaJob>) {
   }
 }
 
+/**
+ * Hand a placed book order to Gelato. `submitBookOrder` (`lib/book-orders.ts`) owns the
+ * whole outcome — it records success or failure on the row itself and never throws — so
+ * this only guards against something truly unexpected. A rethrow would be pointless
+ * anyway: the queue runs with `retryLimit: 0` because creating a Gelato order twice
+ * would print (and charge for) two books.
+ */
+async function handleSubmitBookOrder(data: SubmitBookOrderJob) {
+  try {
+    await submitBookOrder(data.orderId);
+  } catch (err) {
+    console.error(`[worker] submit-book-order failed for ${data.orderId}:`, err);
+  }
+}
+
 /** Reclaim storage from uploads whose owning row was never written. */
 async function handleSweepOrphans() {
   try {
@@ -336,13 +353,23 @@ async function main() {
     },
   );
 
+  // One Gelato order at a time — order creation is not idempotent, so nothing about
+  // this job may run concurrently with itself.
+  await boss.work<SubmitBookOrderJob>(
+    QUEUES.submitBookOrder,
+    { batchSize: 1 },
+    async (jobs) => {
+      for (const job of jobs) await handleSubmitBookOrder(job.data);
+    },
+  );
+
   await boss.work(QUEUES.sweepOrphans, async () => {
     await handleSweepOrphans();
   });
   await boss.schedule(QUEUES.sweepOrphans, SWEEP_ORPHANS_CRON);
 
   console.log(
-    '[worker] ready — listening for style + transcode + thumbnail + render-book + design-book + photo-meta + photo-vision + design-photo-book jobs; orphan sweep scheduled',
+    '[worker] ready — listening for style + transcode + thumbnail + render-book + design-book + photo-meta + photo-vision + design-photo-book + submit-book-order jobs; orphan sweep scheduled',
   );
 }
 

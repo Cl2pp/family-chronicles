@@ -4,20 +4,23 @@ import { Button, Card, Group, Stack, Text, Title } from '@mantine/core';
 import { IconArrowLeft, IconDownload } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
 import type { BookQuote } from '@/lib/gelato';
-import { OrderView, type OrderBook } from './order/order-view';
+import { OrderView, type OrderBook, type OrderingProps } from './order/order-view';
 
 /**
  * Step 3 — Order (docs/PHOTO_BOOK_PLAN.md, builder restructure): the final step. For
  * now this is the "Download PDF" flow (rendering the print PDF first if it's stale,
  * then downloading it — the smart version, ported from the old single-scroll builder)
- * plus the existing Gelato quote/mailto screen, embedded directly rather than sending
- * the user to the standalone `/books/[bookId]/order` route (which still works on its
- * own, unchanged, for anyone who has it bookmarked).
+ * plus the Gelato quote screen, embedded directly rather than sending the user to the
+ * standalone `/books/[bookId]/order` route (which still works on its own for anyone who
+ * has it bookmarked). That screen ends either in the real order form / order status
+ * (accounts `canUserOrderBooks` allows) or in the "email us" flow (everyone else) — see
+ * `OrderingProps` in `order/order-view.tsx`.
  */
 export function PhotoBookOrderStep({
   order,
   quote,
   contactEmail,
+  ordering,
   totalCount,
   generatedAt,
   downloadPdf,
@@ -28,6 +31,8 @@ export function PhotoBookOrderStep({
   order: OrderBook;
   quote: BookQuote | null;
   contactEmail: string;
+  /** Real-ordering data for the embedded `OrderView` — passed straight through. */
+  ordering: OrderingProps;
   totalCount: number;
   /** `books.generated_at` — null means this book has never been through the explicit
    *  "Create book" design pass (`PhotoBookCreateStep`'s Step 2 gate). Ordering/downloading
@@ -70,7 +75,13 @@ export function PhotoBookOrderStep({
         )}
       </Card>
 
-      <OrderView book={order} quote={quote} contactEmail={contactEmail} embedded />
+      <OrderView
+        book={order}
+        quote={quote}
+        contactEmail={contactEmail}
+        ordering={ordering}
+        embedded
+      />
 
       <Group>
         <Button variant="default" leftSection={<IconArrowLeft size={16} />} onClick={onBack}>

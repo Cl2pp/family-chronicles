@@ -60,9 +60,15 @@ transcribed and rewritten into a shared third-person family-memoir, placed on a 
   **order-time print proof**: the order page (`app/(app)/books/[bookId]/order`) triggers
   and polls for it when a book isn't `preview_ready` yet, since ordering needs the exact
   page count and a full-resolution binding PDF. Pricing = Gelato quote (`lib/gelato.ts`);
-  there is NO in-app ordering — the order screen shows the quote and a prefilled mailto
-  to `BOOK_ORDER_CONTACT_EMAIL`; payment/Gelato submission are parked (the `book_orders`
-  table and `ordered` status wait for that flow). A "Design my
+  **in-app ordering is gated** to `BOOK_ORDERING_ALLOWED_EMAILS` (`lib/book-orders.ts`:
+  address form → `book_orders` row + book locked `ordered` + pinned print file under
+  `orders/{id}/` → worker `submit-book-order` job POSTs it to Gelato as `GELATO_ORDER_TYPE`
+  (`draft` by default) → status/tracking synced lazily from the order page; no in-app
+  payment, Gelato bills the account card). Gelato needs its own file shape — ONE PDF:
+  cover spread (sized via their cover-dimensions endpoint) + blank endpaper + inner
+  pages + endpaper — built by `render-book` into `books/{id}/gelato.pdf`
+  (`lib/book-print-file.ts`); `books.page_count` = INNER page count. Everyone else sees
+  the quote and a prefilled mailto to `BOOK_ORDER_CONTACT_EMAIL`. A "Design my
   book" button queues the `design-book` job (`lib/book-ai-layout.ts`'s `proposeLayoutPlan`,
   worker-side): a vision-capable model looks at the book's chapters and actual photos and
   proposes a new `layout_plan` (`layout_source: 'ai'`), falling back to the auto-layouter

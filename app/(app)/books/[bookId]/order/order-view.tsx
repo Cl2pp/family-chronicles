@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -18,6 +18,7 @@ import {
 import {
   IconArrowLeft,
   IconDownload,
+  IconFileTypePdf,
   IconInfoCircle,
   IconMail,
 } from '@tabler/icons-react';
@@ -25,8 +26,13 @@ import { notifications } from '@mantine/notifications';
 import { useI18n } from '@/lib/i18n/client';
 import type { BookFormat, BookQuote } from '@/lib/gelato';
 import type { BookKind, BookStatus } from '@/lib/books';
+import type { BookOrderView } from '@/lib/book-orders';
 import { isBookPrintFresh } from '@/lib/book-print-status';
-import { renderPreviewAction } from '../../actions';
+import { quoteBookOrderAction, renderPreviewAction } from '../../actions';
+import { OrderAddressForm } from './order-address-form';
+import { OrderStatusCard } from './order-status-card';
+import { PriceBreakdown, eur } from './order-price';
+import { MAX_GELATO_PAGES, countryDestination } from './order-shared';
 import posthog from 'posthog-js';
 
 export interface OrderBook {
@@ -55,18 +61,45 @@ export interface OrderBook {
   hasPrint: boolean;
 }
 
-const eur = (n: number) =>
-  new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n);
+/**
+ * Everything the real (Gelato) ordering flow needs, bundled into one prop so the two
+ * server pages that render `OrderView` — the standalone `/books/[bookId]/order` route
+ * and the photo-book builder's step 3 — pass it as a single object instead of five
+ * separate props threaded through the builder.
+ *
+ * When `canOrder` is false (every account except the few `canUserOrderBooks` allows) the
+ * rest is ignored and the view keeps its original "email us to order" behavior exactly.
+ */
+export interface OrderingProps {
+  /** `canUserOrderBooks(user.email)` — gates the in-app order form. */
+  canOrder: boolean;
+  /** Prefills the form's email field. */
+  userEmail: string;
+  /** Prefills first/last name, split on the last space. Null when the account has none. */
+  userName: string | null;
+  /** `Boolean(book.gelatoS3Key)` — the printer needs its own PDF variant; without it the
+   *  view offers to create one instead of showing the form. */
+  hasGelatoFile: boolean;
+  /** `pageCount > MAX_GELATO_PAGES` — the printer can't bind a book this thick, so the
+   *  view asks the user to shorten it instead of offering an order it would reject.
+   *  Computed by both server pages from the same page count they price against. */
+  tooLong: boolean;
+  /** The book's most recent order, if it has one — replaces the ordering UI with the
+   *  status card. */
+  order: BookOrderView | null;
+}
 
 export function OrderView({
   book,
   quote,
   contactEmail,
+  ordering,
   embedded = false,
 }: {
   book: OrderBook;
   quote: BookQuote | null;
   contactEmail: string;
+  ordering: OrderingProps;
   /** True when rendered inside the photo-book builder's own step 3 (photo-book-order-
    *  step.tsx), rather than the standalone `/books/[bookId]/order` route. Hides the "back
    *  to book"/page title (the stepper above already shows where we are) and this view's
@@ -99,6 +132,21 @@ export function OrderView({
     return () => clearInterval(timer);
   }, [book.accessBlocked, book.status, book.id, router]);
 
+  // A placed order moves on without any client-side signal: `submitting` is a background
+  // hand-off to Gelato (seconds), and everything after it changes at the printer's pace
+  // and is only picked up when the server re-reads the order and lazily syncs it from
+  // Gelato. So: refresh fast while the hand-off is in flight, slowly while the order is
+  // live, and not at all once it has finished, failed or been cancelled.
+  const orderStatus = ordering.order?.status;
+  useEffect(() => {
+    if (!orderStatus) return;
+    if (orderStatus === 'delivered' || orderStatus === 'failed' || orderStatus === 'cancelled') {
+      return;
+    }
+    const timer = setInterval(() => router.refresh(), orderStatus === 'submitting' ? 5000 : 60000);
+    return () => clearInterval(timer);
+  }, [orderStatus, router]);
+
   // For story books this is exactly the old `status !== 'preview_ready' && status !==
   // 'ordered'` check (unchanged behavior — `isBookPrintFresh` ignores `layoutStale` for
   // them, since their mutations already downgrade `status` back to `draft` on any
@@ -113,10 +161,56 @@ export function OrderView({
   const priced = quote?.priced ?? false;
   const priceLine = priced && quote?.total != null ? eur(quote.total) : to.priceOnRequest;
 
+  // The server-rendered `quote` is priced against a German address. Shipping costs differ
+  // per country, so picking Austria or Switzerland in the form below re-quotes, and every
+  // price on this screen — the breakdown rows and the "Order now" button — reads from that
+  // result instead. Germany itself always keeps reading the server's own quote, so a
+  // `router.refresh()` (after preparing the print proof, say) is never ignored.
+  //
+  // Results are cached, so switching back and forth costs no extra calls; a country whose
+  // quote failed is cached as `null`, which reads as "no price for this country" rather
+  // than as "not asked yet". The cache key carries the page count the server quoted for,
+  // so an edit that changes the book's length can't leave an old price behind.
+  const [country, setCountry] = useState<string>('DE');
+  const [quotes, setQuotes] = useState<Record<string, BookQuote | null>>({});
+  const [quoting, startQuoting] = useTransition();
+
+  const cacheKey = (code: string) => `${code}:${quote?.pageCount ?? 'none'}`;
+  const countryQuote = country === 'DE' ? quote : (quotes[cacheKey(country)] ?? null);
+  // While a re-quote is in flight the new country has no numbers yet — keep the previous
+  // rows on screen under the loader instead of flashing the "price on request" note.
+  const shownQuote = countryQuote ?? (quoting ? quote : null);
+  const countryQuoteFailed =
+    country !== 'DE' && cacheKey(country) in quotes && !countryQuote?.priced;
+
+  function changeCountry(next: string) {
+    setCountry(next);
+    if (next === 'DE' || cacheKey(next) in quotes) return;
+    startQuoting(async () => {
+      const result = await quoteBookOrderAction(book.id, next);
+      setQuotes((prev) => ({ ...prev, [cacheKey(next)]: result.quote ?? null }));
+    });
+  }
+
   function preparePrintProof() {
     startTransition(async () => {
       const result = await renderPreviewAction(book.id);
       if (result.error) notifications.show({ message: result.error, color: 'red' });
+    });
+  }
+
+  /** Renders the Gelato-format print file (the variant the printer needs, separate from
+   *  the proof PDF the user downloads). Same render job as above, just asked to also
+   *  produce that file — `router.refresh()` afterwards so `book.status` flips to
+   *  `rendering` and the poll above takes over from there. */
+  function createGelatoFile() {
+    startTransition(async () => {
+      const result = await renderPreviewAction(book.id, { ensureGelatoFile: true });
+      if (result.error) {
+        notifications.show({ message: result.error, color: 'red' });
+        return;
+      }
+      router.refresh();
     });
   }
 
@@ -236,68 +330,98 @@ export function OrderView({
               </Button>
             )}
           </Stack>
-        ) : priced && quote ? (
-          <Stack gap={6}>
-            <Group justify="space-between">
-              <Text c="dimmed">{to.printing}</Text>
-              <Text>{eur(quote.productCost ?? 0)}</Text>
-            </Group>
-            <Group justify="space-between">
-              <Text c="dimmed">{to.shipping}</Text>
-              <Text>{eur(quote.shippingCost ?? 0)}</Text>
-            </Group>
-            <Group justify="space-between">
-              <Text c="dimmed">{to.service}</Text>
-              <Text>{eur(quote.margin)}</Text>
-            </Group>
-            <Divider my={4} />
-            <Group justify="space-between">
-              <Text fw={700}>{to.total}</Text>
-              <Text fw={700} fz="lg">
-                {eur(quote.total ?? 0)}
-              </Text>
-            </Group>
-            <Text fz={12} c="dimmed">
-              {to.inclShippingDe}
-            </Text>
-          </Stack>
+        ) : shownQuote?.priced ? (
+          <PriceBreakdown quote={shownQuote} country={country} loading={quoting} />
         ) : (
           <Alert color="yellow" icon={<IconInfoCircle size={16} />}>
             <Text fw={600} mb={2}>
               {to.priceOnRequest}
             </Text>
-            <Text fz={13}>{to.priceOnRequestHint}</Text>
+            <Text fz={13}>
+              {countryQuoteFailed
+                ? to.priceUnavailableCountry(countryDestination(to, country))
+                : to.priceOnRequestHint}
+            </Text>
           </Alert>
         )}
       </Card>
       )}
 
-      {!book.accessBlocked && !preparing && (
-        <>
-          <Alert color="blue" icon={<IconInfoCircle size={16} />}>
+      {/* Once an order exists it outranks everything else here — including the `preparing`
+          gate, so a placed order stays visible even if the book is mid-render for some
+          other reason. */}
+      {!book.accessBlocked && ordering.order ? (
+        <OrderStatusCard order={ordering.order} />
+      ) : !book.accessBlocked && !preparing ? (
+        // The in-app order form is only for the few accounts `canUserOrderBooks` allows,
+        // and only when there is a real price to charge against. Everyone else — and the
+        // allowed accounts when the quote failed, so the owner is never stuck — keeps the
+        // original "email us" flow below, unchanged.
+        ordering.canOrder && ordering.tooLong ? (
+          // Nothing to offer here: the printer can't bind a book this thick, and the
+          // order would only be rejected. The download button in the card above stays,
+          // so the PDF is still available.
+          <Alert color="yellow" icon={<IconInfoCircle size={16} />}>
             <Text fw={600} mb={2}>
-              {to.howToOrderTitle}
+              {to.tooLongTitle}
             </Text>
-            <Text fz={13}>{to.howToOrderBody(contactEmail)}</Text>
+            <Text fz={13}>{to.tooLongBody(MAX_GELATO_PAGES)}</Text>
           </Alert>
+        ) : ordering.canOrder && priced && quote?.total != null ? (
+          ordering.hasGelatoFile ? (
+            <OrderAddressForm
+              bookId={book.id}
+              quote={countryQuote}
+              quoting={quoting}
+              country={country}
+              onCountryChange={changeCountry}
+              userEmail={ordering.userEmail}
+              userName={ordering.userName}
+            />
+          ) : (
+            <Alert color="yellow" icon={<IconInfoCircle size={16} />}>
+              <Text fw={600} mb={2}>
+                {to.printFileMissingTitle}
+              </Text>
+              <Text fz={13} mb="sm">
+                {to.printFileMissingBody}
+              </Text>
+              <Button
+                loading={pending}
+                leftSection={<IconFileTypePdf size={16} />}
+                onClick={createGelatoFile}
+              >
+                {to.createPrintFileCta}
+              </Button>
+            </Alert>
+          )
+        ) : (
+          <>
+            <Alert color="blue" icon={<IconInfoCircle size={16} />}>
+              <Text fw={600} mb={2}>
+                {to.howToOrderTitle}
+              </Text>
+              <Text fz={13}>{to.howToOrderBody(contactEmail)}</Text>
+            </Alert>
 
-          <Button
-            size="lg"
-            component="a"
-            href={mailtoHref}
-            leftSection={<IconMail size={18} />}
-            onClick={() =>
-              posthog.__loaded &&
-              posthog.capture('book_order_email_opened', { book_id: book.id, format: book.format })
-            }
-          >
-            {to.emailCta}
-          </Button>
-          <Text fz={12} c="dimmed" ta="center">
-            {to.emailFallback(contactEmail)}
-          </Text>
-        </>
-      )}
+            <Button
+              size="lg"
+              component="a"
+              href={mailtoHref}
+              leftSection={<IconMail size={18} />}
+              onClick={() =>
+                posthog.__loaded &&
+                posthog.capture('book_order_email_opened', { book_id: book.id, format: book.format })
+              }
+            >
+              {to.emailCta}
+            </Button>
+            <Text fz={12} c="dimmed" ta="center">
+              {to.emailFallback(contactEmail)}
+            </Text>
+          </>
+        )
+      ) : null}
     </Stack>
   );
 }

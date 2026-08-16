@@ -100,7 +100,19 @@ export const PHOTO_BOOK_CONTENT_MARGIN_MM = { top: 14, bottom: 16, inner: 16, ou
  *  of the two photo-page margins so text never sits closer to the spine than a photo. */
 const TEXT_SIDE_MARGIN_MM = PHOTO_BOOK_CONTENT_MARGIN_MM.inner;
 
-const esc = (s: string) =>
+/** How many pages of the `preview`/`print` document are COVER pages: the front cover and
+ *  the back cover, in that order, both emitted at the very top of the body (see the
+ *  `${coverFront}${coverBack}` line at the end of `renderPhotoBookHtml`) and both fixed
+ *  full-sheet `section.page`s, so each is exactly one PDF page. Everything after them is
+ *  an inner page. Exported for `lib/book-print-file.ts`, which drops exactly these pages
+ *  when it assembles the Gelato print file (whose cover is one wraparound spread page
+ *  instead) — and for `lib/books.ts`'s page-count estimate, which subtracts them for the
+ *  same reason. */
+export const PHOTO_BOOK_COVER_PAGE_COUNT = 2;
+
+/** HTML-escapes a text value. Exported for `lib/book-print-file.ts`'s cover-spread
+ *  document, which is generated separately but must escape identically. */
+export const esc = (s: string) =>
   s
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -108,8 +120,10 @@ const esc = (s: string) =>
     .replaceAll('"', '&quot;');
 
 /** Emits the `:root { --pb-*: …; }` block a style suite's tokens resolve to — same
- *  approach as `themeVarsCss` in `lib/book-layout.ts`. */
-function styleVarsCss(s: PhotoStyleTokens): string {
+ *  approach as `themeVarsCss` in `lib/book-layout.ts`. Exported so the cover-spread
+ *  document (`lib/book-print-file.ts`) styles itself from the SAME tokens as the cover
+ *  pages of the proof PDF rather than re-deriving colors and fonts. */
+export function styleVarsCss(s: PhotoStyleTokens): string {
   return `
   :root {
     --pb-font-heading: ${s.fontHeading};
@@ -141,7 +155,10 @@ function styleVarsCss(s: PhotoStyleTokens): string {
   }`;
 }
 
-function img(image: PhotoLayoutImage | undefined, cls: string): string {
+/** One photo `<img>` (or a striped placeholder when the caller couldn't resolve it).
+ *  Exported for `lib/book-print-file.ts`'s cover spread — same markup, same placeholder
+ *  behaviour. */
+export function img(image: PhotoLayoutImage | undefined, cls: string): string {
   if (!image) return `<div class="${cls} ph-missing"></div>`;
   return `<img class="${cls}" src="${image.src}" alt="" style="aspect-ratio: ${image.width} / ${image.height}" />`;
 }
@@ -884,6 +901,8 @@ ${pagedScript}
 </head>
 <body>
 ${watermark}
+<!-- The first PHOTO_BOOK_COVER_PAGE_COUNT pages of this document are the covers, in this
+     order; every page after them is an inner page (lib/book-print-file.ts relies on it). -->
 ${coverFront}
 ${coverBack}
 ${dedicationPage}

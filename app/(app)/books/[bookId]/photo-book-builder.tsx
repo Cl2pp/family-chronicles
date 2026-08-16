@@ -34,7 +34,7 @@ import {
   setPhotoExcludedAction,
   updatePhotoBookSettingsAction,
 } from '../actions';
-import type { OrderBook } from './order/order-view';
+import type { OrderBook, OrderingProps } from './order/order-view';
 import { PhotoBookUploadStep } from './photo-book-upload-step';
 import type { BookChapterView, ChronicleStoryOption } from './book-stories-panel';
 import { PhotoBookCreateStep } from './photo-book-create-step';
@@ -134,6 +134,7 @@ export function PhotoBookBuilder({
   order,
   quote,
   contactEmail,
+  ordering,
 }: {
   book: PhotoBookInfo;
   photos: PhotoBookPhotoView[];
@@ -143,6 +144,8 @@ export function PhotoBookBuilder({
   order: OrderBook;
   quote: BookQuote | null;
   contactEmail: string;
+  /** Real-ordering data for step 3's embedded `OrderView` — passed straight through. */
+  ordering: OrderingProps;
 }) {
   const { t } = useI18n();
   const tb = t.books.builder;
@@ -587,6 +590,7 @@ export function PhotoBookBuilder({
             order={order}
             quote={quote}
             contactEmail={contactEmail}
+            ordering={ordering}
             totalCount={totalCount}
             generatedAt={book.generatedAt}
             downloadPdf={downloadPdf}

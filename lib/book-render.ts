@@ -5,8 +5,10 @@ import { PDFDocument } from 'pdf-lib';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { books, chronicles } from '@/db/schema';
-import { getObjectBuffer, putObjectBuffer } from '@/lib/s3';
-import { MIN_PAGES, MAX_PAGES } from '@/lib/gelato';
+import { deleteObject, getObjectBuffer, putObjectBuffer } from '@/lib/s3';
+import { env } from '@/lib/env';
+import { MIN_PAGES, MAX_PAGES, getGelatoCoverDimensions, productUidForFormat } from '@/lib/gelato';
+import { assembleGelatoPdf, countGelatoInnerPages, renderCoverSpreadHtml } from '@/lib/book-print-file';
 import { TRIM } from '@/lib/book-content';
 import { renderPhotoBookHtml, type PhotoLayoutImage } from '@/lib/photo-book-layout';
 import {
@@ -27,8 +29,10 @@ import type { PhotoBookPlan } from '@/lib/photo-book-plan';
 
 /**
  * The worker side of book rendering: load content, build/refresh the layout plan,
- * embed photos, print the plan to two PDFs (low-res watermarked preview + print-ready
- * with bleed), pad to Gelato's page rules, store both in S3, and update the book row.
+ * embed photos, print the plan to two proof PDFs (low-res watermarked preview +
+ * print-ready with bleed), pad both to Gelato's page rules, assemble the Gelato print
+ * file the printer actually gets (`lib/book-print-file.ts`), store all three in S3, and
+ * update the book row.
  *
  * Runs serially (see worker/index.ts) — Chromium plus large photos is the most
  * memory-hungry thing this app does. Content loading + layout-plan resolution live in
@@ -56,11 +60,11 @@ async function photoDataUri(buffer: Buffer, variant: 'preview' | 'print'): Promi
 }
 
 /** Pad with blank pages to Gelato's rules: at least MIN_PAGES and an even count. */
-async function padPdf(pdf: Buffer): Promise<{ padded: Buffer; pageCount: number }> {
+async function padPdf(pdf: Buffer): Promise<Buffer> {
   const doc = await PDFDocument.load(pdf);
   let count = doc.getPageCount();
   if (count > MAX_PAGES) {
-    // Not fatal for a preview; the order screen surfaces the limit to the user.
+    // Not fatal for a proof; the order screen surfaces the limit to the user.
     console.warn(`[book-render] ${count} pages exceeds Gelato max of ${MAX_PAGES}`);
   }
   const { width, height } = doc.getPage(count - 1).getSize();
@@ -70,7 +74,7 @@ async function padPdf(pdf: Buffer): Promise<{ padded: Buffer; pageCount: number 
     count++;
   }
   const bytes = await doc.save();
-  return { padded: Buffer.from(bytes), pageCount: count };
+  return Buffer.from(bytes);
 }
 
 /** Sets `html` as a Chromium page's content and prints it to a PDF buffer — the one
@@ -132,6 +136,47 @@ async function photoBookPrintDataUri(buffer: Buffer, targetMm: PrintTargetSizeMm
   return `data:image/jpeg;base64,${out.toString('base64')}`;
 }
 
+/** Fetches the best available source for one photo and returns it as an embeddable `data:`
+ *  URI, walking down the rendition chain (original → display → thumbnail) on a decode
+ *  failure rather than dropping the photo. Split out of `renderPhotoBookVariant` below so
+ *  the Gelato cover spread can re-embed the hero at ITS size (the wraparound is wider and
+ *  taller than a single page) through exactly the same source selection.
+ *  Returns null when every source failed. */
+async function embedPhotoDataUri(
+  photo: PhotoBookPhotoRef,
+  variant: 'preview' | 'print',
+  level: 'display' | 'thumb',
+  targetMm: PrintTargetSizeMm,
+): Promise<string | null> {
+  const sources =
+    variant === 'preview'
+      ? [photo.thumbS3Key ?? photo.s3Key]
+      : level === 'display'
+        ? [photo.s3Key, ...(photo.displayS3Key ? [photo.displayS3Key] : []), ...(photo.thumbS3Key ? [photo.thumbS3Key] : [])]
+        : [photo.displayS3Key ?? photo.s3Key, ...(photo.thumbS3Key ? [photo.thumbS3Key] : [])];
+  let lastError: unknown;
+  for (const key of sources) {
+    try {
+      const buffer = await getObjectBuffer(key);
+      return variant === 'preview'
+        ? await photoDataUri(buffer, 'preview')
+        : await photoBookPrintDataUri(buffer, targetMm);
+    } catch (e) {
+      lastError = e;
+      if (key !== sources[sources.length - 1]) {
+        console.warn(`[book-render] ${key} failed, trying next source:`, e);
+      }
+    }
+  }
+  console.error(`[book-render] skipping photo ${photo.s3Key}:`, lastError);
+  return null;
+}
+
+/** The month-and-year line the cover/back cover prints ("März 2026"). */
+function printCreatedLabel(): string {
+  return new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long' });
+}
+
 async function renderPhotoBookVariant(
   browser: Browser,
   loaded: LoadedPhotoBook,
@@ -139,7 +184,7 @@ async function renderPhotoBookVariant(
   chronicleName: string,
   trim: { w: number; h: number },
   variant: 'preview' | 'print',
-): Promise<Buffer> {
+): Promise<{ pdf: Buffer; images: Map<string, PhotoLayoutImage> }> {
   // Source selection mirrors the story path's reasoning (`renderVariant` above): the
   // preview only ever needs a small, flat-budget image, so it prefers the thumbnail and
   // never touches the (possibly huge) original; print wants the best available source for
@@ -156,52 +201,19 @@ async function renderPhotoBookVariant(
   const renditionNeeds = photoAssetRenditionNeeds(plan, trim, dims);
   const printTargets = variant === 'print' ? photoAssetPrintTargetSizeMm(plan, trim, dims) : null;
 
-  const srcCache = new Map<string, string>();
-  async function embed(photo: PhotoBookPhotoRef): Promise<PhotoLayoutImage | null> {
-    if (!photo.width || !photo.height) return null;
-    const cacheKey = `${photo.assetId}:${variant}`;
-    let src = srcCache.get(cacheKey);
-    if (!src) {
-      const level = renditionNeeds.get(photo.assetId) ?? 'thumb';
-      const sources =
-        variant === 'preview'
-          ? [photo.thumbS3Key ?? photo.s3Key]
-          : level === 'display'
-            ? [photo.s3Key, ...(photo.displayS3Key ? [photo.displayS3Key] : []), ...(photo.thumbS3Key ? [photo.thumbS3Key] : [])]
-            : [photo.displayS3Key ?? photo.s3Key, ...(photo.thumbS3Key ? [photo.thumbS3Key] : [])];
-      let lastError: unknown;
-      for (const key of sources) {
-        try {
-          const buffer = await getObjectBuffer(key);
-          src =
-            variant === 'preview'
-              ? await photoDataUri(buffer, 'preview')
-              : await photoBookPrintDataUri(buffer, printTargets?.get(photo.assetId) ?? { w: trim.w, h: trim.h });
-          break;
-        } catch (e) {
-          lastError = e;
-          if (key !== sources[sources.length - 1]) {
-            console.warn(`[book-render] ${key} failed, trying next source:`, e);
-          }
-        }
-      }
-      if (!src) {
-        console.error(`[book-render] skipping photo ${photo.s3Key}:`, lastError);
-        return null;
-      }
-      srcCache.set(cacheKey, src);
-    }
-    return { assetId: photo.assetId, src, width: photo.width, height: photo.height };
-  }
-
   const byId = new Map(loaded.photos.map((p) => [p.assetId, p]));
   const needed = referencedPhotoAssetIds(plan);
   const resolved = new Map<string, PhotoLayoutImage>();
   for (const id of needed) {
     const photo = byId.get(id);
-    if (!photo || photo.excluded) continue;
-    const img = await embed(photo);
-    if (img) resolved.set(id, img);
+    if (!photo || photo.excluded || !photo.width || !photo.height) continue;
+    const src = await embedPhotoDataUri(
+      photo,
+      variant,
+      renditionNeeds.get(id) ?? 'thumb',
+      printTargets?.get(id) ?? { w: trim.w, h: trim.h },
+    );
+    if (src) resolved.set(id, { assetId: id, src, width: photo.width, height: photo.height });
   }
 
   const html = renderPhotoBookHtml({
@@ -213,20 +225,106 @@ async function renderPhotoBookVariant(
     fontFaceCss: embeddedFontFaceCss(plan.style),
     storyParagraphs: storyParagraphMap(loaded),
     dedication: loaded.row.dedication,
-    createdLabel: new Date().toLocaleDateString('de-DE', { year: 'numeric', month: 'long' }),
+    createdLabel: printCreatedLabel(),
     watermarkText: 'VORSCHAU · PREVIEW',
   });
 
-  return htmlToPdf(browser, html);
+  return { pdf: await htmlToPdf(browser, html), images: resolved };
 }
 
-/** The photo-book counterpart of the story path in `renderBook` above: rebuild the plan
- *  (backfilling any missing photo dimensions first, like the story path does), render
+/**
+ * The Gelato print file for this book (`lib/book-print-file.ts`): asks Gelato how big the
+ * wraparound cover is at this inner page count, prints that spread through the same
+ * browser as the rest of the render, and stitches it onto the inner pages of the UNPADDED
+ * print PDF.
+ *
+ * Never throws and never fails the render: a book with no Gelato key, no product UID for
+ * its (size, binding) combination, or a cover-dimensions call that errored simply has no
+ * orderable file this time (`gelatoS3Key` = null) — the human proofs are unaffected.
+ */
+async function buildGelatoPrintFile(
+  browser: Browser,
+  input: {
+    bookId: string;
+    loaded: LoadedPhotoBook;
+    plan: PhotoBookPlan;
+    chronicleName: string;
+    printPdf: Buffer;
+    innerPageCount: number;
+    /** The print variant's already-embedded photos — reused for the back cover, with the
+     *  hero re-embedded at the (larger) wraparound size below. */
+    printImages: Map<string, PhotoLayoutImage>;
+  },
+): Promise<Buffer | null> {
+  const { bookId, loaded, plan } = input;
+  const productUid = productUidForFormat(loaded.row.format, loaded.row.coverType);
+  if (!env.GELATO_API_KEY || !productUid) {
+    console.warn(
+      `[book-render] ${bookId}: no Gelato ${!env.GELATO_API_KEY ? 'API key' : `product for ${loaded.row.format}/${loaded.row.coverType}`} — skipping the print file`,
+    );
+    return null;
+  }
+  if (input.innerPageCount > MAX_PAGES) {
+    // Gelato only prints 30-200 inner pages, and their cover-dimensions endpoint rejects
+    // anything outside that — asking would just be an error. No print file this render;
+    // the order screen tells the user the book is too long.
+    console.warn(
+      `[book-render] ${bookId}: ${input.innerPageCount} inner pages exceeds Gelato's max of ${MAX_PAGES} — skipping the print file`,
+    );
+    return null;
+  }
+  try {
+    const dims = await getGelatoCoverDimensions(productUid, input.innerPageCount);
+
+    // The hero has to cover the front panel AND the wrap around it — a taller, wider box
+    // than the single page it was embedded for, so re-embed it at that size rather than
+    // upscaling the print variant's copy.
+    const images = new Map(input.printImages);
+    const heroId = plan.cover.heroAssetId;
+    const hero = heroId ? loaded.photos.find((p) => p.assetId === heroId) : undefined;
+    if (heroId && hero?.width && hero.height) {
+      const src = await embedPhotoDataUri(hero, 'print', 'display', {
+        w: dims.spread.width - dims.contentFrontSize.left,
+        h: dims.spread.height,
+      });
+      if (src) images.set(heroId, { assetId: heroId, src, width: hero.width, height: hero.height });
+    }
+
+    const spreadPdf = await htmlToPdf(
+      browser,
+      renderCoverSpreadHtml({
+        dims,
+        plan,
+        chronicleName: input.chronicleName,
+        createdLabel: printCreatedLabel(),
+        fontFaceCss: embeddedFontFaceCss(plan.style),
+        images,
+      }),
+    );
+    const { pdf } = await assembleGelatoPdf({ coverSpreadPdf: spreadPdf, printPdf: input.printPdf });
+    return pdf;
+  } catch (e) {
+    console.error(`[book-render] ${bookId}: Gelato print file not built:`, e);
+    return null;
+  }
+}
+
+/** Rebuild the plan (backfilling any missing photo dimensions first), render
  *  `preview`/`print` through the SAME Chromium instance, pad both to Gelato's page-count
- *  rules, store, and flip status — identical shape and end state
- *  (`preview_ready`/`render_failed`, `pageCount`/`previewS3Key`/`printS3Key`) as a story
- *  book's render, so every other part of the app (order screen, status poll, download
- *  route) treats a rendered photo book exactly like a rendered story book. */
+ *  rules, build the Gelato print file on top of the print render, store all three, and
+ *  flip status.
+ *
+ *  Three files come out of one render:
+ *   - `preview.pdf` — low-res, watermarked proof for the builder.
+ *   - `print.pdf` — full-resolution proof a human can flip through: front cover, back
+ *     cover, then the inner pages.
+ *   - `gelato.pdf` — the actual order file (`lib/book-print-file.ts`): wraparound cover
+ *     spread, blank endpaper, inner pages, blank endpaper. Absent when it couldn't be
+ *     built (no Gelato key/product, or their cover-dimensions call failed) — that never
+ *     fails the render, it only means the book can't be ordered until the next one.
+ *
+ *  `books.page_count` is the Gelato file's INNER page count (no covers, no endpapers) —
+ *  the number Gelato prices and prints. */
 async function renderPhotoBook(bookId: string): Promise<void> {
   const loaded = await loadPhotoBook(bookId);
   await backfillPhotoBookDimensionsFromOriginals(loaded.photos);
@@ -240,27 +338,72 @@ async function renderPhotoBook(bookId: string): Promise<void> {
   const chronicleName = chron?.name ?? 'Familienwerk';
   const trim = TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'];
 
-  const { preview, print } = await withChromium(`render photo book ${bookId}`, async (browser) => ({
-    preview: await renderPhotoBookVariant(browser, loaded, plan, chronicleName, trim, 'preview'),
-    print: await renderPhotoBookVariant(browser, loaded, plan, chronicleName, trim, 'print'),
-  }));
+  // All three renders share ONE browser session (see `withChromium`: acquisitions are
+  // serialized process-wide, so opening a second session here would just queue behind
+  // this one and pay another launch).
+  const rendered = await withChromium(`render photo book ${bookId}`, async (browser) => {
+    const preview = await renderPhotoBookVariant(browser, loaded, plan, chronicleName, trim, 'preview');
+    const print = await renderPhotoBookVariant(browser, loaded, plan, chronicleName, trim, 'print');
+    // The inner page count — everything except the two cover pages, padded to Gelato's
+    // ≥30/even rule. It sizes the cover spread (the spine grows with it), so it has to be
+    // known before the cover-dimensions call.
+    let innerPageCount: number | null = null;
+    try {
+      innerPageCount = await countGelatoInnerPages(print.pdf);
+    } catch (e) {
+      console.error(`[book-render] ${bookId}: no inner page count:`, e);
+    }
+    const gelato =
+      innerPageCount == null
+        ? null
+        : await buildGelatoPrintFile(browser, {
+            bookId,
+            loaded,
+            plan,
+            chronicleName,
+            printPdf: print.pdf,
+            innerPageCount,
+            printImages: print.images,
+          });
+    return { preview: preview.pdf, print: print.pdf, innerPageCount, gelato };
+  });
 
-  const printPadded = await padPdf(print);
-  const previewPadded = await padPdf(preview);
+  const printPadded = await padPdf(rendered.print);
+  const previewPadded = await padPdf(rendered.preview);
 
   const previewKey = `books/${bookId}/preview.pdf`;
   const printKey = `books/${bookId}/print.pdf`;
-  await putObjectBuffer(previewKey, previewPadded.padded, 'application/pdf');
-  await putObjectBuffer(printKey, printPadded.padded, 'application/pdf');
+  const gelatoKey = `books/${bookId}/gelato.pdf`;
+  await putObjectBuffer(previewKey, previewPadded, 'application/pdf');
+  await putObjectBuffer(printKey, printPadded, 'application/pdf');
+  if (rendered.gelato) {
+    await putObjectBuffer(gelatoKey, rendered.gelato, 'application/pdf');
+  } else {
+    // `gelatoS3Key` is cleared below, but the OBJECT from an earlier render would still be
+    // sitting there, laid out for a different page count. Nothing should be able to reach
+    // it — drop it so a stale print file can't be printed by accident.
+    try {
+      await deleteObject(gelatoKey);
+    } catch (e) {
+      console.warn(`[book-render] ${bookId}: could not remove the stale Gelato file:`, e);
+    }
+  }
 
   await db
     .update(books)
     .set({
       status: 'preview_ready',
       errorMessage: null,
-      pageCount: printPadded.pageCount,
+      // The INNER page count of the Gelato file — what pricing and ordering use. Known
+      // even when the Gelato file itself couldn't be built (it comes from our own print
+      // PDF), so the order screen still quotes the right number of pages.
+      pageCount: rendered.innerPageCount,
       previewS3Key: previewKey,
       printS3Key: printKey,
+      // Null when this render couldn't build one: a key from an EARLIER render would
+      // point at a file laid out for a different page count, which Gelato would happily
+      // print wrong.
+      gelatoS3Key: rendered.gelato ? gelatoKey : null,
       updatedAt: new Date(),
     })
     .where(eq(books.id, bookId));
