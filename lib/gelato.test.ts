@@ -126,6 +126,39 @@ describe('quoteBookPrice', () => {
   });
 });
 
+describe('mapGelatoStatus', () => {
+  it('maps every Gelato fulfillment status we know about', async () => {
+    const { mapGelatoStatus } = await import('./gelato');
+    // Their documented values, in the order the "How orders work" page lists them.
+    expect(mapGelatoStatus('created')).toBe('submitted');
+    expect(mapGelatoStatus('uploading')).toBe('submitted');
+    expect(mapGelatoStatus('passed')).toBe('submitted');
+    expect(mapGelatoStatus('draft')).toBe('submitted');
+    expect(mapGelatoStatus('pending_approval')).toBe('submitted');
+    expect(mapGelatoStatus('on_hold')).toBe('submitted');
+    expect(mapGelatoStatus('in_production')).toBe('in_production');
+    expect(mapGelatoStatus('printed')).toBe('in_production');
+    expect(mapGelatoStatus('shipped')).toBe('shipped');
+    expect(mapGelatoStatus('in_transit')).toBe('shipped');
+    expect(mapGelatoStatus('delivered')).toBe('delivered');
+    expect(mapGelatoStatus('canceled')).toBe('cancelled');
+    expect(mapGelatoStatus('returned')).toBe('cancelled');
+    expect(mapGelatoStatus('failed')).toBe('failed');
+  });
+
+  it('treats anything unknown as accepted-but-not-yet-in-production', async () => {
+    const { mapGelatoStatus } = await import('./gelato');
+    expect(mapGelatoStatus('some_new_status_gelato_invented')).toBe('submitted');
+    expect(mapGelatoStatus('')).toBe('submitted');
+  });
+
+  it('accepts either spelling of "cancelled"', async () => {
+    const { mapGelatoStatus } = await import('./gelato');
+    expect(mapGelatoStatus('canceled')).toBe('cancelled'); // Gelato's documented spelling
+    expect(mapGelatoStatus('cancelled')).toBe('cancelled'); // ours, just in case
+  });
+});
+
 describe('formatSummaryLabel', () => {
   it('reflects size and binding', async () => {
     const { formatSummaryLabel } = await import('./gelato');

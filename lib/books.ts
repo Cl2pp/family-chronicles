@@ -1858,21 +1858,32 @@ export async function deleteBook(input: { bookId: string; userId: string }): Pro
 
   // `book_orders.book_id` is ON DELETE RESTRICT, so an ordered book's delete would blow
   // up with a raw FK error from Postgres. `editableBook` already blocks the book while
-  // its status is `ordered`, but an order row can outlive that (a cancelled order leaves
-  // the book editable again) — check the rows themselves and say so in plain words.
-  const [{ count: orderCount }] = await db
-    .select({ count: sql<number>`count(*)::int` })
+  // its status is `ordered`, but an order row can outlive that (a failed or cancelled
+  // order releases the book) — check the rows themselves and say so in plain words.
+  // Those dead rows are only a record of an attempt that never printed anything, so they
+  // go with the book instead of keeping it alive forever.
+  const orderRows = await db
+    .select({ id: bookOrders.id, status: bookOrders.status, printFileS3Key: bookOrders.printFileS3Key })
     .from(bookOrders)
     .where(eq(bookOrders.bookId, input.bookId));
-  if (orderCount > 0) {
+  if (orderRows.some((o) => o.status !== 'failed' && o.status !== 'cancelled')) {
     return err("This book has been ordered and can't be deleted.");
   }
 
-  await db.delete(books).where(eq(books.id, input.bookId));
+  await db.transaction(async (tx) => {
+    if (orderRows.length > 0) {
+      await tx.delete(bookOrders).where(eq(bookOrders.bookId, input.bookId));
+    }
+    await tx.delete(books).where(eq(books.id, input.bookId));
+  });
 
   // Storage cleanup AFTER the row is gone — a failed object delete must not leave a
   // half-deleted book behind; a stray PDF object is the cheaper failure.
-  for (const key of [gate.book.previewS3Key, gate.book.printS3Key]) {
+  for (const key of [
+    gate.book.previewS3Key,
+    gate.book.printS3Key,
+    ...orderRows.map((o) => o.printFileS3Key),
+  ]) {
     if (!key) continue;
     try {
       await deleteObject(key);

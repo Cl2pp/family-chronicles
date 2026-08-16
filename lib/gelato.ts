@@ -372,7 +372,10 @@ export async function createGelatoOrder(input: {
     method: 'POST',
     timeoutMs: 60_000,
     body: JSON.stringify({
-      orderType: input.orderType ?? env.GELATO_ORDER_TYPE,
+      // `?? 'draft'` is not dead code: lib/env.ts's SKIP_ENV_VALIDATION escape hatch
+      // returns raw process.env, where an unset GELATO_ORDER_TYPE has no default — and
+      // "unset" must never mean "print it for real".
+      orderType: input.orderType ?? env.GELATO_ORDER_TYPE ?? 'draft',
       orderReferenceId: input.orderReferenceId,
       customerReferenceId: input.customerReferenceId,
       currency: input.currency ?? 'EUR',
@@ -391,9 +394,16 @@ export async function createGelatoOrder(input: {
   return toGelatoOrder(raw);
 }
 
-/** `GET /v4/orders/{id}` — current status + tracking. Throws GelatoError on failure. */
-export async function getGelatoOrder(gelatoOrderId: string): Promise<GelatoOrder> {
-  const raw = await gelatoFetch<GelatoOrderResponse>(`${ORDERS_URL}/${encodeURIComponent(gelatoOrderId)}`);
+/** `GET /v4/orders/{id}` — current status + tracking. Throws GelatoError on failure.
+ *  `timeoutMs` defaults to the client's usual 20s; callers on a request path (the order
+ *  page's lazy poll) pass something much shorter so a slow Gelato can't hold up a render. */
+export async function getGelatoOrder(
+  gelatoOrderId: string,
+  opts: { timeoutMs?: number } = {},
+): Promise<GelatoOrder> {
+  const raw = await gelatoFetch<GelatoOrderResponse>(`${ORDERS_URL}/${encodeURIComponent(gelatoOrderId)}`, {
+    timeoutMs: opts.timeoutMs,
+  });
   return toGelatoOrder(raw);
 }
 
@@ -422,7 +432,10 @@ export function mapGelatoStatus(status: GelatoFulfillmentStatus): BookOrderStatu
       return 'shipped';
     case 'delivered':
       return 'delivered';
+    // Gelato documents the American spelling; accept both so a change of spelling on
+    // their side can't silently turn a cancellation back into "accepted".
     case 'canceled':
+    case 'cancelled':
     case 'returned':
       return 'cancelled';
     case 'failed':

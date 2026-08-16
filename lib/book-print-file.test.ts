@@ -15,7 +15,7 @@ import { PDFDocument } from 'pdf-lib';
 vi.mock('@/lib/env', () => ({ env: {} }));
 
 import { assembleGelatoPdf, countGelatoInnerPages, gelatoInnerPageCount, renderCoverSpreadHtml, spineTextFor } from './book-print-file';
-import type { GelatoCoverDimensions } from './gelato';
+import { MAX_PAGES, type GelatoCoverDimensions } from './gelato';
 import type { PhotoBookPlan } from './photo-book-plan';
 
 const COVER_W = 100;
@@ -63,6 +63,16 @@ describe('gelatoInnerPageCount', () => {
   it('leaves an even count at or above the minimum alone', () => {
     expect(gelatoInnerPageCount(30)).toBe(30);
     expect(gelatoInnerPageCount(64)).toBe(64);
+  });
+
+  it('reports the real count above Gelato’s 200-page maximum instead of clamping it', () => {
+    // Clamping here would quietly drop pages off the end of the book. The number is
+    // reported honestly and the callers refuse: `buildGelatoPrintFile` (lib/book-render.ts)
+    // skips the print file, and `placeBookOrder` (lib/book-orders.ts) refuses the order.
+    expect(gelatoInnerPageCount(200)).toBe(200);
+    expect(gelatoInnerPageCount(201)).toBe(202);
+    expect(gelatoInnerPageCount(400)).toBe(400);
+    expect(gelatoInnerPageCount(201)).toBeGreaterThan(MAX_PAGES);
   });
 });
 

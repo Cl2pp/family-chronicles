@@ -876,12 +876,18 @@ export const en = {
       downloadPdf: 'Download PDF',
       printing: 'Printing & binding',
       shipping: 'Shipping (within Germany)',
+      // `destination` comes from `countryDestination` in order-shared.ts — already the
+      // full destination phrase ("Austria" here, "in die Schweiz" in German).
+      shippingTo: (destination: string) => `Shipping (to ${destination})`,
       service: 'Service',
       total: 'Total',
       inclShippingDe: 'Price includes shipping within Germany.',
+      inclShippingTo: (destination: string) => `Price includes shipping to ${destination}.`,
       priceOnRequest: 'Price on request',
       priceOnRequestHint:
         'We could not fetch a live price right now. You can still request the book — you will receive the exact price by email before anything is due.',
+      priceUnavailableCountry: (destination: string) =>
+        `We could not fetch a price for delivery to ${destination} right now. Try again in a moment, or pick a different country.`,
       summaryReference: 'Reference',
       howToOrderTitle: 'How to order',
       howToOrderBody: (email: string) =>
@@ -920,6 +926,11 @@ export const en = {
       orderFailedBody: 'Nothing was printed and nothing was charged. You can try again.',
       orderCancelledTitle: 'This order was cancelled.',
       orderCancelledBody: 'Nothing was printed and nothing was charged.',
+      orderBookUnlockedNote:
+        'The book is editable again — if you change it, prepare the print proof again before ordering.',
+      tooLongTitle: 'This book is too long to print',
+      tooLongBody: (max: number) =>
+        `Our print partner binds at most ${max} pages. Remove a few photos or stories to shorten the book, then come back here.`,
       printFileMissingTitle: "The print file for the printer hasn't been created for this book yet",
       printFileMissingBody:
         'The printer needs its own version of the PDF. Creating it takes a minute or two.',
@@ -937,6 +948,10 @@ export const en = {
       countryDE: 'Germany',
       countryAT: 'Austria',
       countryCH: 'Switzerland',
+      // The same countries as a delivery destination — see `countryDestination`.
+      countryToDE: 'Germany',
+      countryToAT: 'Austria',
+      countryToCH: 'Switzerland',
       fieldRequired: 'Please fill this in.',
       fieldInvalidEmail: 'Please enter a valid email address.',
       orderPaymentNote:
@@ -944,6 +959,7 @@ export const en = {
       orderNoReturnsNote:
         'Personalised print — it cannot be returned once production has started.',
       orderNowCta: (price: string) => `Order now (${price})`,
+      orderNowCtaNoPrice: 'Order now',
       orderPlacedNotice: 'Your order is on its way to the printer.',
     },
   },

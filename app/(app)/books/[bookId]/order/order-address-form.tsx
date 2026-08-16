@@ -8,8 +8,10 @@ import { notifications } from '@mantine/notifications';
 import posthog from 'posthog-js';
 import { useI18n } from '@/lib/i18n/client';
 import type { BookShippingAddress } from '@/lib/book-orders';
+import type { BookQuote } from '@/lib/gelato';
 import { placeBookOrderAction } from '../../actions';
-import { ORDER_COUNTRY_CODES, countryLabel } from './order-shared';
+import { ORDER_COUNTRY_CODES, countryDestination, countryLabel } from './order-shared';
+import { eur } from './order-price';
 
 /** Field lengths Gelato's address API accepts — enforced here as `maxLength` so the user
  *  can't type past them, rather than only finding out from a rejected submission. */
@@ -44,16 +46,30 @@ function splitName(name: string | null): { first: string; last: string } {
  *
  * No payment fields on purpose: Gelato bills the account's own card, so nothing is
  * charged in the app (see the note above the button).
+ *
+ * The price lives one level up (`order-view.tsx`), because shipping depends on the
+ * country picked here: changing the country re-quotes there, and both the breakdown in
+ * the card above and this form's button read from that same result.
  */
 export function OrderAddressForm({
   bookId,
-  priceLabel,
+  quote,
+  quoting,
+  country,
+  onCountryChange,
   userEmail,
   userName,
 }: {
   bookId: string;
-  /** Already-formatted total, e.g. "89,00 €" — shown inside the primary button. */
-  priceLabel: string;
+  /** The quote for the currently picked country, or null when there is none for it —
+   *  then the button says so and stays disabled instead of charging a wrong price. */
+  quote: BookQuote | null;
+  /** True while the quote for a newly picked country is still being fetched. */
+  quoting: boolean;
+  /** Currently picked destination country (ISO2). Owned here as part of the address, and
+   *  mirrored up through `onCountryChange` so the parent can re-quote. */
+  country: string;
+  onCountryChange: (country: string) => void;
   userEmail: string;
   userName: string | null;
 }) {
@@ -63,26 +79,35 @@ export function OrderAddressForm({
   const [pending, startTransition] = useTransition();
 
   const initial = splitName(userName);
-  const [values, setValues] = useState<BookShippingAddress>({
+  // Everything except the country, which is a prop — the parent needs it to price
+  // shipping, so keeping a second copy here would only let the two drift apart.
+  type AddressFields = Omit<BookShippingAddress, 'country'>;
+  const [values, setValues] = useState<AddressFields>({
     firstName: initial.first,
     lastName: initial.last,
     addressLine1: '',
     addressLine2: '',
     postCode: '',
     city: '',
-    country: 'DE',
     email: userEmail,
     phone: '',
   });
   const [errors, setErrors] = useState<Partial<Record<keyof BookShippingAddress, string>>>({});
 
-  function set<K extends keyof BookShippingAddress>(key: K, value: BookShippingAddress[K]) {
+  /** The total for the picked country, or null when there is no live price for it — then
+   *  ordering is off, because the button would otherwise promise a German price for a
+   *  Swiss delivery. */
+  const total = quote?.priced && quote.total != null ? quote.total : null;
+
+  function set<K extends keyof AddressFields>(key: K, value: AddressFields[K]) {
     setValues((prev) => ({ ...prev, [key]: value }));
     // Clear this field's error as soon as it's touched — re-validated on submit anyway.
     setErrors((prev) => (prev[key] ? { ...prev, [key]: undefined } : prev));
   }
 
   function submit() {
+    // Belt and braces — the button is disabled without a price for this country.
+    if (total == null) return;
     const found: Partial<Record<keyof BookShippingAddress, string>> = {};
     for (const key of REQUIRED) {
       if (!values[key]?.trim()) found[key] = to.fieldRequired;
@@ -102,7 +127,7 @@ export function OrderAddressForm({
       addressLine2: values.addressLine2?.trim() || undefined,
       postCode: values.postCode.trim(),
       city: values.city.trim(),
-      country: values.country,
+      country,
       email: values.email.trim(),
       phone: values.phone?.trim() || undefined,
     };
@@ -184,8 +209,8 @@ export function OrderAddressForm({
           required
           allowDeselect={false}
           data={ORDER_COUNTRY_CODES.map((code) => ({ value: code, label: countryLabel(to, code) }))}
-          value={values.country}
-          onChange={(value) => value && set('country', value)}
+          value={country}
+          onChange={(value) => value && onCountryChange(value)}
         />
 
         <Group grow align="flex-start">
@@ -219,12 +244,20 @@ export function OrderAddressForm({
         size="lg"
         mt="md"
         fullWidth
-        loading={pending}
+        loading={pending || quoting}
+        // `loading` already disables the button, so this only covers the settled case:
+        // a country we have no price for.
+        disabled={total == null && !quoting}
         leftSection={<IconBook size={18} />}
         onClick={submit}
       >
-        {to.orderNowCta(priceLabel)}
+        {total != null ? to.orderNowCta(eur(total)) : to.orderNowCtaNoPrice}
       </Button>
+      {total == null && !quoting && (
+        <Text fz={12} c="dimmed" mt={6} ta="center">
+          {to.priceUnavailableCountry(countryDestination(to, country))}
+        </Text>
+      )}
     </Card>
   );
 }

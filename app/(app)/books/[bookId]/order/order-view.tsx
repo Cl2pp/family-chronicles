@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -28,10 +28,11 @@ import type { BookFormat, BookQuote } from '@/lib/gelato';
 import type { BookKind, BookStatus } from '@/lib/books';
 import type { BookOrderView } from '@/lib/book-orders';
 import { isBookPrintFresh } from '@/lib/book-print-status';
-import { renderPreviewAction } from '../../actions';
+import { quoteBookOrderAction, renderPreviewAction } from '../../actions';
 import { OrderAddressForm } from './order-address-form';
 import { OrderStatusCard } from './order-status-card';
 import { PriceBreakdown, eur } from './order-price';
+import { MAX_GELATO_PAGES, countryDestination } from './order-shared';
 import posthog from 'posthog-js';
 
 export interface OrderBook {
@@ -79,6 +80,10 @@ export interface OrderingProps {
   /** `Boolean(book.gelatoS3Key)` — the printer needs its own PDF variant; without it the
    *  view offers to create one instead of showing the form. */
   hasGelatoFile: boolean;
+  /** `pageCount > MAX_GELATO_PAGES` — the printer can't bind a book this thick, so the
+   *  view asks the user to shorten it instead of offering an order it would reject.
+   *  Computed by both server pages from the same page count they price against. */
+  tooLong: boolean;
   /** The book's most recent order, if it has one — replaces the ordering UI with the
    *  status card. */
   order: BookOrderView | null;
@@ -155,6 +160,37 @@ export function OrderView({
   const preparing = !isBookPrintFresh(book.status, book.layoutStale);
   const priced = quote?.priced ?? false;
   const priceLine = priced && quote?.total != null ? eur(quote.total) : to.priceOnRequest;
+
+  // The server-rendered `quote` is priced against a German address. Shipping costs differ
+  // per country, so picking Austria or Switzerland in the form below re-quotes, and every
+  // price on this screen — the breakdown rows and the "Order now" button — reads from that
+  // result instead. Germany itself always keeps reading the server's own quote, so a
+  // `router.refresh()` (after preparing the print proof, say) is never ignored.
+  //
+  // Results are cached, so switching back and forth costs no extra calls; a country whose
+  // quote failed is cached as `null`, which reads as "no price for this country" rather
+  // than as "not asked yet". The cache key carries the page count the server quoted for,
+  // so an edit that changes the book's length can't leave an old price behind.
+  const [country, setCountry] = useState<string>('DE');
+  const [quotes, setQuotes] = useState<Record<string, BookQuote | null>>({});
+  const [quoting, startQuoting] = useTransition();
+
+  const cacheKey = (code: string) => `${code}:${quote?.pageCount ?? 'none'}`;
+  const countryQuote = country === 'DE' ? quote : (quotes[cacheKey(country)] ?? null);
+  // While a re-quote is in flight the new country has no numbers yet — keep the previous
+  // rows on screen under the loader instead of flashing the "price on request" note.
+  const shownQuote = countryQuote ?? (quoting ? quote : null);
+  const countryQuoteFailed =
+    country !== 'DE' && cacheKey(country) in quotes && !countryQuote?.priced;
+
+  function changeCountry(next: string) {
+    setCountry(next);
+    if (next === 'DE' || cacheKey(next) in quotes) return;
+    startQuoting(async () => {
+      const result = await quoteBookOrderAction(book.id, next);
+      setQuotes((prev) => ({ ...prev, [cacheKey(next)]: result.quote ?? null }));
+    });
+  }
 
   function preparePrintProof() {
     startTransition(async () => {
@@ -294,14 +330,18 @@ export function OrderView({
               </Button>
             )}
           </Stack>
-        ) : priced && quote ? (
-          <PriceBreakdown quote={quote} />
+        ) : shownQuote?.priced ? (
+          <PriceBreakdown quote={shownQuote} country={country} loading={quoting} />
         ) : (
           <Alert color="yellow" icon={<IconInfoCircle size={16} />}>
             <Text fw={600} mb={2}>
               {to.priceOnRequest}
             </Text>
-            <Text fz={13}>{to.priceOnRequestHint}</Text>
+            <Text fz={13}>
+              {countryQuoteFailed
+                ? to.priceUnavailableCountry(countryDestination(to, country))
+                : to.priceOnRequestHint}
+            </Text>
           </Alert>
         )}
       </Card>
@@ -317,11 +357,24 @@ export function OrderView({
         // and only when there is a real price to charge against. Everyone else — and the
         // allowed accounts when the quote failed, so the owner is never stuck — keeps the
         // original "email us" flow below, unchanged.
-        ordering.canOrder && priced && quote?.total != null ? (
+        ordering.canOrder && ordering.tooLong ? (
+          // Nothing to offer here: the printer can't bind a book this thick, and the
+          // order would only be rejected. The download button in the card above stays,
+          // so the PDF is still available.
+          <Alert color="yellow" icon={<IconInfoCircle size={16} />}>
+            <Text fw={600} mb={2}>
+              {to.tooLongTitle}
+            </Text>
+            <Text fz={13}>{to.tooLongBody(MAX_GELATO_PAGES)}</Text>
+          </Alert>
+        ) : ordering.canOrder && priced && quote?.total != null ? (
           ordering.hasGelatoFile ? (
             <OrderAddressForm
               bookId={book.id}
-              priceLabel={eur(quote.total)}
+              quote={countryQuote}
+              quoting={quoting}
+              country={country}
+              onCountryChange={changeCountry}
               userEmail={ordering.userEmail}
               userName={ordering.userName}
             />

@@ -5,7 +5,7 @@ import { PDFDocument } from 'pdf-lib';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { books, chronicles } from '@/db/schema';
-import { getObjectBuffer, putObjectBuffer } from '@/lib/s3';
+import { deleteObject, getObjectBuffer, putObjectBuffer } from '@/lib/s3';
 import { env } from '@/lib/env';
 import { MIN_PAGES, MAX_PAGES, getGelatoCoverDimensions, productUidForFormat } from '@/lib/gelato';
 import { assembleGelatoPdf, countGelatoInnerPages, renderCoverSpreadHtml } from '@/lib/book-print-file';
@@ -60,11 +60,11 @@ async function photoDataUri(buffer: Buffer, variant: 'preview' | 'print'): Promi
 }
 
 /** Pad with blank pages to Gelato's rules: at least MIN_PAGES and an even count. */
-async function padPdf(pdf: Buffer): Promise<{ padded: Buffer; pageCount: number }> {
+async function padPdf(pdf: Buffer): Promise<Buffer> {
   const doc = await PDFDocument.load(pdf);
   let count = doc.getPageCount();
   if (count > MAX_PAGES) {
-    // Not fatal for a preview; the order screen surfaces the limit to the user.
+    // Not fatal for a proof; the order screen surfaces the limit to the user.
     console.warn(`[book-render] ${count} pages exceeds Gelato max of ${MAX_PAGES}`);
   }
   const { width, height } = doc.getPage(count - 1).getSize();
@@ -74,7 +74,7 @@ async function padPdf(pdf: Buffer): Promise<{ padded: Buffer; pageCount: number 
     count++;
   }
   const bytes = await doc.save();
-  return { padded: Buffer.from(bytes), pageCount: count };
+  return Buffer.from(bytes);
 }
 
 /** Sets `html` as a Chromium page's content and prints it to a PDF buffer — the one
@@ -264,6 +264,15 @@ async function buildGelatoPrintFile(
     );
     return null;
   }
+  if (input.innerPageCount > MAX_PAGES) {
+    // Gelato only prints 30-200 inner pages, and their cover-dimensions endpoint rejects
+    // anything outside that — asking would just be an error. No print file this render;
+    // the order screen tells the user the book is too long.
+    console.warn(
+      `[book-render] ${bookId}: ${input.innerPageCount} inner pages exceeds Gelato's max of ${MAX_PAGES} — skipping the print file`,
+    );
+    return null;
+  }
   try {
     const dims = await getGelatoCoverDimensions(productUid, input.innerPageCount);
 
@@ -365,9 +374,20 @@ async function renderPhotoBook(bookId: string): Promise<void> {
   const previewKey = `books/${bookId}/preview.pdf`;
   const printKey = `books/${bookId}/print.pdf`;
   const gelatoKey = `books/${bookId}/gelato.pdf`;
-  await putObjectBuffer(previewKey, previewPadded.padded, 'application/pdf');
-  await putObjectBuffer(printKey, printPadded.padded, 'application/pdf');
-  if (rendered.gelato) await putObjectBuffer(gelatoKey, rendered.gelato, 'application/pdf');
+  await putObjectBuffer(previewKey, previewPadded, 'application/pdf');
+  await putObjectBuffer(printKey, printPadded, 'application/pdf');
+  if (rendered.gelato) {
+    await putObjectBuffer(gelatoKey, rendered.gelato, 'application/pdf');
+  } else {
+    // `gelatoS3Key` is cleared below, but the OBJECT from an earlier render would still be
+    // sitting there, laid out for a different page count. Nothing should be able to reach
+    // it — drop it so a stale print file can't be printed by accident.
+    try {
+      await deleteObject(gelatoKey);
+    } catch (e) {
+      console.warn(`[book-render] ${bookId}: could not remove the stale Gelato file:`, e);
+    }
+  }
 
   await db
     .update(books)

@@ -18,6 +18,7 @@ import { env } from '@/lib/env';
 import { presignGet } from '@/lib/s3';
 import { PhotoBookBuilder, type PhotoBookPhotoView } from './photo-book-builder';
 import type { OrderBook, OrderingProps } from './order/order-view';
+import { MAX_GELATO_PAGES } from './order/order-shared';
 
 export default async function BookBuilderPage({
   params,
@@ -94,6 +95,7 @@ export default async function BookBuilderPage({
       userEmail: user.email,
       userName: user.name ?? null,
       hasGelatoFile: Boolean(book.gelatoS3Key),
+      tooLong: pageCount > MAX_GELATO_PAGES,
       order: await getLatestBookOrder(book.id, user.id),
     };
 

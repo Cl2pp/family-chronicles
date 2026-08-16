@@ -1,5 +1,5 @@
 {
-  "id": "3d3b6ce7-2f32-473b-9ae9-25949e95f54e",
+  "id": "df2cb351-cfc3-4c66-a121-a4d54d8c1e77",
   "prevId": "34793eeb-d885-46b4-b3d5-94592fd59efb",
   "version": "7",
   "dialect": "postgresql",
@@ -368,6 +368,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "gelato_order_type": {
+          "name": "gelato_order_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "gelato_status": {
           "name": "gelato_status",
           "type": "text",
@@ -389,6 +395,12 @@
         "error_message": {
           "name": "error_message",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "submit_started_at": {
+          "name": "submit_started_at",
+          "type": "timestamp",
           "primaryKey": false,
           "notNull": false
         },
@@ -473,7 +485,7 @@
             }
           ],
           "isUnique": true,
-          "where": "status <> 'cancelled'",
+          "where": "status NOT IN ('cancelled', 'failed')",
           "concurrently": false,
           "method": "btree",
           "with": {}

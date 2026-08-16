@@ -634,7 +634,9 @@ export const bookStories = pgTable(
  * queued/running) → `submitted` (Gelato accepted it; `gelatoOrderId` set — for
  * `GELATO_ORDER_TYPE=draft` this means a draft in the Gelato dashboard) →
  * `in_production` → `shipped` (tracking set) → `delivered`; `failed` (submission gave up —
- * `errorMessage` says why, admin retries) and `cancelled` are terminal. `gelatoStatus`
+ * `errorMessage` says why, admin retries) and `cancelled` are terminal. Both terminal
+ * states also RELEASE the book (`books.status` goes back to `preview_ready`), so a dead
+ * order never strands a book: it can be edited, deleted, or ordered again. `gelatoStatus`
  * keeps Gelato's own raw `fulfillmentStatus` for debugging. Rows predating this flow have
  * the old default `requested` (never written in practice).
  */
@@ -658,12 +660,22 @@ export const bookOrders = pgTable(
      *  what gets printed. */
     printFileS3Key: text('print_file_s3_key'),
     gelatoOrderId: text('gelato_order_id'),
+    /** What Gelato actually holds: a reviewable `draft` in their dashboard, or a real
+     *  `order` (`GELATO_ORDER_TYPE`). Recorded from Gelato's own response rather than
+     *  inferred, so the order screen can say which one it is even after the fulfillment
+     *  status has moved on. Null until Gelato has accepted the submission. */
+    gelatoOrderType: text('gelato_order_type'),
     /** Gelato's raw `fulfillmentStatus` from the last submit/poll (see lib/gelato.ts). */
     gelatoStatus: text('gelato_status'),
     trackingCode: text('tracking_code'),
     trackingUrl: text('tracking_url'),
     /** Why the last submission attempt failed (`status = 'failed'`); cleared on retry. */
     errorMessage: text('error_message'),
+    /** Set by the worker the moment it claims this row for submission (a single
+     *  conditional UPDATE — see `submitBookOrder`), so two workers can never both POST
+     *  the same order to Gelato, whose order creation is not idempotent. Cleared when a
+     *  failed order is queued again. */
+    submitStartedAt: timestamp('submit_started_at'),
     submittedAt: timestamp('submitted_at'),
     shippedAt: timestamp('shipped_at'),
     deliveredAt: timestamp('delivered_at'),
@@ -677,9 +689,11 @@ export const bookOrders = pgTable(
     uniqueIndex('book_orders_gelato_order_uq').on(t.gelatoOrderId),
     // At most ONE live order per book — the DB-level backstop for `placeBookOrder`'s
     // "already ordered" check, so two simultaneous clicks can't both get through.
+    // `failed` and `cancelled` are dead ends (the book is released back to
+    // `preview_ready`), so they must not block a fresh attempt.
     uniqueIndex('book_orders_open_uq')
       .on(t.bookId)
-      .where(sql`status <> 'cancelled'`),
+      .where(sql`status NOT IN ('cancelled', 'failed')`),
   ],
 );
 

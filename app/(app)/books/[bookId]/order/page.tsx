@@ -7,6 +7,7 @@ import { quoteBookPrice, formatSummaryLabel } from '@/lib/gelato';
 import { canUserOrderBooks, getLatestBookOrder } from '@/lib/book-orders';
 import { env } from '@/lib/env';
 import { OrderView, type OrderingProps } from './order-view';
+import { MAX_GELATO_PAGES } from './order-shared';
 
 export default async function OrderPage({ params }: { params: Promise<{ bookId: string }> }) {
   const { bookId } = await params;
@@ -58,6 +59,7 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
     userEmail: user.email,
     userName: user.name ?? null,
     hasGelatoFile: Boolean(book.gelatoS3Key),
+    tooLong: pageCount > MAX_GELATO_PAGES,
     order: await getLatestBookOrder(book.id, user.id),
   };
 
@@ -67,7 +69,7 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
         book={{
           id: book.id,
           title: book.title,
-    kind: book.kind,
+          kind: book.kind,
           format: book.format,
           formatLabel: formatSummaryLabel(book.format, book.coverType),
           pageCount,

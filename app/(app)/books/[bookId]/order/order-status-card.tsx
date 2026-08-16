@@ -88,6 +88,12 @@ export function OrderStatusCard({ order }: { order: BookOrderView }) {
               {to.orderFailedTitle}
             </Text>
             <Text fz={13}>{to.orderFailedBody}</Text>
+            {/* The failed hand-off releases the book's lock server-side, so the book can be
+                edited again — which also means a changed book needs a new print proof
+                before a retry sends the right PDF. */}
+            <Text fz={13} mt={4}>
+              {to.orderBookUnlockedNote}
+            </Text>
             {order.errorMessage && (
               <Text fz={11} c="dimmed" mt={4}>
                 {order.errorMessage}
@@ -104,6 +110,9 @@ export function OrderStatusCard({ order }: { order: BookOrderView }) {
             {to.orderCancelledTitle}
           </Text>
           <Text fz={13}>{to.orderCancelledBody}</Text>
+          <Text fz={13} mt={4}>
+            {to.orderBookUnlockedNote}
+          </Text>
         </Alert>
       ) : (
         <Timeline active={STEP_INDEX[order.status] ?? 0} bulletSize={24} lineWidth={2}>
@@ -216,7 +225,7 @@ export function OrderStatusCard({ order }: { order: BookOrderView }) {
 
       {/* The quote as it stood when the order was placed — not a fresh one, so the total
           shown here always matches what was actually ordered. */}
-      <PriceBreakdown quote={order.quote} />
+      <PriceBreakdown quote={order.quote} country={order.shippingAddress?.country ?? 'DE'} />
     </Card>
   );
 }

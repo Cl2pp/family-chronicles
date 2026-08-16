@@ -895,12 +895,18 @@ export const de: Dictionary = {
       downloadPdf: 'PDF herunterladen',
       printing: 'Druck & Bindung',
       shipping: 'Versand (innerhalb Deutschlands)',
+      // `destination` kommt aus `countryDestination` (order-shared.ts) und enthält die
+      // Präposition schon — „nach Österreich“, aber „in die Schweiz“.
+      shippingTo: (destination: string) => `Versand (${destination})`,
       service: 'Service',
       total: 'Gesamt',
       inclShippingDe: 'Preis inklusive Versand innerhalb Deutschlands.',
+      inclShippingTo: (destination: string) => `Preis inklusive Versand ${destination}.`,
       priceOnRequest: 'Preis auf Anfrage',
       priceOnRequestHint:
         'Wir konnten gerade keinen Live-Preis abrufen. Frag das Buch trotzdem an — du bekommst den genauen Preis per E-Mail, bevor etwas fällig wird.',
+      priceUnavailableCountry: (destination: string) =>
+        `Für die Lieferung ${destination} konnten wir gerade keinen Preis abrufen. Versuch es gleich noch einmal oder wähl ein anderes Land.`,
       summaryReference: 'Referenz',
       howToOrderTitle: 'So bestellst du',
       howToOrderBody: (email: string) =>
@@ -940,6 +946,11 @@ export const de: Dictionary = {
         'Es wurde nichts gedruckt und nichts berechnet. Du kannst es erneut versuchen.',
       orderCancelledTitle: 'Diese Bestellung wurde storniert.',
       orderCancelledBody: 'Es wurde nichts gedruckt und nichts berechnet.',
+      orderBookUnlockedNote:
+        'Du kannst das Buch wieder bearbeiten — wenn du etwas änderst, erstelle vor dem Bestellen die Druckvorlage neu.',
+      tooLongTitle: 'Dieses Buch ist zu lang für den Druck',
+      tooLongBody: (max: number) =>
+        `Unsere Druckerei bindet höchstens ${max} Seiten. Nimm ein paar Fotos oder Geschichten heraus, um das Buch zu kürzen, und komm dann wieder hierher.`,
       printFileMissingTitle: 'Für dieses Buch wurde die Druckdatei noch nicht erstellt',
       printFileMissingBody:
         'Die Druckerei braucht eine eigene Fassung des PDFs. Das Erstellen dauert ein bis zwei Minuten.',
@@ -957,6 +968,11 @@ export const de: Dictionary = {
       countryDE: 'Deutschland',
       countryAT: 'Österreich',
       countryCH: 'Schweiz',
+      // Dieselben Länder als Lieferziel — siehe `countryDestination`. Die Schweiz braucht
+      // eine andere Präposition als die anderen beiden, deshalb steht sie hier komplett.
+      countryToDE: 'nach Deutschland',
+      countryToAT: 'nach Österreich',
+      countryToCH: 'in die Schweiz',
       fieldRequired: 'Bitte ausfüllen.',
       fieldInvalidEmail: 'Bitte gib eine gültige E-Mail-Adresse ein.',
       orderPaymentNote:
@@ -964,6 +980,7 @@ export const de: Dictionary = {
       orderNoReturnsNote:
         'Personalisierter Druck — nach Produktionsstart ist keine Rückgabe möglich.',
       orderNowCta: (price: string) => `Jetzt bestellen (${price})`,
+      orderNowCtaNoPrice: 'Jetzt bestellen',
       orderPlacedNotice: 'Deine Bestellung ist auf dem Weg zur Druckerei.',
     },
   },
