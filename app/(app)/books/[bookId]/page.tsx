@@ -13,10 +13,11 @@ import { loadStoryAccessContext } from '@/lib/story-access';
 import { isBookPrintFresh } from '@/lib/book-print-status';
 import { isDesignInFlight, parseDesignStage } from '@/lib/photo-book-design-stage';
 import { quoteBookPrice, formatSummaryLabel } from '@/lib/gelato';
+import { canUserOrderBooks, getLatestBookOrder } from '@/lib/book-orders';
 import { env } from '@/lib/env';
 import { presignGet } from '@/lib/s3';
 import { PhotoBookBuilder, type PhotoBookPhotoView } from './photo-book-builder';
-import type { OrderBook } from './order/order-view';
+import type { OrderBook, OrderingProps } from './order/order-view';
 
 export default async function BookBuilderPage({
   params,
@@ -86,6 +87,16 @@ export default async function BookBuilderPage({
       hasPrint: Boolean(book.printS3Key),
     };
 
+    // Mirrors the standalone order route's own `ordering` block (order/page.tsx) — step 3
+    // embeds the same `OrderView`, so it needs the same data.
+    const ordering: OrderingProps = {
+      canOrder: canUserOrderBooks(user.email),
+      userEmail: user.email,
+      userName: user.name ?? null,
+      hasGelatoFile: Boolean(book.gelatoS3Key),
+      order: await getLatestBookOrder(book.id, user.id),
+    };
+
     return (
       <Box p="lg" maw={1500} mx="auto">
         <PhotoBookBuilder
@@ -127,6 +138,7 @@ export default async function BookBuilderPage({
           order={order}
           quote={quote}
           contactEmail={env.BOOK_ORDER_CONTACT_EMAIL}
+          ordering={ordering}
         />
       </Box>
   );

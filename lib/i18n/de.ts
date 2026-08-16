@@ -919,6 +919,52 @@ export const de: Dictionary = {
       hiddenChaptersTitle: 'Dieses Buch enthält Geschichten, die du nicht sehen kannst',
       hiddenChaptersBody:
         'Das gedruckte Buch enthält immer alle Kapitel — vorbereiten oder bestellen kann es daher nur, wer Zugriff auf alle seine Geschichten hat.',
+
+      // --- Echte Bestellung über Gelato (nur für Konten, die `canUserOrderBooks`
+      //     freigibt; alle anderen behalten den Mailto-Weg oben unverändert). ---
+      orderStatusTitle: 'Deine Bestellung',
+      orderPlacedOn: 'Bestellt am',
+      orderPrinterReference: 'Referenz der Druckerei',
+      orderShipTo: 'Lieferadresse',
+      orderSubmitting: 'Deine Bestellung geht gerade an die Druckerei — einen Moment…',
+      stepPlaced: 'Bestellung aufgegeben',
+      stepSubmitted: 'An die Druckerei geschickt',
+      stepSubmittedDraft: 'Wartet auf deine Bestätigung im Gelato-Dashboard.',
+      stepInProduction: 'In Produktion',
+      stepShipped: 'Versandt',
+      stepDelivered: 'Zugestellt',
+      orderTracking: 'Sendungsverfolgung',
+      orderTrackOpen: 'Sendung verfolgen',
+      orderFailedTitle: 'Deine Bestellung konnte nicht an die Druckerei geschickt werden.',
+      orderFailedBody:
+        'Es wurde nichts gedruckt und nichts berechnet. Du kannst es erneut versuchen.',
+      orderCancelledTitle: 'Diese Bestellung wurde storniert.',
+      orderCancelledBody: 'Es wurde nichts gedruckt und nichts berechnet.',
+      printFileMissingTitle: 'Für dieses Buch wurde die Druckdatei noch nicht erstellt',
+      printFileMissingBody:
+        'Die Druckerei braucht eine eigene Fassung des PDFs. Das Erstellen dauert ein bis zwei Minuten.',
+      createPrintFileCta: 'Druckdatei erstellen',
+      addressTitle: 'Lieferadresse',
+      fieldFirstName: 'Vorname',
+      fieldLastName: 'Nachname',
+      fieldAddressLine1: 'Straße und Hausnummer',
+      fieldAddressLine2: 'Adresszusatz (optional)',
+      fieldPostCode: 'PLZ',
+      fieldCity: 'Ort',
+      fieldCountry: 'Land',
+      fieldEmail: 'E-Mail',
+      fieldPhone: 'Telefon (optional)',
+      countryDE: 'Deutschland',
+      countryAT: 'Österreich',
+      countryCH: 'Schweiz',
+      fieldRequired: 'Bitte ausfüllen.',
+      fieldInvalidEmail: 'Bitte gib eine gültige E-Mail-Adresse ein.',
+      orderPaymentNote:
+        'Mit dem Bestellen geht dieses Buch an unseren Druckpartner Gelato. Die Bezahlung läuft außerhalb der App — hier wird nichts abgebucht.',
+      orderNoReturnsNote:
+        'Personalisierter Druck — nach Produktionsstart ist keine Rückgabe möglich.',
+      orderNowCta: (price: string) => `Jetzt bestellen (${price})`,
+      orderPlacedNotice: 'Deine Bestellung ist auf dem Weg zur Druckerei.',
     },
   },
   invite: {

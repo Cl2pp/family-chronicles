@@ -3,6 +3,7 @@ import { db } from '@/db';
 import {
   assets,
   books,
+  bookOrders,
   bookPhotos,
   bookStories,
   chronicles,
@@ -27,7 +28,8 @@ import {
   enqueueThumbnail,
 } from '@/lib/queue';
 import { enqueuePendingPhotoVisionBatches } from '@/lib/photo-vision';
-import { quoteBookPrice, type BookCoverType, type BookFormat, type BookQuote } from '@/lib/gelato';
+import { MIN_PAGES, quoteBookPrice, type BookCoverType, type BookFormat, type BookQuote } from '@/lib/gelato';
+import { PHOTO_BOOK_COVER_PAGE_COUNT } from '@/lib/photo-book-layout';
 import {
   buildAndPersistPhotoAutoPlan,
   countPhotoBookPages,
@@ -261,6 +263,12 @@ export interface BookDetail {
   pageCount: number | null;
   previewS3Key: string | null;
   printS3Key: string | null;
+  /** The Gelato-format print file (`books.gelato_s3_key`) — one PDF with the wraparound
+   *  cover spread, endpapers and inner pages. Null on books rendered before that file
+   *  existed, or when the render couldn't build it; ordering (`lib/book-orders.ts`)
+   *  requires it, and `requestPreview({ ensureGelatoFile: true })` forces a re-render
+   *  until it is there. */
+  gelatoS3Key: string | null;
   /** Who last wrote the layout plan: the heuristic auto-layouter, an AI design pass, or a
    *  manual edit (manual edits are phase 4; the type already allows for them). */
   layoutSource: 'auto' | 'ai' | 'edited';
@@ -396,6 +404,7 @@ export async function getBookForUser(
     pageCount: row.book.pageCount,
     previewS3Key: row.book.previewS3Key,
     printS3Key: row.book.printS3Key,
+    gelatoS3Key: row.book.gelatoS3Key,
     layoutSource: row.book.layoutSource as 'auto' | 'ai' | 'edited',
     layoutPlan: row.book.layoutPlan,
     layoutStale: row.book.layoutStale,
@@ -1847,6 +1856,18 @@ export async function deleteBook(input: { bookId: string; userId: string }): Pro
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
 
+  // `book_orders.book_id` is ON DELETE RESTRICT, so an ordered book's delete would blow
+  // up with a raw FK error from Postgres. `editableBook` already blocks the book while
+  // its status is `ordered`, but an order row can outlive that (a cancelled order leaves
+  // the book editable again) — check the rows themselves and say so in plain words.
+  const [{ count: orderCount }] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(bookOrders)
+    .where(eq(bookOrders.bookId, input.bookId));
+  if (orderCount > 0) {
+    return err("This book has been ordered and can't be deleted.");
+  }
+
   await db.delete(books).where(eq(books.id, input.bookId));
 
   // Storage cleanup AFTER the row is gone — a failed object delete must not leave a
@@ -2013,10 +2034,16 @@ export async function setBookStoryFlags(input: {
  * Chromium. The builder's own preview pane no longer depends on this — it's live
  * HTML (app/api/books/[bookId]/preview-html) — so this is now only needed before
  * ordering (exact page count → quote) or when a PDF proof is explicitly wanted.
+ *
+ * `ensureGelatoFile` is for the order screen: a book rendered before the Gelato print
+ * file existed sits at `preview_ready` with no `gelatoS3Key`, which looks fresh but
+ * can't be ordered. With the flag on, "already fresh" also requires that file, so the
+ * order screen's "prepare print file" button forces the one re-render that produces it.
  */
 export async function requestPreview(input: {
   bookId: string;
   userId: string;
+  ensureGelatoFile?: boolean;
 }): Promise<Result> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
@@ -2024,7 +2051,10 @@ export async function requestPreview(input: {
   // Already fresh — nothing to (re-)render. Lets the "Download PDF" flow call this
   // unconditionally before serving the PDF without forcing a wasteful Chromium re-run
   // on a book whose print PDF already matches its current content.
-  if (gate.book.status === 'preview_ready' && !gate.book.layoutStale) return { ok: true };
+  const gelatoFileOk = !input.ensureGelatoFile || !!gate.book.gelatoS3Key;
+  if (gate.book.status === 'preview_ready' && !gate.book.layoutStale && gelatoFileOk) {
+    return { ok: true };
+  }
 
   // The rendered PDF physically contains EVERY chapter — all-or-nothing: only someone
   // who can read all of the book's stories may trigger (and later fetch) it. Vacuous for
@@ -2090,7 +2120,12 @@ export async function estimatePageCount(
   {
     const loaded = await loadPhotoBook(book.id);
     const plan = await loadOrBuildPhotoPlan(book.id, loaded);
-    return countPhotoBookPages(plan);
+    // `books.page_count` means the INNER page count of the Gelato print file, so this
+    // estimate has to mean the same thing: drop the plan's two cover pages (they become
+    // the wraparound spread, which Gelato never counts) and apply the same ≥30/even
+    // padding rule the renderer does (`gelatoInnerPageCount`, lib/book-print-file.ts).
+    const inner = Math.max(0, countPhotoBookPages(plan) - PHOTO_BOOK_COVER_PAGE_COUNT);
+    return Math.max(MIN_PAGES, inner + (inner % 2));
   }
   const front = 4; // cover sheet, title page, TOC, blank
   const perStory = book.chapters.reduce(
@@ -2101,8 +2136,9 @@ export async function estimatePageCount(
 }
 
 /*
- * Ordering deliberately has no in-app write path right now: the order screen shows
- * the quote and asks the user to email BOOK_ORDER_CONTACT_EMAIL with the on-screen
- * details. The `book_orders` table and the `ordered` status stay in the schema for
- * the future payment flow (Stripe + automatic Gelato submission).
+ * Ordering itself lives in `lib/book-orders.ts` — placing an order writes a `book_orders`
+ * row, pins the Gelato print file, and flips this book to `ordered` (which locks it via
+ * `editableBook`). It is gated to BOOK_ORDERING_ALLOWED_EMAILS; everyone else still gets
+ * the order screen's quote plus a mailto to BOOK_ORDER_CONTACT_EMAIL. There is no in-app
+ * payment either way: Gelato bills the account behind GELATO_API_KEY.
  */

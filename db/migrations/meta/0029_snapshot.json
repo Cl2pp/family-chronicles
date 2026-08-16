@@ -1,5 +1,5 @@
 {
-  "id": "ea52b286-54a6-4563-9a29-6eeb81819581",
+  "id": "3d3b6ce7-2f32-473b-9ae9-25949e95f54e",
   "prevId": "34793eeb-d885-46b4-b3d5-94592fd59efb",
   "version": "7",
   "dialect": "postgresql",
@@ -458,6 +458,22 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "book_orders_open_uq": {
+          "name": "book_orders_open_uq",
+          "columns": [
+            {
+              "expression": "book_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status <> 'cancelled'",
           "concurrently": false,
           "method": "btree",
           "with": {}

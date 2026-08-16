@@ -4,8 +4,9 @@ import { requireUser } from '@/lib/session';
 import { estimatePageCount, getBookForUser, listBookPhotos } from '@/lib/books';
 import { isBookPrintFresh } from '@/lib/book-print-status';
 import { quoteBookPrice, formatSummaryLabel } from '@/lib/gelato';
+import { canUserOrderBooks, getLatestBookOrder } from '@/lib/book-orders';
 import { env } from '@/lib/env';
-import { OrderView } from './order-view';
+import { OrderView, type OrderingProps } from './order-view';
 
 export default async function OrderPage({ params }: { params: Promise<{ bookId: string }> }) {
   const { bookId } = await params;
@@ -49,6 +50,17 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
     photoCount = photosResult.ok ? photosResult.value.photos.filter((p) => !p.excluded).length : 0;
   }
 
+  // Real (Gelato) ordering — see `OrderingProps`. `getLatestBookOrder` also lazily syncs
+  // an open order's status from Gelato, which is why the view only has to keep asking for
+  // a fresh render rather than polling an API of its own.
+  const ordering: OrderingProps = {
+    canOrder: canUserOrderBooks(user.email),
+    userEmail: user.email,
+    userName: user.name ?? null,
+    hasGelatoFile: Boolean(book.gelatoS3Key),
+    order: await getLatestBookOrder(book.id, user.id),
+  };
+
   return (
     <Box p="lg" maw={640} mx="auto">
       <OrderView
@@ -69,6 +81,7 @@ export default async function OrderPage({ params }: { params: Promise<{ bookId: 
         }}
         quote={quote}
         contactEmail={env.BOOK_ORDER_CONTACT_EMAIL}
+        ordering={ordering}
       />
     </Box>
   );

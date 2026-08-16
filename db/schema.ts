@@ -543,7 +543,9 @@ export const books = pgTable(
     coverType: bookCoverType('cover_type').notNull().default('hardcover'),
     status: bookStatus('status').notNull().default('draft'),
     errorMessage: text('error_message'),
-    /** Set by the renderer: final padded page count of the print PDF. */
+    /** Set by the renderer: the INNER page count of the Gelato print file (`gelatoS3Key`)
+     *  — no covers, no endpapers, padded to Gelato's ≥30/even rule. This is the number
+     *  Gelato prices and prints, and the one the order screen shows. */
     pageCount: integer('page_count'),
     previewS3Key: text('preview_s3_key'),
     printS3Key: text('print_s3_key'),
@@ -673,6 +675,11 @@ export const bookOrders = pgTable(
   (t) => [
     index('book_orders_book_idx').on(t.bookId),
     uniqueIndex('book_orders_gelato_order_uq').on(t.gelatoOrderId),
+    // At most ONE live order per book — the DB-level backstop for `placeBookOrder`'s
+    // "already ordered" check, so two simultaneous clicks can't both get through.
+    uniqueIndex('book_orders_open_uq')
+      .on(t.bookId)
+      .where(sql`status <> 'cancelled'`),
   ],
 );
 
