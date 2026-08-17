@@ -56,6 +56,13 @@ import {
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
 import { isDesignInFlight } from '@/lib/photo-book-design-stage';
 import { parsePhotoGrouping, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
+import {
+  decideChapterOrder,
+  isDateOrdered,
+  reorderChapterSections,
+  sortByDate,
+  type StoryDateKeys,
+} from '@/lib/book-chapter-order';
 
 /**
  * Book domain — the ONE place book state changes. The Books UI (server actions)
@@ -170,6 +177,21 @@ async function ensureUsableBookStories(
     }
   }
   return { ok: true };
+}
+
+/**
+ * The `(event_date, created_at)` keys of `storyIds`, for the pure chapter-order decisions
+ * in `lib/book-chapter-order.ts` — the reference for the `custom` grouping
+ * (`lib/photo-book-grouping.ts`): a chapter order that isn't by these keys IS a custom
+ * order, and leaving `custom` means going back to them.
+ */
+async function storyDateKeys(tx: DbLike, storyIds: readonly string[]): Promise<StoryDateKeys> {
+  if (storyIds.length === 0) return new Map();
+  const rows = await tx
+    .select({ id: stories.id, eventDate: stories.eventDate, createdAt: stories.createdAt })
+    .from(stories)
+    .where(inArray(stories.id, [...storyIds]));
+  return new Map(rows.map((r) => [r.id, { eventDate: r.eventDate, createdAt: r.createdAt }]));
 }
 
 export interface BookListItem {
@@ -452,7 +474,9 @@ export async function readyStoriesForChronicle(
     .from(stories)
     .innerJoin(user, eq(stories.submittedBy, user.id))
     .where(and(eq(stories.chronicleId, chronicleId), eq(stories.status, 'ready')))
-    .orderBy(asc(stories.eventDate), asc(stories.createdAt));
+    // The "by date" order of `lib/book-chapter-order.ts` (ties are fine there); the id
+    // tie-break only makes this list deterministic.
+    .orderBy(asc(stories.eventDate), asc(stories.createdAt), asc(stories.id));
 
   const ctx = accessCtx ?? (await loadStoryAccessContext(userId, chronicleId));
   const visible = readsWholeChronicle(ctx)
@@ -480,7 +504,7 @@ export async function createBook(input: {
   userId: string;
   title: string;
   storyIds?: string[];
-}): Promise<Result<{ bookId: string }>> {
+}): Promise<Result<{ bookId: string; customOrder: boolean }>> {
   const gate = await ensureBookAccess(input.chronicleId, input.userId);
   if (!gate.ok) return gate;
   const ctx = await loadStoryAccessContext(input.userId, input.chronicleId);
@@ -499,13 +523,20 @@ export async function createBook(input: {
   }
 
   let freshMirrors: Array<{ assetId: string; s3Key: string }> = [];
+  let customOrder = false;
   const bookId = await db.transaction(async (tx) => {
+    // A caller-supplied order (the chat agent's `create_book`) that isn't by date is the
+    // reader's own order — same rule as `setBookStories`, so the new book's Step 2 choice
+    // is truthful from the start. The default list above IS in date order.
+    const custom = input.storyIds !== undefined && !isDateOrdered(storyIds, await storyDateKeys(tx, storyIds));
+    customOrder = custom;
     const [created] = await tx
       .insert(books)
       .values({
         chronicleId: input.chronicleId,
         createdBy: input.userId,
         title: input.title.trim() || 'Familienwerk',
+        ...(custom ? { photoGrouping: 'custom' } : {}),
       })
       .returning();
     await tx
@@ -519,7 +550,7 @@ export async function createBook(input: {
     return created.id;
   });
   await enqueueMirrorAnalysis(freshMirrors);
-  return { ok: true, value: { bookId } };
+  return { ok: true, value: { bookId, customOrder } };
 }
 
 /** The slice of a drizzle transaction the mirror sync needs — also satisfied by `db`
@@ -1274,9 +1305,24 @@ export async function updatePhotoBookSettings(input: {
   // Deliberately does NOT flip `layoutStale`: that would make the next page load rebuild
   // the book behind the user's back (and for an AI-designed book only REPAIR it, which
   // never re-sections). Re-sectioning needs a real design pass, queued below.
-  const groupingChanged =
-    input.photoGrouping !== undefined && input.photoGrouping !== parsePhotoGrouping(row.photoGrouping);
+  const previousGrouping = parsePhotoGrouping(row.photoGrouping);
+  const groupingChanged = input.photoGrouping !== undefined && input.photoGrouping !== previousGrouping;
   if (input.photoGrouping !== undefined) set.photoGrouping = input.photoGrouping;
+  // Every grouping but `custom` promises chapters in date order (`lib/photo-book-grouping.ts`
+  // — `setBookStories` is what flips a book to `custom` when they aren't). So leaving
+  // `custom` for any other option puts the chapters back in that order. Changing chapter
+  // order is a chapter edit, so it needs the same "can see every chapter" gate as
+  // `setBookStories` — `editablePhotoBook` doesn't check that, so it's done here.
+  const resortChapters = groupingChanged && previousGrouping === 'custom';
+  if (resortChapters) {
+    const ctx = await loadStoryAccessContext(input.userId, gate.chronicleId);
+    const detail = await getBookForUser(input.bookId, input.userId, ctx);
+    if (!detail || detail.hiddenChapterCount > 0) {
+      return err(
+        "Some of this book's chapters are stories you don't have access to — only someone who can read every story can change the book's chapters.",
+      );
+    }
+  }
 
   const coverTextChanged =
     (input.title !== undefined && nextTitle !== row.title) ||
@@ -1304,7 +1350,44 @@ export async function updatePhotoBookSettings(input: {
     }
   }
 
-  await db.update(books).set(set).where(eq(books.id, input.bookId));
+  await db.transaction(async (tx) => {
+    if (resortChapters) {
+      const chapters = await tx
+        .select({ storyId: bookStories.storyId })
+        .from(bookStories)
+        .where(eq(bookStories.bookId, input.bookId))
+        .orderBy(asc(bookStories.position));
+      const current = chapters.map((c) => c.storyId);
+      const keys = await storyDateKeys(tx, current);
+      // Nothing to do when the "custom" order happens to be the date order already (the
+      // reader moved a chapter and moved it back) — in particular no plan write below.
+      if (!isDateOrdered(current, keys)) {
+        const ordered = sortByDate(current, keys);
+        // Position is the only thing that changes — include flags and photo mirrors stay.
+        for (const [position, storyId] of ordered.entries()) {
+          await tx
+            .update(bookStories)
+            .set({ position })
+            .where(and(eq(bookStories.bookId, input.bookId), eq(bookStories.storyId, storyId)));
+        }
+        // Keep the stored plan in step by moving its chapter sections in place — the same
+        // "patch the plan directly" approach as the cover text above, and for the same
+        // reason: `layoutStale` would send an AI-designed or hand-edited plan through the
+        // repair path, which never re-sections, so the book would keep the OLD order
+        // (permanently, for a hand-edited plan whose redesign is skipped below).
+        const plan = set.layoutPlan ?? row.layoutPlan;
+        if (plan) {
+          const validated = validatePhotoBookPlan(plan);
+          if (validated.ok) {
+            const reordered = reorderChapterSections(validated.plan, ordered);
+            const revalidated = validatePhotoBookPlan(reordered);
+            if (revalidated.ok) set.layoutPlan = revalidated.plan;
+          }
+        }
+      }
+    }
+    await tx.update(books).set(set).where(eq(books.id, input.bookId));
+  });
 
   // Changing how the book is ORGANISED changes what a section is, which no in-place patch
   // can express — the book has to be designed again. That rule lives here, with the
@@ -1925,15 +2008,32 @@ export async function deleteBook(input: { bookId: string; userId: string }): Pro
   return { ok: true };
 }
 
+/** What `setBookStories` did to the book's grouping, so callers can say so: the panel's
+ *  arrows act on Step 1 while the setting lives on Step 2, and the chat agent needs it in
+ *  its tool result to tell the user. */
+export interface SetBookStoriesOutcome {
+  /** True when this call switched the book to the `custom` grouping. */
+  switchedToCustom: boolean;
+}
+
 /**
  * Replace the book's story selection with `storyIds`, in that order. One idempotent
  * call covers add, remove, and reorder — much easier for the agent than move ops.
+ *
+ * Chapter ORDER interacts with the book's grouping (`lib/photo-book-grouping.ts`): every
+ * grouping but `custom` promises chapters by date. So, on a non-custom book:
+ * - moving chapters relative to each other (a real reorder) switches it to `custom`;
+ * - a pure add/remove keeps the grouping, and an added story is slotted in by date rather
+ *   than left where the caller appended it — unless the retained chapters were already out
+ *   of date order (a book reordered before `custom` existed), which is a custom order that
+ *   just hadn't been named yet, so the book becomes `custom` and keeps the given order.
+ * A `custom` book always keeps exactly the order given.
  */
 export async function setBookStories(input: {
   bookId: string;
   userId: string;
   storyIds: string[];
-}): Promise<Result> {
+}): Promise<Result<SetBookStoriesOutcome>> {
   const gate = await editableBook(input.bookId, input.userId);
   if (!gate.ok) return gate;
   // Photo books have no chapters. This gate was never needed while attaching a story
@@ -1972,6 +2072,7 @@ export async function setBookStories(input: {
   if (!usable.ok) return usable;
 
   let freshMirrors: Array<{ assetId: string; s3Key: string }> = [];
+  let switchedToCustom = false;
   await db.transaction(async (tx) => {
     // Preserve each retained story's include flags across the replace — a plain
     // delete+reinsert silently reset `includePhotos` (and would reset `includeText`)
@@ -1983,11 +2084,27 @@ export async function setBookStories(input: {
         includeText: bookStories.includeText,
       })
       .from(bookStories)
-      .where(eq(bookStories.bookId, input.bookId));
+      .where(eq(bookStories.bookId, input.bookId))
+      .orderBy(asc(bookStories.position));
     const flagsByStory = new Map(previous.map((p) => [p.storyId, p]));
 
+    // The grouping rule from the doc comment above (`decideChapterOrder`, tested in
+    // `lib/book-chapter-order.test.ts`). Decided here, with the mutation, so the panel's
+    // arrows and the chat agent's `set_book_stories` behave the same.
+    let ordered = unique;
+    if (unique.length > 0 && gate.book.photoGrouping !== 'custom') {
+      const previousIds = previous.map((p) => p.storyId);
+      const decision = decideChapterOrder({
+        previousIds,
+        requested: unique,
+        keys: await storyDateKeys(tx, [...new Set([...previousIds, ...unique])]),
+      });
+      ordered = decision.ordered;
+      switchedToCustom = decision.switchedToCustom;
+    }
+
     await tx.delete(bookStories).where(eq(bookStories.bookId, input.bookId));
-    const rows = unique.map((storyId, position) => ({
+    const rows = ordered.map((storyId, position) => ({
       bookId: input.bookId,
       storyId,
       position,
@@ -1999,6 +2116,7 @@ export async function setBookStories(input: {
     // Cover may have belonged to a story that just left the book.
     const cover = gate.book.coverAssetId;
     const set: Partial<typeof books.$inferInsert> = { ...invalidatePreview() };
+    if (switchedToCustom) set.photoGrouping = 'custom';
     if (cover) {
       const still = await tx
         .select({ id: assets.id })
@@ -2010,7 +2128,7 @@ export async function setBookStories(input: {
     await tx.update(books).set(set).where(eq(books.id, input.bookId));
   });
   await enqueueMirrorAnalysis(freshMirrors);
-  return { ok: true };
+  return { ok: true, value: { switchedToCustom } };
 }
 
 

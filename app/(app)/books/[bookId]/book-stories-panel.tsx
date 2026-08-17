@@ -70,6 +70,10 @@ export function BookStoriesPanel({
         notifications.show({ color: 'red', message: result.error });
         return;
       }
+      // The order lives here, the setting it changed lives on the next step — say so.
+      if (result.switchedToCustom) {
+        notifications.show({ color: 'blue', message: ts.switchedToCustom });
+      }
       router.refresh();
     });
   }

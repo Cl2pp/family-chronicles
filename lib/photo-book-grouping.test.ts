@@ -3,6 +3,7 @@ import { computeCandidateSections, type AutoLayoutPhoto } from '@/lib/photo-book
 import {
   DEFAULT_PHOTO_BOOK_GROUPING,
   groupingInstruction,
+  photoSectioning,
   parsePhotoGrouping,
   PHOTO_BOOK_GROUPINGS,
 } from '@/lib/photo-book-grouping';
@@ -57,6 +58,16 @@ describe('groupingInstruction', () => {
     expect(new Set(texts).size).toBe(texts.length);
     expect(groupingInstruction('topic')).toMatch(/TOPIC/);
     expect(groupingInstruction('location')).toMatch(/PLACE/);
+    expect(groupingInstruction('custom')).toMatch(/OWN ORDER/);
+  });
+});
+
+describe('photoSectioning', () => {
+  it('sections custom-ordered books like chronological ones and leaves the rest alone', () => {
+    expect(photoSectioning('custom')).toBe('chronological');
+    expect(photoSectioning('chronological')).toBe('chronological');
+    expect(photoSectioning('topic')).toBe('topic');
+    expect(photoSectioning('location')).toBe('location');
   });
 });
 

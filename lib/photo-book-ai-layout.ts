@@ -15,6 +15,7 @@ import { computeCandidateSections, type AutoLayoutPhoto } from '@/lib/photo-book
 import {
   groupingInstruction,
   parsePhotoGrouping,
+  photoSectioning,
   type PhotoBookGrouping,
 } from '@/lib/photo-book-grouping';
 import {
@@ -247,6 +248,7 @@ const CLUSTER_BASIS: Record<PhotoBookGrouping, string> = {
   chronological: 'time and place',
   topic: 'shared subject matter',
   location: 'GPS proximity',
+  custom: 'time and place',
 };
 
 function systemPrompt(languageName: string, grouping: PhotoBookGrouping): string {
@@ -643,7 +645,11 @@ export async function proposePhotoBookPlan(
     }
 
     const { languageName, name: chronicleName } = await chronicleContext(loaded.row.chronicleId);
-    const grouping = parsePhotoGrouping(loaded.row.photoGrouping);
+    // `custom` only speaks about chapter order; a custom book whose last chapter was
+    // removed (legal while photos remain) is instructed as the plain chronological book it
+    // now is, rather than being told to honour a chapter list that isn't there.
+    const stored = parsePhotoGrouping(loaded.row.photoGrouping);
+    const grouping = loaded.chapters.length > 0 ? stored : photoSectioning(stored);
     const messages = await buildMessages(loaded, available, languageName, grouping);
 
     await stage('drafting');

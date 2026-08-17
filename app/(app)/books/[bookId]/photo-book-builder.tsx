@@ -89,7 +89,9 @@ export interface PhotoBookInfo {
    *  checklist. Null when nothing is running. */
   designStage: PhotoBookDesignStage | null;
   /** How the user asked the book to be organised (`books.photo_grouping`) — chronological,
-   *  by topic, or by place. Feeds both layout producers; see `lib/photo-book-grouping.ts`. */
+   *  by topic, by place, or the reader's own chapter order (`custom`, which
+   *  `setBookStories` selects by itself once chapters are moved out of date order). Feeds
+   *  both layout producers; see `lib/photo-book-grouping.ts`. */
   photoGrouping: PhotoBookGrouping;
   /** ISO timestamp of the last time a design job completed for this book (success or
    *  auto-fallback), or null if it never has — `books.generated_at`. This is the Step 2

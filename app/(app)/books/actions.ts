@@ -240,11 +240,11 @@ export async function updateBookAction(input: {
 export async function setBookStoriesAction(input: {
   bookId: string;
   storyIds: string[];
-}): Promise<{ error?: string }> {
+}): Promise<{ error?: string; switchedToCustom?: boolean }> {
   const user = await requireUser();
   const result = await setBookStories({ ...input, userId: user.id });
   revalidatePath(`/books/${input.bookId}`);
-  return result.ok ? {} : { error: result.error };
+  return result.ok ? { switchedToCustom: result.value.switchedToCustom } : { error: result.error };
 }
 
 /** Queue the print-proof render. `ensureGelatoFile` also forces a re-render when the

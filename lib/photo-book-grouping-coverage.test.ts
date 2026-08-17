@@ -36,4 +36,9 @@ describe('groupingCoverage', () => {
   it('treats an empty book as fine rather than dividing by zero', () => {
     expect(groupingCoverage([], 'location')).toEqual({ supported: 0, total: 0, sufficient: true });
   });
+
+  it('custom needs nothing from the photos, like chronological', () => {
+    const photos: GroupingCoveragePhoto[] = Array.from({ length: 5 }, () => ({ excluded: false, hasLocation: false, hasAnalysis: false }));
+    expect(groupingCoverage(photos, 'custom')).toEqual({ supported: 5, total: 5, sufficient: true });
+  });
 });

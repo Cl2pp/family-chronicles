@@ -24,11 +24,25 @@ export const PHOTO_BOOK_GROUPINGS = [
   /** By WHERE they were taken, from EXIF GPS. Photos with no location fall into a
    *  trailing section, the same way undated photos do in chronological mode. */
   'location',
+  /** The reader's OWN order: story chapters stay exactly as arranged in the builder's
+   *  content step (`book_stories.position`), instead of by date. Uploaded photos that
+   *  belong to no chapter still follow chronologically after them — there is no manual
+   *  photo ordering. `setBookStories` switches a book here by itself the moment its
+   *  chapters are put out of date order, so the label always tells the truth; picking any
+   *  other grouping afterwards re-sorts the chapters by date (`updatePhotoBookSettings`). */
+  'custom',
 ] as const;
 
 export type PhotoBookGrouping = (typeof PHOTO_BOOK_GROUPINGS)[number];
 
 export const DEFAULT_PHOTO_BOOK_GROUPING: PhotoBookGrouping = 'chronological';
+
+/** How photos outside any chapter are sectioned under a grouping — `custom` only speaks
+ *  about chapter order, so its photos are grouped like `chronological`. Both layout
+ *  producers branch on this rather than on the raw grouping. */
+export function photoSectioning(grouping: PhotoBookGrouping): 'chronological' | 'topic' | 'location' {
+  return grouping === 'custom' ? 'chronological' : grouping;
+}
 
 /** Narrows a raw `books.photo_grouping` value (an untyped text column, null on every book
  *  created before this existed) to a known grouping, defaulting to chronological. */
@@ -79,7 +93,7 @@ export function groupingCoverage(
 ): GroupingCoverage {
   const usable = photos.filter((p) => !p.excluded);
   const total = usable.length;
-  if (grouping === 'chronological' || total === 0) {
+  if (photoSectioning(grouping) === 'chronological' || total === 0) {
     return { supported: total, total, sufficient: true };
   }
   const supported = usable.filter((p) => (grouping === 'location' ? p.hasLocation : p.hasAnalysis)).length;
@@ -98,6 +112,8 @@ export function groupingInstruction(grouping: PhotoBookGrouping): string {
       return `ORGANISE THIS BOOK BY TOPIC. The reader asked for a book of occasions and themes, not a timeline. Group photos by what they actually SHOW — a birthday, a beach day, cooking together, the dog — even when that puts photos from different months, or different years, in the same section. Use the photos' scene tags, descriptions and the images themselves to decide what belongs together, not their timestamps. Give every section a title naming its theme. Within a section, still order the photos oldest-first so a theme that recurs over the years reads as a progression. Order the sections themselves so the book opens on the strongest, most representative theme; the candidate clusters below are grouped by topic to start you off.`;
     case 'location':
       return `ORGANISE THIS BOOK BY PLACE. The reader asked for a book of places, not a timeline. Group photos by WHERE they were taken — every photo from one trip destination, one town, one house together in a single section, even when they were taken months apart. The photo list gives GPS coordinates where the camera recorded them; the candidate clusters below are already grouped by location. Photos with no coordinates are grouped separately at the end — place them by what they look like if you can recognise where they belong, otherwise keep them as a closing section. Name each section after the place if you can tell what it is from the photos (a beach, a city, "Zuhause"); never leave a section named after coordinates. Within a section, order the photos oldest-first.`;
+    case 'custom':
+      return `KEEP THE READER'S OWN ORDER. The reader arranged the story chapters of this book by hand, so the chapters listed below MUST appear in exactly the order given — that order is deliberate, even where it is not chronological, and it must never be re-sorted by date. Photos that belong to no chapter follow after the chapters, organised chronologically: sections run oldest to newest, and so do the photos inside each one; a section is one occasion — a day out, a weekend away, a party — split where there is a real gap in time or a jump in place. The candidate clusters below are already grouped this way.`;
     case 'chronological':
     default:
       return `ORGANISE THIS BOOK CHRONOLOGICALLY. This is a family memoir on a timeline: sections run oldest to newest, and so do the photos inside each one. A section is one occasion — a day out, a weekend away, a party — split where there is a real gap in time or a jump in place. The candidate clusters below are already grouped this way.`;

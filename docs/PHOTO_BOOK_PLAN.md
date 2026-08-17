@@ -385,6 +385,16 @@ Freunden*, *Zuhause & Alltag*. That same book has GPS on **zero** photos — whi
 config panel checks coverage and warns before you pick a grouping the photos can't support,
 rather than silently producing one meaningless chapter.
 
+**`custom` — the reader's own chapter order** (unified builder). Story chapters always come
+first, in `book_stories.position` order, under every grouping; the other three options
+promise that order is by date, and only affect how the uploaded photos after them are
+clustered. Moving a chapter in the content step (`setBookStories`, also the agent's
+`set_book_stories`) so the chapters no longer follow `(event_date, created_at)` therefore
+switches the book to `custom` by itself, so Step 2's choice tells the truth; picking any
+other option again re-sorts the chapters by date (`updatePhotoBookSettings`). For photos
+outside a chapter, `custom` sections like `chronological` (`photoSectioning`), and the AI
+pass is told the chapter order is deliberate. Only offered when the book has chapters.
+
 ### 6a. Design-pass hardening (post-launch)
 
 The first shipped version of the AI pass was **all-or-nothing**, and in production that
