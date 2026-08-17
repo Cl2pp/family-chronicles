@@ -3,6 +3,7 @@ import { DEFAULT_PHOTO_BOOK_GROUPING, photoSectioning, type PhotoBookGrouping } 
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
 import {
   photoOrientation,
+  type PhotoBookTemplate,
   type PhotoBookPlan,
   type PhotoFlowItem,
   type PhotoBookStyle,
@@ -106,7 +107,12 @@ export interface PhotoBookAutoLayoutInput {
    *  regeneration never silently resets a design choice — §6 phase 4's carry-over rule,
    *  mirrored from `lib/book-autolayout.ts`'s `existingTheme`/`existingCoverStyle`. */
   existingStyle?: PhotoBookStyle;
+  /** Structural recipe carried over from the stored plan. Absent means the legacy
+   * standard layout; Birthday Books always pass `birthday`. */
+  existingTemplate?: PhotoBookTemplate;
   existingHeroAssetId?: string;
+  /** User-adjustable Birthday Book cover selection, in display order. */
+  existingCoverAssetIds?: string[];
   existingCoverTitle?: string;
   existingCoverSubtitle?: string | null;
   /** BCP-47 tag for "Juni 2025"-style date-range section titles (`Intl.DateTimeFormat`).
@@ -560,6 +566,7 @@ function pairTemplate(a: AutoLayoutPhoto, b: AutoLayoutPhoto): 'two-vertical' | 
 
 function groupPage(group: AutoLayoutPhoto[]): PhotoPagePlan {
   const assetIds = group.map((g) => g.assetId);
+  if (group.length === 1) return { template: singleTemplate(group[0]), assetIds };
   if (group.length === 2) return { template: pairTemplate(group[0], group[1]), assetIds };
   if (group.length === 3) {
     if (group.every((p) => classify(p) === 'portrait')) {
@@ -584,7 +591,23 @@ function groupPage(group: AutoLayoutPhoto[]): PhotoPagePlan {
     }
     return { template: 'collage-4', assetIds };
   }
-  return { template: 'collage-5', assetIds };
+  if (group.length === 5) return { template: 'collage-5', assetIds };
+  return { template: 'collage-6', assetIds };
+}
+
+/** Birthday pages favor compact collages so a story's complete photo set follows its
+ * prose in as few well-filled pages as possible. Groups are 2-6 photos whenever the
+ * count permits; a true one-photo story still gets a framed full page. */
+function paceBirthdayPhotos(photos: AutoLayoutPhoto[]): PhotoPagePlan[] {
+  const queue = photos.slice();
+  const pages: PhotoPagePlan[] = [];
+  while (queue.length > 0) {
+    let take = Math.min(6, queue.length);
+    // Avoid leaving a single orphan for the next page: 7 becomes 3+4, 13 becomes 6+3+4.
+    if (queue.length > 6 && queue.length - take === 1) take = 3;
+    pages.push(groupPage(queue.splice(0, take)));
+  }
+  return pages;
 }
 
 /**
@@ -649,10 +672,26 @@ function textRuns(paragraphCount: number, runs: number): PhotoFlowItem[] {
  * run. A chapter with no text is just its photo pages; a chapter with no photos is one
  * unbroken run.
  */
-function paceChapter(chapter: AutoLayoutChapter, photos: AutoLayoutPhoto[]): PhotoFlowItem[] {
-  const pages: PhotoFlowItem[] = photos.length > 0 ? paceSection(photos) : [];
+function paceChapter(
+  chapter: AutoLayoutChapter,
+  photos: AutoLayoutPhoto[],
+  template: PhotoBookTemplate,
+): PhotoFlowItem[] {
+  const pages: PhotoFlowItem[] =
+    photos.length > 0
+      ? template === 'birthday'
+        ? paceBirthdayPhotos(photos)
+        : paceSection(photos)
+      : [];
   const paragraphCount = chapter.includeText ? chapter.paragraphCount : 0;
   if (paragraphCount === 0) return pages;
+
+  // Birthday Books tell each story in full before showing its photos. One flowing text
+  // item may span several physical pages; the renderer then starts the photo collage on
+  // the following page.
+  if (template === 'birthday') {
+    return [{ template: 'text', from: 0, to: paragraphCount - 1 }, ...pages];
+  }
 
   const runs = textRuns(paragraphCount, pages.length + 1);
   const out: PhotoFlowItem[] = [];
@@ -925,6 +964,7 @@ export function resolveUsableHeroId(
 export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): PhotoBookAutoLayoutResult {
   const locale = input.dateLocale ?? 'de-DE';
   const undatedTitle = input.undatedSectionTitle ?? 'Weitere Fotos';
+  const template = input.existingTemplate ?? 'standard';
 
   // A force-excluded photo is dropped before anything else runs — it must never be
   // sectioned, culled (it's not a "cull", the user already decided), placed, or picked as
@@ -961,7 +1001,11 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   // present-and-non-excluded in the current photo set, via `resolveUsableHeroId` below —
   // see that function's doc comment for the bug this guards against
   // (docs/PHOTO_BOOK_PLAN.md PR3 FIX 1b).
-  const protectedHeroId = input.coverAssetId ?? input.existingHeroAssetId ?? null;
+  const carriedCoverIds = (input.existingCoverAssetIds ?? []).filter((id, index, ids) =>
+    usablePhotos.some((photo) => photo.assetId === id) && ids.indexOf(id) === index,
+  );
+  const protectedHeroId =
+    input.coverAssetId ?? carriedCoverIds[0] ?? input.existingHeroAssetId ?? null;
 
   const culled: CulledPhoto[] = [];
   const survivorsForCover: AutoLayoutPhoto[] = [];
@@ -980,19 +1024,25 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   for (const { photos: group, chapter } of groups) {
     // A chapter with text is kept even with zero photos — its prose IS the section.
     if (group.length === 0 && !(chapter && chapter.includeText && chapter.paragraphCount > 0)) continue;
-    const dupResult = cullDuplicates(group);
-    culled.push(...dupResult.culled);
-    const blurResult = cullBlurry(dupResult.keep);
-    culled.push(...blurResult.culled);
-    // The two score-aware cullers below are no-ops whenever `analysis` is absent (see
-    // their own doc comments) — a book with no vision data yet culls identically to PR2.
-    // Both are handed `protectedHeroId` so the resolved cover hero (pinned or carried
-    // over) can never be culled out from under `plan.cover.heroAssetId`.
-    const eyesResult = cullEyesClosed(blurResult.keep, protectedHeroId);
-    culled.push(...eyesResult.culled);
-    const aestheticResult = cullLowAesthetic(eyesResult.keep, protectedHeroId);
-    culled.push(...aestheticResult.culled);
-    const keep = aestheticResult.keep;
+    // A Birthday Book is deliberately exhaustive: every non-excluded source photo is
+    // appended after its story. The ordinary template may still auto-cull weak and
+    // redundant photos; Birthday leaves that decision solely to the user's eye toggles.
+    let keep: AutoLayoutPhoto[];
+    if (template === 'birthday') {
+      keep = group.slice();
+    } else {
+      const dupResult = cullDuplicates(group);
+      culled.push(...dupResult.culled);
+      const blurResult = cullBlurry(dupResult.keep);
+      culled.push(...blurResult.culled);
+      // The two score-aware cullers below are no-ops whenever `analysis` is absent (see
+      // their own doc comments) — a book with no vision data yet culls identically to PR2.
+      const eyesResult = cullEyesClosed(blurResult.keep, protectedHeroId);
+      culled.push(...eyesResult.culled);
+      const aestheticResult = cullLowAesthetic(eyesResult.keep, protectedHeroId);
+      culled.push(...aestheticResult.culled);
+      keep = aestheticResult.keep;
+    }
     if (keep.length === 0 && !chapter) continue;
 
     survivorsForCover.push(...keep);
@@ -1001,6 +1051,19 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
 
   const bestOverall = pickBestPhoto(survivorsForCover);
   const heroAssetId = protectedHeroId ?? bestOverall?.assetId;
+  const birthdayCoverIds = (() => {
+    if (template !== 'birthday') return [];
+    if (carriedCoverIds.length > 0) return carriedCoverIds.slice(0, 6);
+    const pool = survivorsForCover.slice();
+    const picked: string[] = [];
+    while (pool.length > 0 && picked.length < 6) {
+      const best = pickBestPhoto(pool);
+      if (!best) break;
+      picked.push(best.assetId);
+      pool.splice(pool.findIndex((photo) => photo.assetId === best.assetId), 1);
+    }
+    return picked;
+  })();
 
   // The cover hero (however it was chosen — pinned, carried over, or auto-picked) is the
   // book's front-cover image and must NOT also turn up as an interior page: `paceSection`
@@ -1011,12 +1074,16 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   // which solves the same problem for story books).
   const sections: PhotoSectionPlan[] = [];
   for (const { group, keep, chapter } of groupKeeps) {
-    const interior = heroAssetId ? keep.filter((p) => p.assetId !== heroAssetId) : keep;
+    // Birthday cover photos are decorative duplicates; every source photo remains in its
+    // story collage. Standard books retain the original exclusive hero behavior.
+    const interior = template === 'birthday' || !heroAssetId
+      ? keep
+      : keep.filter((p) => p.assetId !== heroAssetId);
     if (chapter) {
       // A story chapter is always its own section, in chapter order, even if every one
       // of its photos went to the cover or got culled — the TEXT is the content that
       // matters here, and dropping the section would lose the chapter from the book.
-      const pages = paceChapter(chapter, interior);
+      const pages = paceChapter(chapter, interior, template);
       if (pages.length === 0) continue;
       sections.push({
         title: chapter.title,
@@ -1032,15 +1099,23 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
     if (interior.length === 0) continue;
     sections.push({
       title: sectionTitle(group, locale, undatedTitle, grouping),
-      pages: paceSection(interior),
+      pages: template === 'birthday' ? paceBirthdayPhotos(interior) : paceSection(interior),
     });
   }
 
   const plan: PhotoBookPlan = {
     kind: 'photo',
+    ...(input.existingTemplate ? { template } : {}),
     style: input.existingStyle ?? 'classic',
     cover: {
-      ...(heroAssetId ? { heroAssetId } : {}),
+      ...(template === 'birthday'
+        ? {
+            ...(birthdayCoverIds[0] ? { heroAssetId: birthdayCoverIds[0] } : {}),
+            ...(birthdayCoverIds.length > 0 ? { assetIds: birthdayCoverIds } : {}),
+          }
+        : heroAssetId
+          ? { heroAssetId }
+          : {}),
       title: input.existingCoverTitle ?? input.title,
       ...((input.existingCoverSubtitle ?? input.subtitle) ? { subtitle: (input.existingCoverSubtitle ?? input.subtitle) as string } : {}),
     },

@@ -23,13 +23,14 @@ import { isBookPrintFresh } from '@/lib/book-print-status';
 import { canAccessPhotoBookStep } from '@/lib/photo-book-step-gate';
 import type { PhotoBookDesignStage } from '@/lib/photo-book-design-stage';
 import { groupingCoverage, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
-import type { PhotoBookStyle } from '@/lib/photo-book-plan';
+import type { PhotoBookStyle, PhotoBookTemplate } from '@/lib/photo-book-plan';
 import type { BookCoverType, BookFormat, BookQuote } from '@/lib/gelato';
 import {
   deleteBookAction,
   regeneratePhotoBookLayoutAction,
   renderPreviewAction,
   requestPhotoBookAiDesignAction,
+  setBirthdayCoverPhotosAction,
   setPhotoBookStyleAction,
   setPhotoExcludedAction,
   updatePhotoBookSettingsAction,
@@ -72,6 +73,10 @@ export interface PhotoBookInfo {
   /** Current style suite (`lib/photo-book-plan.ts`) — resolves/builds the plan
    *  server-side if there wasn't one yet, so this always has a value. */
   style: PhotoBookStyle;
+  /** Structural recipe; unlike `style`, this controls page order and front matter. */
+  template: PhotoBookTemplate;
+  /** User-selected Birthday Book front-cover collage, in display order. */
+  coverAssetIds: string[];
   /** Trim SIZE only (`books.format`) — despite the "hardcover-" in its values, this is
    *  not a binding choice; see `bookFormat`'s comment in db/schema.ts. The config
    *  panel labels these as sizes ("21×28 (Hochformat)" / "20×20 (Quadratisch)"), never
@@ -344,6 +349,17 @@ export function PhotoBookBuilder({
     });
   }
 
+  function setCoverPhotos(assetIds: string[]) {
+    startTransition(async () => {
+      const result = await setBirthdayCoverPhotosAction({ bookId: book.id, assetIds });
+      if (result.error) {
+        notifications.show({ message: result.error, color: 'red' });
+        return;
+      }
+      router.refresh();
+    });
+  }
+
   /** The config panel's title/subtitle/size/cover-type fields — one server round trip
    *  per saved field (each input saves independently on blur/change, same pattern as the
    *  story builder's settings card, `book-builder.tsx`). */
@@ -581,6 +597,7 @@ export function PhotoBookBuilder({
             onCreateBook={createBook}
             onDesignBook={designBook}
             onSetStyle={setStyle}
+            onSetCoverPhotos={setCoverPhotos}
             onSetGrouping={setGrouping}
             onUpdateSettings={updateSettings}
             onBack={() => setStep(0)}

@@ -7,7 +7,7 @@ import { openrouter, OPENROUTER_ROUTING } from '@/lib/ai/client';
 import { encodePhotoForVision } from '@/lib/vision-image';
 import {
   loadPhotoBook,
-  textChapters,
+  planChapters,
   type LoadedPhotoBook,
   type PhotoBookPhotoRef,
 } from '@/lib/photo-book-content';
@@ -20,6 +20,7 @@ import {
 } from '@/lib/photo-book-grouping';
 import {
   checkPhotoBookPlanConsistency,
+  photoBookTemplate,
   validatePhotoBookPlan,
   PHOTO_BOOK_STYLES,
   PHOTO_PAGE_TEMPLATES,
@@ -313,6 +314,7 @@ function toAutoLayoutPhotos(
       blurScore: p.blurScore,
       analysis: p.analysis,
       userDecision: p.userDecision,
+      storyId: p.storyId,
       s3Key: p.s3Key,
       thumbS3Key: p.thumbS3Key,
     }));
@@ -418,6 +420,10 @@ export function applyPhotoPlanCarryOver(plan: PhotoBookPlan, loaded: LoadedPhoto
   const existingPlan = existing?.ok ? existing.plan : null;
 
   const style = existingPlan?.style ?? plan.style;
+  // The model may design pages and visual style, never the book's structural recipe.
+  // Missing on legacy plans means standard; Birthday jobs normally bypass AI entirely,
+  // but keeping this carry-over defensive makes direct/test calls safe too.
+  const template = existingPlan ? photoBookTemplate(existingPlan) : 'standard';
   const pinnedHero =
     loaded.row.coverAssetId && loaded.photos.some((p) => p.assetId === loaded.row.coverAssetId && !p.excluded)
       ? loaded.row.coverAssetId
@@ -432,10 +438,25 @@ export function applyPhotoPlanCarryOver(plan: PhotoBookPlan, loaded: LoadedPhoto
     ...(heroAssetId ? { heroAssetId } : {}),
     title: loaded.row.title,
   };
+  if (photoBookTemplate({ template }) === 'birthday') {
+    const storedCoverIds = (existingPlan?.cover.assetIds ?? []).filter((id) =>
+      loaded.photos.some((photo) => photo.assetId === id && !photo.excluded),
+    );
+    const proposedCoverIds = (plan.cover.assetIds ?? []).filter((id) =>
+      loaded.photos.some((photo) => photo.assetId === id && !photo.excluded),
+    );
+    const coverIds = (storedCoverIds.length > 0 ? storedCoverIds : proposedCoverIds).slice(0, 6);
+    if (coverIds.length > 0) {
+      cover.assetIds = coverIds;
+      cover.heroAssetId = coverIds[0];
+    }
+  } else {
+    delete cover.assetIds;
+  }
   if (loaded.row.subtitle) cover.subtitle = loaded.row.subtitle;
   else delete cover.subtitle;
 
-  return { ...plan, style, cover };
+  return { ...plan, template, style, cover };
 }
 
 /**
@@ -461,11 +482,12 @@ function acceptPlan(
   // below overrides it with the stored plan's style regardless (the user's own choice wins).
   const stored = loaded.row.layoutPlan ? validatePhotoBookPlan(loaded.row.layoutPlan) : null;
 
-  const stories = textChapters(loaded);
+  const stories = planChapters(loaded);
   const coerced = coercePhotoBookPlan(raw, {
     photos: available,
     fallbackTitle: loaded.row.title,
     fallbackStyle: stored?.ok ? stored.plan.style : 'classic',
+    fallbackTemplate: stored?.ok ? photoBookTemplate(stored.plan) : 'standard',
     stories,
   });
   if (!coerced) {
@@ -475,7 +497,10 @@ function acceptPlan(
 
   const repaired = repairPhotoBookPlan(coerced.plan, {
     photos: available,
-    mustInclude: available.filter((p) => p.userDecision === 'include').map((p) => p.assetId),
+    mustInclude:
+      photoBookTemplate(coerced.plan) === 'birthday'
+        ? available.map((p) => p.assetId)
+        : available.filter((p) => p.userDecision === 'include').map((p) => p.assetId),
     stories,
   });
   const fixes = [...coerced.changes, ...repaired.changes];
@@ -499,6 +524,7 @@ function acceptPlan(
     availableAssetIds: loaded.photos.filter((p) => !p.excluded).map((p) => p.assetId),
     allAssetIds: loaded.photos.map((p) => p.assetId),
     stories,
+    photoStoryIds: loaded.photos.map((photo) => ({ assetId: photo.assetId, storyId: photo.storyId })),
   };
   const validated = validatePhotoBookPlan(plan);
   if (!validated.ok) {

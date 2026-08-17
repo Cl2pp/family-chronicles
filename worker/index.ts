@@ -20,7 +20,7 @@ import {
 import { markRenderFailed, renderBook } from '@/lib/book-render';
 import { submitBookOrder } from '@/lib/book-orders';
 import { proposePhotoBookPlan } from '@/lib/photo-book-ai-layout';
-import { validatePhotoBookPlan } from '@/lib/photo-book-plan';
+import { photoBookTemplate, validatePhotoBookPlan } from '@/lib/photo-book-plan';
 import type { PhotoBookDesignStage } from '@/lib/photo-book-design-stage';
 import { buildAndPersistPhotoAutoPlan, loadPhotoBook } from '@/lib/photo-book-content';
 import { styleStory } from '@/lib/ai/openrouter';
@@ -149,6 +149,28 @@ async function handleDesignPhotoBook(data: DesignPhotoBookJob) {
   };
 
   try {
+    // Birthday Book is a deliberately fixed structural recipe, not an AI composition:
+    // story text first, every photo afterwards, dense collages, no automatic culling.
+    // Running the general design model here could undo those guarantees, so the normal
+    // "Create book" job resolves it through the deterministic producer directly.
+    const [storedRow] = await db
+      .select({ layoutPlan: books.layoutPlan })
+      .from(books)
+      .where(eq(books.id, bookId))
+      .limit(1);
+    const storedPlan = validatePhotoBookPlan(storedRow?.layoutPlan);
+    if (storedPlan.ok && photoBookTemplate(storedPlan.plan) === 'birthday') {
+      await onStage('finalizing');
+      const loaded = await loadPhotoBook(bookId);
+      await buildAndPersistPhotoAutoPlan(bookId, loaded);
+      await db
+        .update(books)
+        .set({ designRequestedAt: null, designStage: null, generatedAt: new Date() })
+        .where(eq(books.id, bookId));
+      console.log(`[worker] generated Birthday Book ${bookId} from its fixed template`);
+      return;
+    }
+
     const plan = await proposePhotoBookPlan(bookId, { onStage });
     if (plan) {
       await db

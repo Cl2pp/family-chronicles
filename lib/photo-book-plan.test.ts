@@ -100,6 +100,69 @@ describe('checkPhotoBookPlanConsistency', () => {
     expect(checkPhotoBookPlanConsistency(basePlan(), content)).toEqual([]);
   });
 
+  it('lets Birthday cover collage photos repeat inside their stories', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { heroAssetId: 'a1', assetIds: ['a1', 'a2', 'a3'], title: 'Birthday Book' },
+      sections: [
+        {
+          title: 'Der Geburtstag',
+          pages: [
+            { template: 'three-mixed', assetIds: ['a1', 'a2', 'a3'] },
+            { template: 'full-framed', assetIds: ['a4'] },
+          ],
+        },
+      ],
+    });
+    expect(checkPhotoBookPlanConsistency(plan, contentFor(['a1', 'a2', 'a3', 'a4']))).toEqual([]);
+  });
+
+  it('requires a populated Birthday collage when interior photos exist', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { title: 'Birthday Book' },
+      sections: [{ title: 'Story', pages: [{ template: 'full-framed', assetIds: ['a1'] }] }],
+    });
+    expect(checkPhotoBookPlanConsistency(plan, contentFor(['a1']))).toContain(
+      'Birthday cover has no assetIds, but the book has photo content',
+    );
+  });
+
+  it('rejects a Birthday story that places prose after a photo page', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { title: 'Birthday Book', heroAssetId: 'a1', assetIds: ['a1'] },
+      sections: [{
+        title: 'Story',
+        storyId: 's1',
+        pages: [
+          { template: 'full-framed', assetIds: ['a1'] },
+          { template: 'text', from: 0, to: 0 },
+        ],
+      }],
+    });
+    expect(checkPhotoBookPlanConsistency(plan, contentFor(['a1']))).toContain(
+      'Birthday story "Story" places text after its photos',
+    );
+  });
+
+  it('rejects a mirrored photo placed under a different Birthday story', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { title: 'Birthday Book', heroAssetId: 'a1', assetIds: ['a1'] },
+      sections: [{
+        title: 'Story one',
+        storyId: 's1',
+        pages: [{ template: 'full-framed', assetIds: ['a1'] }],
+      }],
+    });
+    const content = contentFor(['a1']);
+    content.photoStoryIds = [{ assetId: 'a1', storyId: 's2' }];
+    expect(checkPhotoBookPlanConsistency(plan, content)).toContain(
+      'Birthday story "Story one" contains photo a1 from story s2',
+    );
+  });
+
   it('flags a cover hero that does not exist in the book', () => {
     const content = contentFor(['a1', 'a2', 'a3', 'a4'].filter((id) => id !== 'a1'));
     const problems = checkPhotoBookPlanConsistency(basePlan(), content);

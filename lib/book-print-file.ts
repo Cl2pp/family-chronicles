@@ -1,6 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { MAX_PAGES, MIN_PAGES, type GelatoCoverArea, type GelatoCoverDimensions } from '@/lib/gelato';
 import {
+  birthdayCoverCollageHtml,
   esc,
   img,
   styleVarsCss,
@@ -8,7 +9,7 @@ import {
   type PhotoLayoutImage,
 } from '@/lib/photo-book-layout';
 import { PHOTO_STYLE_TOKENS } from '@/lib/photo-book-styles';
-import type { PhotoBookPlan } from '@/lib/photo-book-plan';
+import { photoBookTemplate, type PhotoBookPlan } from '@/lib/photo-book-plan';
 
 /**
  * The Gelato PRINT FILE — the one PDF a real print order is submitted with, as opposed to
@@ -190,8 +191,10 @@ export function renderCoverSpreadHtml(input: CoverSpreadInput): string {
   const spread = dims.spread;
   const back = dims.contentBackSize;
   const front = dims.contentFrontSize;
+  const birthday = photoBookTemplate(plan) === 'birthday';
 
-  const hero = plan.cover.heroAssetId ? input.images.get(plan.cover.heroAssetId) : undefined;
+  const hero = !birthday && plan.cover.heroAssetId ? input.images.get(plan.cover.heroAssetId) : undefined;
+  const birthdayCoverIds = plan.cover.assetIds ?? (plan.cover.heroAssetId ? [plan.cover.heroAssetId] : []);
   const backImages = (plan.cover.backAssetIds ?? []).map((id) => input.images.get(id)).filter(Boolean);
   const spine = spineTextFor({ spine: dims.spineSize, title: plan.cover.title, chronicleName: input.chronicleName });
 
@@ -273,6 +276,32 @@ ${styleVarsCss(style)}
     align-items: flex-end;
   }
   .pb-spread-hero { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .pb-spread-birthday-collage {
+    position: absolute;
+    left: ${mm(FRONT_TEXT_INSET_MM)};
+    right: ${mm(frontTextPad.right)};
+    top: ${mm(front.top + FRONT_TEXT_INSET_MM)};
+    bottom: 45mm;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    grid-auto-rows: minmax(0, 1fr);
+    gap: 4mm;
+  }
+  .pb-birthday-cover-photo {
+    grid-column: span 2;
+    min-width: 0;
+    min-height: 0;
+    padding: 2.2mm;
+    background: #fff;
+    border: 0.3mm solid rgba(30, 36, 48, 0.18);
+    box-shadow: 0 2mm 5mm rgba(20, 20, 20, 0.18);
+    overflow: hidden;
+  }
+  .pb-spread-birthday-collage[data-count="1"] .pb-birthday-cover-photo { grid-column: span 6; }
+  .pb-spread-birthday-collage[data-count="2"] .pb-birthday-cover-photo { grid-column: span 3; }
+  .pb-spread-birthday-collage[data-count="4"] .pb-birthday-cover-photo { grid-column: span 3; }
+  .pb-spread-birthday-collage[data-count="5"] .pb-birthday-cover-photo:nth-child(-n + 2) { grid-column: span 3; }
+  .pb-birthday-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .pb-spread-front-text {
     position: relative;
     width: 100%;
@@ -286,6 +315,18 @@ ${styleVarsCss(style)}
   .pb-spread-front-text h1 { font-family: var(--pb-font-heading); font-size: 26pt; margin: 0 0 3mm; font-weight: 700; }
   .pb-spread-subtitle { font-size: 12.5pt; margin: 0 0 3mm; opacity: 0.85; }
   .pb-spread-chronicle { font-size: 9.5pt; letter-spacing: 0.1em; font-variant: small-caps; margin: 0; opacity: 0.75; }
+  .pb-spread-birthday-text {
+    position: absolute;
+    left: ${mm(FRONT_TEXT_INSET_MM)};
+    right: ${mm(frontTextPad.right)};
+    bottom: ${mm(frontTextPad.bottom)};
+    width: auto;
+    padding: 5mm 8mm;
+    text-align: center;
+    color: var(--pb-cover-heading-color);
+    background: color-mix(in srgb, var(--pb-cover-bg) 92%, transparent);
+  }
+  .pb-spread-birthday-text .pb-spread-subtitle { margin-bottom: 0; color: var(--pb-cover-muted-color); }
 
   /* Spine: the cover colour with the title reading top-to-bottom (vertical-rl rotates
      Latin glyphs 90° clockwise, which is how European/US spines read on a shelf). */
@@ -315,10 +356,15 @@ ${styleVarsCss(style)}
   <div class="pb-spread-layer pb-spread-back-bleed"></div>
   <div class="pb-spread-layer pb-spread-front">
     ${hero ? img(hero, 'pb-spread-hero') : ''}
-    <div class="pb-spread-front-text">
+    ${birthday ? birthdayCoverCollageHtml(birthdayCoverIds, input.images, 'pb-spread-birthday-collage') : ''}
+    <div class="pb-spread-front-text${birthday ? ' pb-spread-birthday-text' : ''}">
       <h1>${esc(plan.cover.title)}</h1>
-      ${plan.cover.subtitle ? `<p class="pb-spread-subtitle">${esc(plan.cover.subtitle)}</p>` : ''}
-      <p class="pb-spread-chronicle">${esc(input.chronicleName)}</p>
+      ${
+        birthday
+          ? `<p class="pb-spread-subtitle">${esc(plan.cover.subtitle || input.createdLabel)}</p>`
+          : `${plan.cover.subtitle ? `<p class="pb-spread-subtitle">${esc(plan.cover.subtitle)}</p>` : ''}
+      <p class="pb-spread-chronicle">${esc(input.chronicleName)}</p>`
+      }
     </div>
   </div>
   <div class="pb-spread-layer pb-spread-spine">

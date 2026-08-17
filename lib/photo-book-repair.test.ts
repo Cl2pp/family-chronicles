@@ -350,6 +350,82 @@ describe('repairTextCoverage (unified-book plan)', () => {
     expect(repaired).toEqual(plan);
   });
 
+  it('normalizes Birthday stories to one complete text run followed by every story photo', () => {
+    const photos = [
+      { ...portrait('a'), storyId: 's1' },
+      { ...landscape('b'), storyId: 's1' },
+    ];
+    const plan: PhotoBookPlan = {
+      kind: 'photo',
+      template: 'birthday',
+      style: 'classic',
+      cover: { title: 'Birthday', heroAssetId: 'a', assetIds: ['a'] },
+      sections: [
+        {
+          title: 'Omas Sommer',
+          storyId: 's1',
+          pages: [
+            { template: 'text', from: 3, to: 5 },
+            { template: 'full-framed', assetIds: ['a'] },
+            { template: 'text', from: 0, to: 2 },
+          ],
+        },
+      ],
+    };
+    const { plan: repaired } = repairPhotoBookPlan(plan, {
+      photos,
+      mustInclude: ['a', 'b'],
+      stories,
+    });
+    expect(repaired.sections[0].pages[0]).toEqual({ template: 'text', from: 0, to: 5 });
+    expect(repaired.sections[0].pages.slice(1).every((page) => !isTextItem(page))).toBe(true);
+    expect(
+      repaired.sections[0].pages
+        .slice(1)
+        .flatMap((page) => (isTextItem(page) ? [] : page.assetIds)),
+    ).toEqual(['a', 'b']);
+    expect(checkPhotoBookPlanConsistency(repaired, {
+      availableAssetIds: ['a', 'b'],
+      allAssetIds: ['a', 'b'],
+      stories,
+    })).toEqual([]);
+  });
+
+  it('creates the missing story section before attaching a newly added Birthday photo', () => {
+    const allStories = [
+      stories[0],
+      { storyId: 's2', paragraphCount: 2, title: 'Das neue Kapitel' },
+    ];
+    const photos = [
+      { ...portrait('a'), storyId: 's1' },
+      { ...landscape('b'), storyId: 's2' },
+    ];
+    const plan: PhotoBookPlan = {
+      kind: 'photo',
+      template: 'birthday',
+      style: 'classic',
+      cover: { title: 'Birthday', heroAssetId: 'a', assetIds: ['a'] },
+      sections: [{
+        title: 'Omas Sommer',
+        storyId: 's1',
+        pages: [
+          { template: 'text', from: 0, to: 5 },
+          { template: 'full-framed', assetIds: ['a'] },
+        ],
+      }],
+    };
+    const { plan: repaired } = repairPhotoBookPlan(plan, {
+      photos,
+      mustInclude: ['a', 'b'],
+      stories: allStories,
+    });
+    const added = repaired.sections.find((section) => section.storyId === 's2');
+    expect(added?.title).toBe('Das neue Kapitel');
+    expect(added?.pages[0]).toEqual({ template: 'text', from: 0, to: 1 });
+    expect(added?.pages.slice(1).flatMap((page) => (isTextItem(page) ? [] : page.assetIds))).toEqual(['b']);
+    expect(repaired.sections[0].pages.flatMap((page) => (isTextItem(page) ? [] : page.assetIds))).toEqual(['a']);
+  });
+
   it('re-covers broken ranges over the existing runs, keeping photo-page positions', () => {
     const photos = [landscape('hero'), portrait('a')];
     const plan = planOf(

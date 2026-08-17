@@ -83,6 +83,18 @@ describe('applyPhotoLayoutOp', () => {
     }
   });
 
+  it('set_cover promotes a photo inside the Birthday cover collage', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { title: 'Birthday', heroAssetId: 'a1', assetIds: ['a1', 'a2', 'a3'] },
+    });
+    const result = apply(plan, { op: 'set_cover', heroAssetId: 'b1' });
+    expect('plan' in result).toBe(true);
+    if (!('plan' in result)) return;
+    expect(result.plan.cover.heroAssetId).toBe('b1');
+    expect(result.plan.cover.assetIds).toEqual(['b1', 'a1', 'a2', 'a3']);
+  });
+
   it('set_cover_title updates title and subtitle independently', () => {
     const r1 = apply(basePlan(), { op: 'set_cover_title', title: 'New Title' });
     expect('plan' in r1 && r1.plan.cover.title).toBe('New Title');
@@ -148,6 +160,45 @@ describe('applyPhotoLayoutOp', () => {
     expect('error' in result).toBe(true);
   });
 
+  it('keeps a moved Birthday photo after its story text and in its cover selection', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { title: 'Birthday', heroAssetId: 'a7', assetIds: ['a7'] },
+      sections: [{
+        title: 'Story one',
+        storyId: 's1',
+        pages: [
+          { template: 'text', from: 0, to: 0 },
+          { template: 'full-framed', assetIds: ['a7'] },
+        ],
+      }],
+    });
+    const result = apply(plan, {
+      op: 'move_photo',
+      assetId: 'a7',
+      toSectionIndex: 0,
+      toPageIndex: 0,
+    });
+    expect('plan' in result).toBe(true);
+    if (!('plan' in result)) return;
+    expect(result.plan.sections[0].pages[0]).toEqual({ template: 'text', from: 0, to: 0 });
+    expect(photoPage(result.plan.sections[0].pages[1]).assetIds).toEqual(['a7']);
+    expect(result.plan.cover.assetIds).toEqual(['a7']);
+  });
+
+  it('rejects moving a Birthday photo into a different story', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { title: 'Birthday', heroAssetId: 'a7', assetIds: ['a7'] },
+      sections: [
+        { title: 'Story one', storyId: 's1', pages: [{ template: 'full-framed', assetIds: ['a7'] }] },
+        { title: 'Story two', storyId: 's2', pages: [{ template: 'full-framed', assetIds: ['b1'] }] },
+      ],
+    });
+    const result = apply(plan, { op: 'move_photo', assetId: 'a7', toSectionIndex: 1 });
+    expect(result).toEqual({ error: 'Birthday Book photos must stay with the story they came from.' });
+  });
+
   it('swap_photos exchanges two photos wherever they sit, including the cover hero', () => {
     const result = apply(basePlan(), { op: 'swap_photos', assetIdA: 'a1', assetIdB: 'b3' });
     expect('plan' in result).toBe(true);
@@ -161,6 +212,19 @@ describe('applyPhotoLayoutOp', () => {
   it('swap_photos rejects swapping a photo with itself', () => {
     const result = apply(basePlan(), { op: 'swap_photos', assetIdA: 'a1', assetIdB: 'a1' });
     expect('error' in result).toBe(true);
+  });
+
+  it('rejects swapping Birthday photos between different stories', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { title: 'Birthday', heroAssetId: 'a7', assetIds: ['a7'] },
+      sections: [
+        { title: 'Story one', storyId: 's1', pages: [{ template: 'full-framed', assetIds: ['a7'] }] },
+        { title: 'Story two', storyId: 's2', pages: [{ template: 'full-framed', assetIds: ['b1'] }] },
+      ],
+    });
+    const result = apply(plan, { op: 'swap_photos', assetIdA: 'a7', assetIdB: 'b1' });
+    expect(result).toEqual({ error: 'Birthday Book photos cannot be swapped between different stories.' });
   });
 
   it('swap_photos rejects an unavailable photo on either side', () => {
@@ -254,6 +318,18 @@ describe('removePhotoFromPlan', () => {
   it('clears the cover hero when it is the removed photo', () => {
     const plan = removePhotoFromPlan(basePlan(), 'a1');
     expect(plan.cover.heroAssetId).toBeUndefined();
+  });
+
+  it('removes a Birthday cover photo and promotes the next selection', () => {
+    const plan = removePhotoFromPlan(
+      basePlan({
+        template: 'birthday',
+        cover: { title: 'Birthday', heroAssetId: 'a1', assetIds: ['a1', 'a2', 'a3'] },
+      }),
+      'a1',
+    );
+    expect(plan.cover.assetIds).toEqual(['a2', 'a3']);
+    expect(plan.cover.heroAssetId).toBe('a2');
   });
 
   it('shrinks a full page down to a valid smaller template instead of vanishing', () => {

@@ -26,6 +26,7 @@ vi.mock('@/lib/env', () => ({
 }));
 
 const { applyPhotoPlanCarryOver } = await import('./photo-book-ai-layout');
+const { planChapters } = await import('./photo-book-content');
 
 function photo(overrides: Partial<PhotoBookPhotoRef> = {}): PhotoBookPhotoRef {
   return {
@@ -121,5 +122,90 @@ describe('applyPhotoPlanCarryOver — cover title/subtitle (config wins over the
     const existingPlan: PhotoBookPlan = { kind: 'photo', style: 'heirloom', cover: { title: 'x' }, sections: [] };
     const result = applyPhotoPlanCarryOver(aiPlan({ style: 'bold' }), loaded({ layoutPlan: existingPlan }));
     expect(result.style).toBe('heirloom');
+  });
+
+  it('never lets an AI reply convert a standard book into the Birthday template', () => {
+    const result = applyPhotoPlanCarryOver(
+      aiPlan({
+        template: 'birthday',
+        cover: { title: 'x', heroAssetId: 'a', assetIds: ['a'] },
+      }),
+      loaded(),
+    );
+    expect(result.template).toBe('standard');
+    expect(result.cover.assetIds).toBeUndefined();
+  });
+
+  it('carries an existing Birthday template and its cover selection through defensively', () => {
+    const existingPlan: PhotoBookPlan = {
+      kind: 'photo',
+      template: 'birthday',
+      style: 'classic',
+      cover: { title: 'Birthday', heroAssetId: 'a', assetIds: ['a', 'b'] },
+      sections: [],
+    };
+    const photos = [photo({ assetId: 'a' }), photo({ assetId: 'b' })];
+    const result = applyPhotoPlanCarryOver(aiPlan(), loaded({ layoutPlan: existingPlan }, photos));
+    expect(result.template).toBe('birthday');
+    expect(result.cover.assetIds).toEqual(['a', 'b']);
+  });
+});
+
+describe('planChapters — only content-bearing chapters constrain a plan', () => {
+  it('keeps photo-only/text chapters but drops an attached chapter with no printable content', () => {
+    const book = loaded({}, [
+      photo({ assetId: 'p1', storyId: 'photo-story' }),
+      photo({ assetId: 'pending', storyId: 'pending-story', width: null, height: null }),
+    ]);
+    book.chapters = [
+      {
+        storyId: 'empty-story',
+        title: 'Empty',
+        eventLabel: null,
+        eventDate: null,
+        body: '',
+        paragraphs: [],
+        includeText: false,
+        includePhotos: true,
+        position: 0,
+      },
+      {
+        storyId: 'photo-story',
+        title: 'Photos',
+        eventLabel: null,
+        eventDate: null,
+        body: '',
+        paragraphs: [],
+        includeText: false,
+        includePhotos: true,
+        position: 1,
+      },
+      {
+        storyId: 'pending-story',
+        title: 'Pending photo',
+        eventLabel: null,
+        eventDate: null,
+        body: '',
+        paragraphs: [],
+        includeText: false,
+        includePhotos: true,
+        position: 2,
+      },
+      {
+        storyId: 'text-story',
+        title: 'Text',
+        eventLabel: null,
+        eventDate: null,
+        body: 'One paragraph',
+        paragraphs: ['One paragraph'],
+        includeText: true,
+        includePhotos: true,
+        position: 3,
+      },
+    ];
+    expect(planChapters(book)).toEqual([
+      { storyId: 'photo-story', paragraphCount: 0, title: 'Photos' },
+      { storyId: 'text-story', paragraphCount: 1, title: 'Text' },
+    ]);
   });
 });

@@ -10,14 +10,17 @@ import {
   Drawer,
   Flex,
   Group,
+  Image,
   Loader,
   Modal,
   Select,
+  SimpleGrid,
   Stack,
   Text,
   TextInput,
   Title,
   Tooltip,
+  UnstyledButton,
   useMantineTheme,
 } from '@mantine/core';
 import { useMediaQuery, useLocalStorage } from '@mantine/hooks';
@@ -26,6 +29,7 @@ import {
   IconArrowRight,
   IconCircle,
   IconCircleCheck,
+  IconCheck,
   IconExternalLink,
   IconInfoCircle,
   IconLayoutSidebarLeftCollapse,
@@ -89,6 +93,7 @@ function PhotoBookConfigPanel({
   locked,
   pending,
   onSetStyle,
+  onSetCoverPhotos,
   onSetGrouping,
   onUpdateSettings,
 }: {
@@ -97,6 +102,7 @@ function PhotoBookConfigPanel({
   locked: boolean;
   pending: boolean;
   onSetStyle: (style: PhotoBookStyle) => void;
+  onSetCoverPhotos: (assetIds: string[]) => void;
   onSetGrouping: (grouping: PhotoBookGrouping) => void;
   onUpdateSettings: (patch: SettingsPatch) => void;
 }) {
@@ -169,6 +175,73 @@ function PhotoBookConfigPanel({
             dedication !== (book.dedication ?? '') && onUpdateSettings({ dedication: dedication || null })
           }
         />
+      )}
+      {book.template === 'birthday' && photos.some((photo) => !photo.excluded) && (
+        <Box>
+          <Text fz={13} fw={500} mb={2}>
+            {tc.coverPhotos}
+          </Text>
+          <Text fz={12} c="dimmed" mb={6}>
+            {tc.coverPhotosHint}
+          </Text>
+          <Text fz={11} c="dimmed" mb={8}>
+            {tc.coverPhotosSelected(book.coverAssetIds.length)}
+          </Text>
+          <SimpleGrid cols={4} spacing={6} mah={260} style={{ overflowY: 'auto' }}>
+            {photos
+              .filter((photo) => !photo.excluded)
+              .map((photo) => {
+                const selected = book.coverAssetIds.includes(photo.assetId);
+                const selectionFull = !selected && book.coverAssetIds.length >= 6;
+                return (
+                  <UnstyledButton
+                    key={photo.assetId}
+                    type="button"
+                    aria-label={tc.coverPhotos}
+                    aria-pressed={selected}
+                    disabled={disabled || selectionFull}
+                    onClick={() => {
+                      const next = selected
+                        ? book.coverAssetIds.filter((id) => id !== photo.assetId)
+                        : [...book.coverAssetIds, photo.assetId];
+                      // A populated Birthday Book always keeps at least one cover photo.
+                      if (next.length > 0) onSetCoverPhotos(next);
+                    }}
+                    style={{
+                      position: 'relative',
+                      aspectRatio: '1 / 1',
+                      overflow: 'hidden',
+                      borderRadius: 6,
+                      border: selected
+                        ? '2px solid var(--mantine-color-brand-6)'
+                        : '1px solid var(--mantine-color-slate-3)',
+                      opacity: selectionFull ? 0.45 : 1,
+                    }}
+                  >
+                    <Image src={photo.url} alt="" w="100%" h="100%" fit="cover" />
+                    {selected && (
+                      <Box
+                        style={{
+                          position: 'absolute',
+                          top: 4,
+                          right: 4,
+                          borderRadius: '50%',
+                          width: 20,
+                          height: 20,
+                          display: 'grid',
+                          placeItems: 'center',
+                          color: '#fff',
+                          background: 'var(--mantine-color-brand-6)',
+                        }}
+                      >
+                        <IconCheck size={13} />
+                      </Box>
+                    )}
+                  </UnstyledButton>
+                );
+              })}
+          </SimpleGrid>
+        </Box>
       )}
       {/* How the book is organised. This is the most consequential choice on the panel —
           the same photos become a timeline, a book of occasions, or a book of places — so
@@ -349,6 +422,7 @@ export function PhotoBookCreateStep({
   onCreateBook,
   onDesignBook,
   onSetStyle,
+  onSetCoverPhotos,
   onSetGrouping,
   onUpdateSettings,
   onBack,
@@ -371,6 +445,7 @@ export function PhotoBookCreateStep({
   onCreateBook: () => void;
   onDesignBook: () => void;
   onSetStyle: (style: PhotoBookStyle) => void;
+  onSetCoverPhotos: (assetIds: string[]) => void;
   onSetGrouping: (grouping: PhotoBookGrouping) => void;
   onUpdateSettings: (patch: SettingsPatch) => void;
   onBack: () => void;
@@ -474,6 +549,7 @@ export function PhotoBookCreateStep({
                 locked={locked}
                 pending={pending}
                 onSetStyle={onSetStyle}
+                onSetCoverPhotos={onSetCoverPhotos}
                 onSetGrouping={onSetGrouping}
                 onUpdateSettings={onUpdateSettings}
               />
@@ -650,6 +726,7 @@ export function PhotoBookCreateStep({
           locked={locked}
           pending={pending}
           onSetStyle={onSetStyle}
+          onSetCoverPhotos={onSetCoverPhotos}
           onSetGrouping={onSetGrouping}
           onUpdateSettings={onUpdateSettings}
         />

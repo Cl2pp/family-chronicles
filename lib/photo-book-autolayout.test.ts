@@ -441,6 +441,54 @@ describe('buildPhotoBookAutoLayout — cover selection exclusivity (regression)'
   });
 });
 
+describe('buildPhotoBookAutoLayout — Birthday Book template', () => {
+  it('prints the complete story first, then collages every photo, while reusing cover photos', () => {
+    const photos = Array.from({ length: 7 }, (_, i) =>
+      photo({
+        assetId: `birthday-${i}`,
+        storyId: 'story-1',
+        position: i,
+        width: i % 2 ? 1200 : 1800,
+        height: i % 2 ? 1800 : 1200,
+        phash: i < 2 ? 'aaaaaaaaaaaaaaaa' : null,
+        blurScore: i === 1 ? 1 : 100,
+      }),
+    );
+    const { plan, culled } = buildPhotoBookAutoLayout({
+      title: 'Birthday Book',
+      coverAssetId: null,
+      existingTemplate: 'birthday',
+      photos,
+      chapters: [
+        {
+          storyId: 'story-1',
+          title: 'Omas Geburtstag',
+          eventLabel: '12. Mai 2025',
+          paragraphCount: 5,
+          includeText: true,
+        },
+      ],
+    });
+
+    expect(plan.template).toBe('birthday');
+    expect(culled).toEqual([]);
+    expect(plan.cover.assetIds).toHaveLength(6);
+    const section = plan.sections[0];
+    expect(section.pages[0]).toEqual({ template: 'text', from: 0, to: 4 });
+    expect(section.pages.slice(1).every((item) => !isTextItem(item))).toBe(true);
+    const interior = section.pages.flatMap((item) => (isTextItem(item) ? [] : item.assetIds));
+    expect(interior.sort()).toEqual(photos.map((p) => p.assetId).sort());
+    expect(interior).toContain(plan.cover.assetIds![0]);
+    expect(
+      checkPhotoBookPlanConsistency(plan, {
+        availableAssetIds: photos.map((p) => p.assetId),
+        allAssetIds: photos.map((p) => p.assetId),
+        stories: [{ storyId: 'story-1', paragraphCount: 5 }],
+      }),
+    ).toEqual([]);
+  });
+});
+
 describe('buildPhotoBookAutoLayout — plan consistency (regression)', () => {
   // The regression class that let the exclusivity bug through PR2 review: every plan the
   // producer emits, for a realistic spread of book sizes, must pass

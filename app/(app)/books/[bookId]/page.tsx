@@ -111,6 +111,8 @@ export default async function BookBuilderPage({
             status: book.status,
             errorMessage: book.errorMessage,
             style: styleResult.ok ? styleResult.value.style : 'classic',
+            template: styleResult.ok ? styleResult.value.template : 'standard',
+            coverAssetIds: styleResult.ok ? styleResult.value.coverAssetIds : [],
             format: book.format,
             coverType: book.coverType,
             previewVersion: book.updatedAt.getTime(),

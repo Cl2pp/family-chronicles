@@ -1,5 +1,6 @@
 import {
   isTextItem,
+  photoBookTemplate,
   PHOTO_PAGE_TEMPLATE_SLOTS,
   type PhotoBookPlan,
   type PhotoBookStyle,
@@ -172,6 +173,10 @@ function shrinkPage(page: PhotoPagePlan, assetId: string): PhotoPagePlan {
 export function removePhotoFromPlan(plan: PhotoBookPlan, assetId: string): PhotoBookPlan {
   const cover: PhotoCoverPlan = { ...plan.cover };
   if (cover.heroAssetId === assetId) cover.heroAssetId = undefined;
+  if (cover.assetIds?.includes(assetId)) {
+    cover.assetIds = cover.assetIds.filter((id) => id !== assetId);
+    cover.heroAssetId = cover.assetIds[0];
+  }
   if (cover.backAssetIds?.includes(assetId)) {
     cover.backAssetIds = cover.backAssetIds.filter((id) => id !== assetId);
   }
@@ -199,6 +204,18 @@ function findPlacedCaption(plan: PhotoBookPlan, assetId: string): string | null 
   return undefined;
 }
 
+/** The story section currently holding a photo (`null` = an unowned photo section,
+ * `undefined` = not on an interior page). Birthday edits use this to prevent chat ops
+ * from detaching a mirrored photo from the story it documents. */
+function placedPhotoStoryId(plan: PhotoBookPlan, assetId: string): string | null | undefined {
+  for (const section of plan.sections) {
+    for (const page of section.pages) {
+      if (!isTextItem(page) && page.assetIds.includes(assetId)) return section.storyId ?? null;
+    }
+  }
+  return undefined;
+}
+
 /** Swaps every occurrence of `a`/`b` in the plan (cover hero, cover back slots, and every
  *  page's `assetIds`) — pure id substitution, so unlike `move_photo` it never needs to
  *  re-template a page (the photo COUNT per page never changes).
@@ -213,6 +230,7 @@ function swapIdEverywhere(plan: PhotoBookPlan, a: string, b: string): PhotoBookP
   const cover: PhotoCoverPlan = {
     ...plan.cover,
     heroAssetId: plan.cover.heroAssetId ? swap(plan.cover.heroAssetId) : plan.cover.heroAssetId,
+    assetIds: plan.cover.assetIds?.map(swap),
     backAssetIds: plan.cover.backAssetIds?.map(swap),
   };
 
@@ -266,7 +284,21 @@ export function applyPhotoLayoutOp(
         return { error: 'That photo is not available in this book (missing or excluded).' };
       }
       return {
-        plan: { ...plan, cover: { ...plan.cover, heroAssetId: op.heroAssetId } },
+        plan: {
+          ...plan,
+          cover: {
+            ...plan.cover,
+            heroAssetId: op.heroAssetId,
+            ...(plan.template === 'birthday'
+              ? {
+                  assetIds: [
+                    op.heroAssetId,
+                    ...(plan.cover.assetIds ?? []).filter((id) => id !== op.heroAssetId),
+                  ].slice(0, 6),
+                }
+              : {}),
+          },
+        },
         coverAssetId: op.heroAssetId,
       };
     }
@@ -309,6 +341,9 @@ export function applyPhotoLayoutOp(
       if (isTextItem(page)) {
         return { error: 'That entry is flowing story text, not a photo page — it has no template to change.' };
       }
+      if (photoBookTemplate(plan) === 'birthday' && section.storyId && op.template === 'divider') {
+        return { error: 'Birthday story photos must use a photo layout, not a divider.' };
+      }
       if (!templateFits(op.template, page.assetIds.length)) {
         const slots = PHOTO_PAGE_TEMPLATE_SLOTS[op.template];
         const expected = slots.min === slots.max ? `${slots.min}` : `${slots.min}-${slots.max}`;
@@ -329,21 +364,36 @@ export function applyPhotoLayoutOp(
       }
       const target = plan.sections[op.toSectionIndex];
       if (!target) return { error: `No section at index ${op.toSectionIndex}.` };
+      const birthday = photoBookTemplate(plan) === 'birthday';
+      const sourceStoryId = placedPhotoStoryId(plan, op.assetId);
+      const targetStoryId = target.storyId ?? null;
+      if (birthday && sourceStoryId !== undefined && sourceStoryId !== targetStoryId) {
+        return {
+          error: 'Birthday Book photos must stay with the story they came from.',
+        };
+      }
       // Always lands on its own new full-framed page, rather than trying to slot into an
       // existing multi-photo page — growing that page's template (e.g. two-horizontal ->
       // three-mixed) would change what OTHER photos on it look like, which is more
       // surprising than "the moved photo gets its own page". A follow-up
       // set_page_template (once the destination page holds the photos the user wants
       // together) covers the "combine into one page" case explicitly.
-      const working = removePhotoFromPlan(plan, op.assetId);
+      const removed = removePhotoFromPlan(plan, op.assetId);
+      // Birthday cover references are decorative duplicates, not placements. Moving a
+      // story photo must not silently remove it from the user-selected cover collage.
+      const working = birthday ? { ...removed, cover: plan.cover } : removed;
       const sections = working.sections.slice();
       const destination = sections[op.toSectionIndex];
       const pages = destination.pages.slice();
       const newPage: PhotoPagePlan = { template: 'full-framed', assetIds: [op.assetId] };
-      const insertAt =
+      const requestedIndex =
         op.toPageIndex != null && op.toPageIndex >= 0 && op.toPageIndex <= pages.length
           ? op.toPageIndex
           : pages.length;
+      const afterStoryText = birthday && destination.storyId
+        ? pages.reduce((minimum, page, index) => (isTextItem(page) ? index + 1 : minimum), 0)
+        : 0;
+      const insertAt = Math.max(requestedIndex, afterStoryText);
       pages.splice(insertAt, 0, newPage);
       sections[op.toSectionIndex] = { ...destination, pages };
       return { plan: { ...working, sections } };
@@ -353,6 +403,13 @@ export function applyPhotoLayoutOp(
       if (op.assetIdA === op.assetIdB) return { error: 'Both photos are the same.' };
       if (!ctx.availableAssetIds.has(op.assetIdA) || !ctx.availableAssetIds.has(op.assetIdB)) {
         return { error: 'Both photos must be available in this book.' };
+      }
+      if (photoBookTemplate(plan) === 'birthday') {
+        const storyA = placedPhotoStoryId(plan, op.assetIdA);
+        const storyB = placedPhotoStoryId(plan, op.assetIdB);
+        if (storyA !== undefined && storyB !== undefined && storyA !== storyB) {
+          return { error: 'Birthday Book photos cannot be swapped between different stories.' };
+        }
       }
       return { plan: swapIdEverywhere(plan, op.assetIdA, op.assetIdB) };
     }
