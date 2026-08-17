@@ -199,8 +199,7 @@ describe('renderPhotoBookHtml', () => {
     // check lives in `photo-book-text-flow.integration.test.ts`, but it can only assert
     // while pagination is still in flight — this is the guard that survives whatever the
     // timing does, and it is the reason deleting the rule can't pass unnoticed.
-    expect(screenHtml).toContain('html:not([data-pagedjs-visible]) .pagedjs_pages');
-    expect(screenHtml).toContain('visibility: hidden');
+    expect(screenHtml).toContain('html:not([data-pagedjs-visible]) .pagedjs_pages { visibility: hidden; }');
     // Both rescue paths that release it — a pagination that fails, and one that stops.
     // They un-hide ONLY: neither may reach `fitPages`, since scaling a pagination that is
     // still running is the bug this all exists to prevent.

@@ -114,18 +114,20 @@ async function markersPerPdfPage(pdfBytes: Uint8Array): Promise<number[][]> {
   return perPage;
 }
 
+type OpenScreenPageOptions = {
+  /** Which signal to wait for. `data-pagedjs-ready` means Paged.js finished and is what
+   *  almost every test wants; `data-pagedjs-visible` only means the stack is safe to show,
+   *  and is all a failed pagination ever sets. */
+  awaitAttribute?: 'data-pagedjs-ready' | 'data-pagedjs-visible';
+  timeoutMs?: number;
+};
+
 async function openScreenPage(
   browser: Browser,
   html: string,
   polyfill: Buffer,
   viewport: { width: number; height: number },
-  // Which signal to wait for. `data-pagedjs-ready` means Paged.js finished and is what
-  // almost every test wants; `data-pagedjs-visible` only means the stack is safe to show,
-  // and is all a failed pagination ever sets.
-  { awaitAttribute = 'data-pagedjs-ready', timeoutMs = 30_000 } = {} as {
-    awaitAttribute?: 'data-pagedjs-ready' | 'data-pagedjs-visible';
-    timeoutMs?: number;
-  },
+  { awaitAttribute = 'data-pagedjs-ready', timeoutMs = 30_000 }: OpenScreenPageOptions = {},
 ): Promise<Page> {
   // The `screen` variant references the app's self-hosted polyfill URL, so serve both the
   // HTML and the exact response from that route through a synthetic local origin rather
@@ -156,14 +158,14 @@ async function openScreenPage(
     if (seen) return;
     const tick = () => {
       const stack = document.querySelector('.pagedjs_pages');
-      const ready = document.documentElement.getAttribute('data-pagedjs-visible') === 'true';
-      if (!ready && stack && stack.querySelectorAll('.pagedjs_page').length >= 2) {
+      const visible = document.documentElement.getAttribute('data-pagedjs-visible') === 'true';
+      if (!visible && stack && stack.querySelectorAll('.pagedjs_page').length >= 2) {
         (window as unknown as { __midRun?: unknown }).__midRun = {
           visibility: getComputedStyle(stack).visibility,
         };
         return;
       }
-      if (!ready) requestAnimationFrame(tick);
+      if (!visible) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
   });
@@ -235,10 +237,9 @@ describe('flowing story text PDF pagination', () => {
       const input = storyFixture();
       const html = renderPhotoBookHtml(input);
 
-      const browser = await puppeteer.launch({
-        args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
-      });
+      const browser = await launchBrowser();
       let pdfBytes: Uint8Array;
+      let midRunSeen = false;
       const screenRuns: {
         label: string;
         pageCount: number;
@@ -271,10 +272,13 @@ describe('flowing story text PDF pagination', () => {
               midRun: (window as unknown as { __midRun?: { visibility: string } }).__midRun,
             };
           });
-          // Undefined only if pagination outran the observer — assert when we caught it,
-          // and let `photo-book-layout.test.ts` be the deterministic guard that the rule
-          // exists at all.
-          if (midRun) expect(midRun.visibility, `${viewport.label} mid-pagination`).toBe('hidden');
+          // Undefined only if pagination outran the observer, so this is per-viewport
+          // conditional — but at least one viewport must catch it, asserted after the loop,
+          // so the check can't quietly decay into a no-op.
+          if (midRun) {
+            midRunSeen = true;
+            expect(midRun.visibility, `${viewport.label} mid-pagination`).toBe('hidden');
+          }
           const visible = await visibleMarkersPerScreenPage(measured);
           const fit = await measurePageFit(measured);
           // Gating the zoom on "Paged.js is done" must not disable the fitting itself:
@@ -301,6 +305,11 @@ describe('flowing story text PDF pagination', () => {
       } finally {
         await browser.close();
       }
+
+      expect(
+        midRunSeen,
+        'never caught the stack mid-pagination — the observer has stopped working',
+      ).toBe(true);
 
       // The invariant the bug actually broke, and the one assertion that can never drift:
       // both viewports run the same engine over the same document, so zooming to fit must
@@ -377,7 +386,15 @@ describe('a stray unhandled rejection during pagination', () => {
         await injected.setViewport(viewport);
         await injected.evaluateOnNewDocument(() => {
           const tick = () => {
-            if (document.querySelectorAll('.pagedjs_page').length >= 2) {
+            const pages = document.querySelectorAll('.pagedjs_page').length;
+            if (pages >= 2) {
+              // Recorded so the assertions can prove this landed mid-pagination. Without
+              // it, a future engine that paginates before the first tick would inject
+              // AFTER the run, and the test would pass having proved nothing.
+              (window as unknown as { __injectedAt?: unknown }).__injectedAt = {
+                pages,
+                ready: document.documentElement.getAttribute('data-pagedjs-ready'),
+              };
               void Promise.reject(new Error('stray rejection from somewhere else'));
               return;
             }
@@ -401,12 +418,20 @@ describe('a stray unhandled rejection during pagination', () => {
           () => document.documentElement.getAttribute('data-pagedjs-ready') === 'true',
           { timeout: 30_000 },
         );
-        const injectedPages = await injected.evaluate(
-          () => document.querySelectorAll('.pagedjs_page').length,
-        );
+        const { injectedPages, injectedAt } = await injected.evaluate(() => ({
+          injectedPages: document.querySelectorAll('.pagedjs_page').length,
+          injectedAt: (
+            window as unknown as { __injectedAt?: { pages: number; ready: string | null } }
+          ).__injectedAt,
+        }));
         await injected.close();
 
         expect(baselinePages).toBeGreaterThan(7);
+        expect(injectedAt, 'the rejection was never injected').toBeDefined();
+        expect(injectedAt?.ready, 'injected after pagination had already finished').toBeNull();
+        expect(injectedAt?.pages, 'injected too late to be mid-pagination').toBeLessThan(
+          baselinePages,
+        );
         expect(injectedPages).toBe(baselinePages);
       } finally {
         await browser.close();
@@ -454,9 +479,7 @@ describe('builder preview when Paged.js dies mid-run', () => {
         });
       `;
 
-      const browser = await puppeteer.launch({
-        args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
-      });
+      const browser = await launchBrowser();
       try {
         // Waits on the visibility signal, the only one a failed pagination sets, with a
         // short timeout: here the wait IS the assertion, so a broken rescue should fail in
@@ -475,11 +498,11 @@ describe('builder preview when Paged.js dies mid-run', () => {
             zoom: pages?.style.zoom ?? '',
           };
         });
-        expect(visibility).toBe('visible');
+        expect(visibility, 'a dead pagination must not leave an empty box').toBe('visible');
         // Salvaged pages are shown at native size, NOT fitted: a rejection is not proof
         // that pagination has stopped, and scaling one that is still running is the bug
         // this file exists to prevent. An unzoomed crop is the deliberate price.
-        expect(zoom).toBe('');
+        expect(zoom, 'rescue path must not scale').toBe('');
       } finally {
         await browser.close();
       }
