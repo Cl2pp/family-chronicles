@@ -232,7 +232,15 @@ async function renderPhotoBookVariant(
       renditionNeeds.get(id) ?? 'thumb',
       printTargets?.get(id) ?? { w: trim.w, h: trim.h },
     );
-    if (src) resolved.set(id, { assetId: id, src, width: photo.width, height: photo.height });
+    if (src) {
+      resolved.set(id, {
+        assetId: id,
+        src,
+        width: photo.width,
+        height: photo.height,
+        ...(photo.analysis?.focalPoint ? { focalPoint: photo.analysis.focalPoint } : {}),
+      });
+    }
   }
 
   const html = renderPhotoBookHtml({
@@ -330,7 +338,15 @@ async function buildGelatoPrintFile(
           h: dims.spread.height,
         },
       );
-      if (src) images.set(coverId, { assetId: coverId, src, width: photo.width, height: photo.height });
+      if (src) {
+        images.set(coverId, {
+          assetId: coverId,
+          src,
+          width: photo.width,
+          height: photo.height,
+          ...(photo.analysis?.focalPoint ? { focalPoint: photo.analysis.focalPoint } : {}),
+        });
+      }
     }
 
     const spreadPdf = await htmlToPdf(

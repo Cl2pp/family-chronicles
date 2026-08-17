@@ -141,7 +141,13 @@ export function photoAssetPrintTargetSizeMm(
             aspectRows.push(photoDims.slice(offset, offset + size).map((d) => d.width / d.height));
             offset += size;
           }
-          const cells = rowStackCellSizesMm(aspectRows, { w: contentW, h: contentH });
+          let captionOffset = 0;
+          const captionedRows = rows.map((size) => {
+            const hasCaption = page.captions?.slice(captionOffset, captionOffset + size).some(Boolean) ?? false;
+            captionOffset += size;
+            return hasCaption;
+          });
+          const cells = rowStackCellSizesMm(aspectRows, { w: contentW, h: contentH }, captionedRows);
           let idx = 0;
           cells.forEach((row) =>
             row.forEach((cell) => {

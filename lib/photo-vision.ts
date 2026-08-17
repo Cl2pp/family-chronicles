@@ -34,7 +34,8 @@ const SYSTEM_PROMPT = `You are a fast, no-nonsense photo scorer for "Familienwer
   "peopleCount": <integer>,       // how many people are in the photo, 0 if none
   "sceneTags": ["..."],           // 1-4 short lowercase tags, e.g. "beach", "birthday", "food", "group photo"
   "shortDescription": "...",      // one short, plain English sentence describing what's in the photo — do not guess names
-  "coverCandidate": true | false  // true only for a warm, clear, well-composed photo of people that would make a great book cover
+  "coverCandidate": true | false, // true only for a warm, clear, well-composed photo of people that would make a great book cover
+  "focalPoint": { "x": <0-1>, "y": <0-1> } // normalized centre of the most important subject/face; use {"x":0.5,"y":0.5} when there is no clear subject
 }
 
 Reply with ONLY a JSON array of these objects, one per photo shown, in any order. No markdown code fences, no explanation before or after — nothing but the JSON array.`;

@@ -180,4 +180,13 @@ describe('photoAnalysisSchema', () => {
   it('rejects a non-boolean eyesClosed', () => {
     expect(photoAnalysisSchema.safeParse({ ...SAMPLE_ANALYSIS, eyesClosed: 'no' }).success).toBe(false);
   });
+
+  it('accepts a normalized focal point and keeps older analyses without one valid', () => {
+    expect(photoAnalysisSchema.safeParse({ ...SAMPLE_ANALYSIS, focalPoint: { x: 0.2, y: 0.7 } }).success).toBe(true);
+    expect(photoAnalysisSchema.safeParse(SAMPLE_ANALYSIS).success).toBe(true);
+  });
+
+  it('rejects focal points outside the image', () => {
+    expect(photoAnalysisSchema.safeParse({ ...SAMPLE_ANALYSIS, focalPoint: { x: 1.2, y: 0.5 } }).success).toBe(false);
+  });
 });

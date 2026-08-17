@@ -7,6 +7,14 @@ import {
   type PhotoOrientation,
   type PhotoPageTemplate,
 } from '@/lib/photo-book-plan';
+import {
+  bestPhotoPageForGroup,
+  MIN_AREA_RATIO_IMPROVEMENT,
+  MIN_MULTI_PHOTO_AREA_RATIO,
+  photoBookContentBox,
+  photoPageAreaRatio,
+} from '@/lib/photo-book-fit';
+import { coverCropRetention, MIN_SAFE_COVER_RETENTION, TEMPLATE_ROW_ARRANGEMENT } from '@/lib/photo-book-layout';
 
 /**
  * Deterministic design review of a finished `PhotoBookPlan` — "does this layout actually
@@ -35,6 +43,12 @@ import {
 export type PhotoBookLintCode =
   /** A page's template needs a photo shape it didn't get (the three-column complaint). */
   | 'template-orientation'
+  /** A cover/full-page crop would discard too much of the source photo. */
+  | 'excessive-crop'
+  /** A multi-photo arrangement occupies too little of the usable page. */
+  | 'poor-page-fill'
+  /** Another legal same-count template/order fits materially better. */
+  | 'suboptimal-template'
   /** A page that renders with no photo on it — a blank page in a printed book. */
   | 'empty-page'
   /** The same page template repeated too many times back to back. */
@@ -103,23 +117,10 @@ export interface TemplateShapeRule {
 export const TEMPLATE_SHAPE_RULES: Record<PhotoPageTemplate, TemplateShapeRule | null> = {
   'full-bleed': null,
   'full-framed': null,
-  // Two photos stacked, each rendered full-width at its true shape — a portrait one
-  // towers over the page and forces the whole stack to shrink into a narrow column.
-  'two-horizontal': {
-    allowed: ['landscape', 'square'],
-    slots: 'all',
-    flagWhen: 'any',
-    why: 'both photos render full-width, stacked — a portrait one is taller than wide, so the pair has to shrink into a narrow centered column. Use "two-vertical" instead when a portrait is involved',
-  },
-  // A justified side-by-side row. Shared row height = pageWidth / sum(aspect ratios), so a
-  // pair of landscapes here renders as a short strip; they belong stacked instead. A mixed
-  // portrait+landscape pair still reads fine, hence `flagWhen: 'all'`.
-  'two-vertical': {
-    allowed: ['portrait', 'square'],
-    slots: 'all',
-    flagWhen: 'all',
-    why: 'the photos stand side by side sharing one height, so two landscapes render as a thin strip — stack them with "two-horizontal" instead',
-  },
+  // Overflowing row stacks now balance row heights independently, so portrait/landscape
+  // pairs are judged by measured area rather than brittle orientation buckets.
+  'two-horizontal': null,
+  'two-vertical': null,
   // The one this module was written for: three photos justified into a single row. Shared
   // row height = pageWidth / sum(aspects), so ONE landscape (aspect ~1.5 vs a portrait's
   // ~0.75) drags the whole row's height down until every photo is a sliver.
@@ -129,20 +130,8 @@ export const TEMPLATE_SHAPE_RULES: Record<PhotoPageTemplate, TemplateShapeRule |
     flagWhen: 'any',
     why: 'three photos share one row height, which only works when they are all portrait — a single landscape squashes the entire row into a thin strip. Use "three-mixed" (landscape first) for any trio containing a landscape',
   },
-  // One dominant photo across the top, a justified pair below it.
-  'three-mixed': {
-    allowed: ['landscape', 'square'],
-    slots: 'first',
-    flagWhen: 'any',
-    why: 'the FIRST photo spans the full width across the top, so it must be landscape (or square) — put the landscape first',
-  },
-  // Same dominant-on-top arrangement with a trio below.
-  'four-mixed': {
-    allowed: ['landscape', 'square'],
-    slots: 'first',
-    flagWhen: 'any',
-    why: 'the FIRST photo spans the full width across the top, so it must be landscape (or square) — put the landscape first',
-  },
+  'three-mixed': null,
+  'four-mixed': null,
   'collage-4': null,
   'collage-5': null,
   'collage-6': null,
@@ -197,9 +186,26 @@ function placedAssetIds(plan: PhotoBookPlan): Set<string> {
  * (cover → section 0 page 0 → …), then the book-wide coverage findings — the order the
  * review prompt reads best in.
  */
-export function lintPhotoBookPlan(plan: PhotoBookPlan, photos: LintPhoto[]): PhotoBookLintFinding[] {
+export function lintPhotoBookPlan(
+  plan: PhotoBookPlan,
+  photos: LintPhoto[],
+  options: { trim?: { w: number; h: number } } = {},
+): PhotoBookLintFinding[] {
   const byId = new Map(photos.map((p) => [p.assetId, p]));
   const findings: PhotoBookLintFinding[] = [];
+  const trim = options.trim ?? { w: 210, h: 280 };
+  const contentBox = photoBookContentBox(trim);
+
+  const cover = plan.cover.heroAssetId ? byId.get(plan.cover.heroAssetId) : null;
+  if (cover) {
+    const retention = coverCropRetention(cover.width / cover.height, trim.w / trim.h);
+    if (retention < MIN_SAFE_COVER_RETENTION) {
+      findings.push({
+        code: 'excessive-crop',
+        message: `The front-cover photo ${cover.assetId} would retain only ${Math.round(retention * 100)}% of its cropped axis in this ${trim.w}x${trim.h} page shape. Pick a more compatible hero; the renderer will otherwise use its protective blurred-contain treatment.`,
+      });
+    }
+  }
 
   plan.sections.forEach((section, sectionIndex) => {
     if (section.pages.length > 0 && section.pages.length < MIN_SECTION_PAGES) {
@@ -260,6 +266,41 @@ export function lintPhotoBookPlan(plan: PhotoBookPlan, photos: LintPhoto[]): Pho
           pageIndex,
           message: `${where} uses "${page.template}", but ${rule.why}. Wrong-shaped photo(s): ${listed}. Either move those photos to a template that fits their shape, or swap in photos that fit this one.`,
         });
+      }
+
+      if (page.template === 'full-bleed' && known[0]) {
+        const retention = coverCropRetention(known[0].width / known[0].height, contentBox.w / contentBox.h);
+        if (retention < MIN_SAFE_COVER_RETENTION) {
+          findings.push({
+            code: 'excessive-crop',
+            sectionIndex,
+            pageIndex,
+            message: `${where} uses "full-bleed" for ${known[0].assetId}, which would retain only ${Math.round(retention * 100)}% of its cropped axis. Use "full-framed" or a shape-compatible photo.`,
+          });
+        }
+      }
+
+      if (known.length >= 2 && TEMPLATE_ROW_ARRANGEMENT[page.template]) {
+        const captionFor = new Map(page.assetIds.map((id, index) => [id, page.captions?.[index] ?? null]));
+        const measured = known.map((photo) => ({ ...photo, captioned: !!captionFor.get(photo.assetId) }));
+        const current = photoPageAreaRatio(page.template, measured, contentBox);
+        const best = bestPhotoPageForGroup(measured, trim);
+        if (current < MIN_MULTI_PHOTO_AREA_RATIO) {
+          findings.push({
+            code: 'poor-page-fill',
+            sectionIndex,
+            pageIndex,
+            message: `${where} uses only ${Math.round(current * 100)}% of the usable page for photos, leaving a thin centered strip. Split the group or choose a better-fitting template.`,
+          });
+        }
+        if (best.areaRatio - current >= MIN_AREA_RATIO_IMPROVEMENT) {
+          findings.push({
+            code: 'suboptimal-template',
+            sectionIndex,
+            pageIndex,
+            message: `${where} fits materially better as "${best.template}" (${Math.round(best.areaRatio * 100)}% photo area versus ${Math.round(current * 100)}%). Use this asset order: ${best.ordered.map((p) => p.assetId).join(', ')}.`,
+          });
+        }
       }
 
       if (page.captions?.some((c) => c) && CAPTION_LESS_TEMPLATES.includes(page.template)) {
@@ -333,6 +374,9 @@ export function lintPhotoBookPlan(plan: PhotoBookPlan, photos: LintPhoto[]): Pho
 const CODE_WEIGHT: Record<PhotoBookLintCode, number> = {
   'empty-page': 12,
   'template-orientation': 10,
+  'excessive-crop': 10,
+  'poor-page-fill': 8,
+  'suboptimal-template': 6,
   'adjacent-text-blocks': 2,
   'caption-not-rendered': 4,
   'monotonous-pacing': 3,

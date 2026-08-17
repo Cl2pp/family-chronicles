@@ -6,6 +6,8 @@ import {
   img,
   styleVarsCss,
   PHOTO_BOOK_COVER_PAGE_COUNT,
+  coverCropRetention,
+  MIN_SAFE_COVER_RETENTION,
   type PhotoLayoutImage,
 } from '@/lib/photo-book-layout';
 import { PHOTO_STYLE_TOKENS } from '@/lib/photo-book-styles';
@@ -203,6 +205,9 @@ export function renderCoverSpreadHtml(input: CoverSpreadInput): string {
   // Between them sit the joints and the spine, which keep the cover background colour.
   const backBleedWidth = back.left + back.width;
   const frontBleedWidth = spread.width - front.left;
+  const heroNeedsContain =
+    hero != null &&
+    coverCropRetention(hero.width / hero.height, frontBleedWidth / spread.height) < MIN_SAFE_COVER_RETENTION;
   // The front half is ONE box (hero + title), sized to the bleed rather than to the panel,
   // so the title's dark scrim fades out past the spread's edges instead of ending in a
   // visible rectangle right where the board folds. The text is pushed back inside
@@ -276,6 +281,8 @@ ${styleVarsCss(style)}
     align-items: flex-end;
   }
   .pb-spread-hero { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .pb-spread-hero-blur { filter: blur(5mm); transform: scale(1.08); opacity: 0.72; }
+  .pb-spread-hero-contain { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   .pb-spread-birthday-collage {
     position: absolute;
     left: ${mm(FRONT_TEXT_INSET_MM)};
@@ -355,7 +362,13 @@ ${styleVarsCss(style)}
 <div class="pb-spread">
   <div class="pb-spread-layer pb-spread-back-bleed"></div>
   <div class="pb-spread-layer pb-spread-front">
-    ${hero ? img(hero, 'pb-spread-hero') : ''}
+    ${
+      hero
+        ? heroNeedsContain
+          ? `${img(hero, 'pb-spread-hero pb-spread-hero-blur')}${img(hero, 'pb-spread-hero-contain')}`
+          : img(hero, 'pb-spread-hero')
+        : ''
+    }
     ${birthday ? birthdayCoverCollageHtml(birthdayCoverIds, input.images, 'pb-spread-birthday-collage') : ''}
     <div class="pb-spread-front-text${birthday ? ' pb-spread-birthday-text' : ''}">
       <h1>${esc(plan.cover.title)}</h1>

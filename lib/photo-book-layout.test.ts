@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   PHOTO_BOOK_BLEED_MM,
+  PHOTO_CAPTION_RESERVE_MM,
   PHOTO_BOOK_CONTENT_MARGIN_MM,
   renderPhotoBookHtml,
+  rowStackGeometryMm,
   type PhotoLayoutImage,
   type PhotoLayoutInput,
 } from './photo-book-layout';
@@ -214,6 +216,42 @@ describe('renderPhotoBookHtml', () => {
     expect(html).toContain('ph-missing');
   });
 
+  it('protects an incompatible landscape cover with blurred fill plus an uncropped foreground', () => {
+    const html = renderPhotoBookHtml(baseInput());
+    expect(html).toContain('ph-cover-bg-img ph-cover-bg-blur');
+    expect(html).toContain('ph-cover-contain-img');
+  });
+
+  it('falls a landscape full-bleed page back to an intrinsic-aspect frame', () => {
+    const html = renderPhotoBookHtml(baseInput());
+    expect(html).toContain('pb-fullbleed-fallback');
+    expect(html).toMatch(/pb-framed-figure" style="width: [\d.]+mm; height: [\d.]+mm/);
+  });
+
+  it('uses the vision focal point as object-position for cover crops', () => {
+    const images = new Map(baseInput().images);
+    images.set('hero', { ...image('hero', 900, 1200), focalPoint: { x: 0.2, y: 0.7 } });
+    const html = renderPhotoBookHtml(baseInput({ images }));
+    expect(html).toContain('object-position: 20.0% 70.0%');
+  });
+
+  it('reserves caption height before sizing photos instead of cropping afterward', () => {
+    const box = { w: 180, h: 249 };
+    const geometry = rowStackGeometryMm([[2 / 3, 2 / 3]], box, [true]);
+    expect(geometry.rowHeights[0] - geometry.cells[0][0].h).toBe(PHOTO_CAPTION_RESERVE_MM);
+    expect(geometry.cells[0][0].w / geometry.cells[0][0].h).toBeCloseTo(2 / 3);
+
+    const plan = basePlan({
+      sections: [{ title: 'S', pages: [{ template: 'two-vertical', assetIds: ['a2', 'a3'], captions: ['One', null] }] }],
+    });
+    const images = new Map(baseInput().images);
+    images.set('a2', image('a2', 800, 1200));
+    images.set('a3', image('a3', 800, 1200));
+    const html = renderPhotoBookHtml(baseInput({ plan, images }));
+    expect(html.match(/class="ph-caption-slot"/g)).toHaveLength(2);
+    expect(html).toContain('.ph-jimg { width: 100%; height: 100%; object-fit: contain;');
+  });
+
   // Regression coverage: the photo book used to render bleed pages for `preview`/`print`
   // with CSS's named-page mechanism (`page: <ident>` on the element + a matching
   // `@page <ident> { margin: 0 }` rule) while `screen` used a single unnamed
@@ -346,7 +384,7 @@ describe('renderPhotoBookHtml', () => {
 
 /** The justified row stack behind every multi-photo template (see `rowStackHtml` in
  *  photo-book-layout.ts): photos render at their true aspect ratios — no cropping —
- *  in rows that share one height, scaled down (never cropped) when the stack would
+ *  in rows that share one height, balanced (never cropped) when the stack would
  *  overflow the content box. */
 describe('justified row stacks', () => {
   const contentW = TRIM.w - PHOTO_BOOK_CONTENT_MARGIN_MM.inner - PHOTO_BOOK_CONTENT_MARGIN_MM.outer;
@@ -384,7 +422,7 @@ describe('justified row stacks', () => {
     expect(row.widths.reduce((a, b) => a + b, 0) + 4).toBeCloseTo(contentW, 1);
   });
 
-  it('a three-mixed stack that would overflow the page scales down instead of cropping', () => {
+  it('a three-mixed stack that would overflow the page balances rows instead of cropping', () => {
     const html = renderPages(
       [{ template: 'three-mixed', assetIds: ['l1', 'p1', 'p2'] }],
       [image('l1', 1600, 1200), image('p1', 800, 1200), image('p2', 800, 1200)],
@@ -392,7 +430,7 @@ describe('justified row stacks', () => {
     const rows = parseRows(html);
     expect(rows).toHaveLength(2);
     const total = rows.reduce((sum, r) => sum + r.height, 0) + 4;
-    // Scaled to exactly the content box height (the unscaled stack would overflow it).
+    // Balanced to exactly the content box height (the natural stack would overflow it).
     expect(total).toBeCloseTo(contentH, 1);
     // Every cell still has its photo's exact shape.
     expect(rows[0].widths[0] / rows[0].height).toBeCloseTo(1600 / 1200, 2);

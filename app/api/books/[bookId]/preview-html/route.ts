@@ -95,7 +95,13 @@ async function bookPreview(bookId: string, book: BookDetail): Promise<NextRespon
         (level === 'display' ? photo.displayS3Key : null) ?? photo.thumbS3Key ?? photo.s3Key;
       const mime = key === photo.s3Key ? photo.mimeType : 'image/webp';
       const src = await presignGet(key, mime);
-      return { assetId: photo.assetId, src, width: photo.width, height: photo.height };
+      return {
+        assetId: photo.assetId,
+        src,
+        width: photo.width,
+        height: photo.height,
+        ...(photo.analysis?.focalPoint ? { focalPoint: photo.analysis.focalPoint } : {}),
+      };
     } catch (e) {
       console.error(`[preview-html] failed to presign photo ${photo.assetId}:`, e);
       return null;

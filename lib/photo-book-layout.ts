@@ -49,6 +49,10 @@ export interface PhotoLayoutImage {
   src: string;
   width: number;
   height: number;
+  /** Normalized subject/focal point from the vision pass. Cover-style crops keep this
+   *  point visible instead of blindly centering every photo. Older analyses omit it and
+   *  retain the browser's 50%/50% default. */
+  focalPoint?: { x: number; y: number };
 }
 
 export interface PhotoLayoutInput {
@@ -161,32 +165,49 @@ export function styleVarsCss(s: PhotoStyleTokens): string {
  *  behaviour. */
 export function img(image: PhotoLayoutImage | undefined, cls: string): string {
   if (!image) return `<div class="${cls} ph-missing"></div>`;
-  return `<img class="${cls}" src="${image.src}" alt="" style="aspect-ratio: ${image.width} / ${image.height}" />`;
+  const focal = image.focalPoint
+    ? `; object-position: ${(image.focalPoint.x * 100).toFixed(1)}% ${(image.focalPoint.y * 100).toFixed(1)}%`
+    : '';
+  return `<img class="${cls}" src="${image.src}" alt="" style="aspect-ratio: ${image.width} / ${image.height}${focal}" />`;
 }
 
-/** Renders one `page.captions[i]` entry, or nothing when it's absent/null/empty — the
- *  AI design pass (`lib/photo-book-ai-layout.ts`) is the only producer that ever fills
- *  `captions` (the deterministic auto-layouter never does), and even it leaves most
- *  photos uncaptioned, so this is the common case everywhere `withCaption`/`framedFigure`
- *  call it. */
+/** Renders one `page.captions[i]` entry, or nothing when it's absent/null/empty. */
 function captionEl(caption: string | null | undefined): string {
   if (!caption) return '';
   return `<p class="ph-caption">${esc(caption)}</p>`;
 }
 
-/** Wraps a photo's markup with an optional caption underneath it, in a flex column that
- *  lets the photo shrink to make room. Crucially, the `.ph-cell` wrapper (and the CSS
- *  that makes the photo flexible instead of a hardcoded 100% height) only appears in the
- *  output when a caption is actually present — a caption-less photo's markup is byte-
- *  for-byte what it was before captions existed, so plans without captions (i.e. every
- *  plan the auto-layouter ever produces) render exactly as before. */
-function withCaption(photoHtml: string, caption: string | null | undefined): string {
-  if (!caption) return photoHtml;
-  return `<div class="ph-cell">${photoHtml}${captionEl(caption)}</div>`;
+/** Fixed height reserved below images in a captioned row. */
+export const PHOTO_CAPTION_RESERVE_MM = 10;
+
+/** Keeps every photo in a captioned row the same height. The old implementation wrapped
+ *  only the cells that happened to have text, then let the caption steal height from an
+ *  already-sized image box; `object-fit: cover` consequently cropped those photos. A row
+ *  now reserves one fixed, two-line caption slot for every cell when any caption is present. */
+function withCaptionSlot(photoHtml: string, caption: string | null | undefined, reserve: boolean): string {
+  if (!reserve) return photoHtml;
+  return `<div class="ph-cell">${photoHtml}<div class="ph-caption-slot">${captionEl(caption)}</div></div>`;
 }
 
-function framedFigure(image: PhotoLayoutImage | undefined, caption?: string | null): string {
-  return withCaption(`<div class="ph-frame">${img(image, 'ph-frame-img')}</div>`, caption);
+/** A contain-sized frame around one photo. The frame itself follows the photo's aspect
+ *  ratio instead of occupying the entire portrait page and letterboxing the image inside
+ *  a giant page-shaped border. */
+function framedFigure(
+  image: PhotoLayoutImage | undefined,
+  caption: string | null | undefined,
+  box: ContentBox,
+  matMm: number,
+): string {
+  const aspect = image ? image.width / image.height : MISSING_ASPECT;
+  const captionMm = caption ? PHOTO_CAPTION_RESERVE_MM : 0;
+  const availableW = Math.max(1, box.w - matMm * 2);
+  const availableH = Math.max(1, box.h - matMm * 2 - captionMm);
+  const imageH = Math.min(availableH, availableW / aspect);
+  const imageW = aspect * imageH;
+  const frameW = imageW + matMm * 2;
+  const frameH = imageH + matMm * 2;
+  const frame = `<div class="ph-frame">${img(image, 'ph-frame-img')}</div>`;
+  return `<div class="pb-framed-figure" style="width: ${frameW.toFixed(2)}mm; height: ${(frameH + captionMm).toFixed(2)}mm">${withCaptionSlot(frame, caption, !!caption)}</div>`;
 }
 
 /**
@@ -273,22 +294,72 @@ export const TEMPLATE_ROW_ARRANGEMENT: Record<PhotoPageTemplate, number[] | null
 /**
  * The row-stack math, standalone: given each row's photo aspect ratios and the content
  * box, returns every cell's exact size in mm. Within a row every cell shares one height
- * and its width is `aspect × height`, so the row fills `box.w` exactly; a stack whose
- * natural height exceeds `box.h` is scaled down uniformly (photos shrink, never crop).
+ * and its width is `aspect × height`, so the row fills `box.w` exactly where its
+ * natural height fits. Overflowing stacks balance row heights without cropping.
  * Shared by the renderer (below) and `photoAssetPrintTargetSizeMm` /
  * `photoAssetRenditionNeeds` (print embedding + rendition tier) — see
  * `TEMPLATE_ROW_ARRANGEMENT`.
  */
-export function rowStackCellSizesMm(aspectRows: number[][], box: ContentBox): { w: number; h: number }[][] {
+export interface RowStackGeometry {
+  /** Exact image boxes (caption slots are not part of these heights). */
+  cells: { w: number; h: number }[][];
+  /** Total row heights, including the fixed caption slot when that row has captions. */
+  rowHeights: number[];
+}
+
+/** Balances rows that are too tall for the page without shrinking every row by the same
+ *  factor. Each row may use up to the height at which it fills the page width; constrained
+ *  rows then share the available height as evenly as their natural caps allow. A mixed
+ *  portrait/landscape stack can therefore keep the landscape full-width while the portrait
+ *  becomes the narrower row, instead of collapsing the entire arrangement into a column. */
+export function rowStackGeometryMm(
+  aspectRows: number[][],
+  box: ContentBox,
+  captionedRows: boolean[] = [],
+): RowStackGeometry {
   const naturalHeights = aspectRows.map((row) => {
     const gaps = (row.length - 1) * PHOTO_GAP_MM;
     const aspectSum = row.reduce((sum, a) => sum + a, 0);
     return (box.w - gaps) / aspectSum;
   });
   const gapsH = (aspectRows.length - 1) * PHOTO_GAP_MM;
-  const totalH = naturalHeights.reduce((a, b) => a + b, 0) + gapsH;
-  const scale = totalH > box.h ? (box.h - gapsH) / (totalH - gapsH) : 1;
-  return aspectRows.map((row, r) => row.map((a) => ({ w: a * naturalHeights[r] * scale, h: naturalHeights[r] * scale })));
+  const captionH = aspectRows.reduce(
+    (sum, _, r) => sum + (captionedRows[r] ? PHOTO_CAPTION_RESERVE_MM : 0),
+    0,
+  );
+  const availablePhotoH = Math.max(1, box.h - gapsH - captionH);
+  const photoHeights = naturalHeights.slice();
+
+  if (naturalHeights.reduce((a, b) => a + b, 0) > availablePhotoH) {
+    const remaining = new Set(naturalHeights.map((_, i) => i));
+    let heightLeft = availablePhotoH;
+    while (remaining.size > 0) {
+      const equalShare = heightLeft / remaining.size;
+      const capped = [...remaining].filter((i) => naturalHeights[i] <= equalShare);
+      if (capped.length === 0) {
+        for (const i of remaining) photoHeights[i] = equalShare;
+        break;
+      }
+      for (const i of capped) {
+        photoHeights[i] = naturalHeights[i];
+        heightLeft -= naturalHeights[i];
+        remaining.delete(i);
+      }
+    }
+  }
+
+  return {
+    cells: aspectRows.map((row, r) => row.map((a) => ({ w: a * photoHeights[r], h: photoHeights[r] }))),
+    rowHeights: photoHeights.map((h, r) => h + (captionedRows[r] ? PHOTO_CAPTION_RESERVE_MM : 0)),
+  };
+}
+
+export function rowStackCellSizesMm(
+  aspectRows: number[][],
+  box: ContentBox,
+  captionedRows: boolean[] = [],
+): { w: number; h: number }[][] {
+  return rowStackGeometryMm(aspectRows, box, captionedRows).cells;
 }
 
 /** Aspect ratio stood in for a photo the caller couldn't resolve (`ph-missing`) — the
@@ -310,25 +381,25 @@ function aspectOf(p: RowPhoto): number {
  * height with its width equal to `aspect × height`, so the row fills the content-box
  * width exactly, uncropped, whatever the orientation mix (the math: width_i = a_i · h and
  * Σ width_i = W − gaps means h is the row's single free variable). Rows are stacked and
- * vertically centered; when the stack's natural height exceeds the content box (e.g. a
- * dominant square over two portraits), every row is scaled down by the same factor and
- * stays horizontally centered — photos shrink, they never crop.
+ * vertically centered; when the stack's natural height exceeds the content box, the row
+ * heights are balanced within their natural caps — photos shrink, they never crop.
  *
  * Sized deterministically here in mm, not with CSS percentage/stretch tricks: a
  * stretched cell whose aspect ratio differs from its photo's forces `object-fit: cover`
  * to crop — exactly the "half the photo is missing" defect this renderer replaced.
  */
 function rowStackHtml(rows: RowPhoto[][], box: ContentBox): string {
-  const cellSizes = rowStackCellSizesMm(rows.map((row) => row.map(aspectOf)), box);
+  const captionedRows = rows.map((row) => row.some((p) => !!p.caption));
+  const geometry = rowStackGeometryMm(rows.map((row) => row.map(aspectOf)), box, captionedRows);
   const rowsHtml = rows
     .map((row, r) => {
       const cells = row
         .map((p, i) => {
           const photo = p.image ? img(p.image, 'ph-jimg') : `<div class="ph-jimg ph-missing"></div>`;
-          return `<div class="ph-jcell" style="width: ${cellSizes[r][i].w.toFixed(2)}mm">${withCaption(photo, p.caption)}</div>`;
+          return `<div class="ph-jcell" style="width: ${geometry.cells[r][i].w.toFixed(2)}mm">${withCaptionSlot(photo, p.caption, captionedRows[r])}</div>`;
         })
         .join('\n');
-      return `<div class="ph-jrow" style="height: ${cellSizes[r][0].h.toFixed(2)}mm">${cells}</div>`;
+      return `<div class="ph-jrow" style="height: ${geometry.rowHeights[r].toFixed(2)}mm">${cells}</div>`;
     })
     .join('\n');
   return `<div class="ph-rows">${rowsHtml}</div>`;
@@ -359,7 +430,20 @@ function rowStackPage(
       </section>`;
 }
 
-function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, box: ContentBox): string {
+/** Fraction of the source's cropped axis that remains after `object-fit: cover`. */
+export function coverCropRetention(sourceAspect: number, targetAspect: number): number {
+  return Math.min(sourceAspect / targetAspect, targetAspect / sourceAspect);
+}
+
+/** More crop than this is never treated as a harmless full-page trim. */
+export const MIN_SAFE_COVER_RETENTION = 0.82;
+
+function renderPage(
+  page: PhotoPagePlan,
+  images: Map<string, PhotoLayoutImage>,
+  box: ContentBox,
+  style: PhotoStyleTokens,
+): string {
   const get = (id: string) => images.get(id);
   switch (page.template) {
     case 'full-bleed': {
@@ -370,10 +454,21 @@ function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, 
       // A caption (when present) overlays the bottom on a scrim rather than pushing
       // content below it — same treatment the cover front uses for its title.
       const caption = page.captions?.[0];
+      const image = get(page.assetIds[0]);
+      // Stored plans made before aspect-aware fitting commonly put a 3:2 landscape into
+      // this portrait box, discarding over half its width. Keep old books safe at render
+      // time too: an incompatible image gets the same contain-sized treatment as a framed
+      // single page rather than waiting for a regeneration to repair the plan.
+      if (image && coverCropRetention(image.width / image.height, box.w / box.h) < MIN_SAFE_COVER_RETENTION) {
+        return `
+      <section class="page photo-page pb-framed pb-fullbleed-fallback">
+        <div class="pb-framed-inner">${framedFigure(image, caption, box, style.photoMatMm)}</div>
+      </section>`;
+      }
       return `
       <section class="page photo-page pb-fullbleed">
         <div class="pb-fullbleed-inner">
-          ${img(get(page.assetIds[0]), 'ph-fullbleed-img')}
+          ${img(image, 'ph-fullbleed-img')}
           ${caption ? `<div class="ph-fullbleed-caption"><p>${esc(caption)}</p></div>` : ''}
         </div>
       </section>`;
@@ -381,7 +476,7 @@ function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, 
     case 'full-framed': {
       return `
       <section class="page photo-page pb-framed">
-        <div class="pb-framed-inner">${framedFigure(get(page.assetIds[0]), page.captions?.[0])}</div>
+        <div class="pb-framed-inner">${framedFigure(get(page.assetIds[0]), page.captions?.[0], box, style.photoMatMm)}</div>
       </section>`;
     }
     // Every multi-photo template is a justified row stack (see rowStackHtml) — photos
@@ -518,6 +613,9 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
 
   // Cover front — always a bleed page (edge-to-edge hero photo).
   const coverHero = input.plan.cover.heroAssetId ? input.images.get(input.plan.cover.heroAssetId) : undefined;
+  const coverNeedsContain =
+    coverHero != null &&
+    coverCropRetention(coverHero.width / coverHero.height, pageW / pageH) < MIN_SAFE_COVER_RETENTION;
   const birthdayCoverIds = input.plan.cover.assetIds ?? (input.plan.cover.heroAssetId ? [input.plan.cover.heroAssetId] : []);
   const coverFront = birthday
     ? `
@@ -530,7 +628,13 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
     </section>`
     : `
     <section class="page pb-cover-front">
-      ${coverHero ? img(coverHero, 'ph-cover-bg-img') : ''}
+      ${
+        coverHero
+          ? coverNeedsContain
+            ? `${img(coverHero, 'ph-cover-bg-img ph-cover-bg-blur')}${img(coverHero, 'ph-cover-contain-img')}`
+            : img(coverHero, 'ph-cover-bg-img')
+          : ''
+      }
       <div class="pb-cover-text">
         <h1>${esc(input.plan.cover.title)}</h1>
         ${input.plan.cover.subtitle ? `<p class="pb-cover-subtitle">${esc(input.plan.cover.subtitle)}</p>` : ''}
@@ -588,7 +692,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
               birthday && isFirst ? { title: section.title, dateLabel: section.dateLabel } : undefined,
             );
           }
-          return renderPage(page, input.images, contentBox);
+          return renderPage(page, input.images, contentBox, style);
         })
         .join('\n');
 
@@ -781,6 +885,11 @@ ${
   }
   .pb-cover-front { background: var(--pb-cover-bg); align-items: flex-end; }
   .ph-cover-bg-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  /* Crop-incompatible covers keep the whole photo over a softly blurred edge-to-edge
+     version. This preserves bleed while ensuring a wide group shot never loses the people
+     at either side. The focal point still guides the background crop. */
+  .ph-cover-bg-blur { filter: blur(5mm); transform: scale(1.08); opacity: 0.72; }
+  .ph-cover-contain-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   .pb-cover-text {
     position: relative;
     padding: 14mm 16mm 18mm;
@@ -921,17 +1030,18 @@ ${
   }
   .ph-fullbleed-caption p { margin: 0; color: #fff; font-size: 10pt; font-style: italic; line-height: 1.4; }
 
-  /* Optional per-photo captions (AI design pass only — the auto-layouter never emits
-     them, so a caption-less plan never emits this markup at all — see withCaption()).
-     '.ph-cell' turns a photo's normal 100%-height box into a flex column so the photo
-     can shrink and leave room for the caption beneath it; '> *:first-child' reaches
-     whatever's actually in there (an img element, or full-framed's already-matted
-     '.ph-frame' div) and overrides its fixed height with 'flex: 1', at higher
-     specificity than any of '.ph-cover-img' / '.ph-row-img' / '.ph-frame''s own
-     'height: 100%' rules — those rules stay untouched for every caption-less photo,
-     which is the vast majority. */
+  /* Captioned rows reserve the same fixed slot below every image. That keeps the image
+     boxes aligned and prevents one long caption from shrinking only its own photo. */
   .ph-cell { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 0; }
   .ph-cell > *:first-child { flex: 1 1 0%; min-height: 0; height: auto; }
+  .ph-caption-slot {
+    flex: 0 0 ${PHOTO_CAPTION_RESERVE_MM}mm;
+    height: ${PHOTO_CAPTION_RESERVE_MM}mm;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow: hidden;
+  }
   .ph-caption {
     flex: 0 0 auto;
     margin: 1.5mm 0 0;
@@ -940,11 +1050,16 @@ ${
     font-style: italic;
     text-align: center;
     color: var(--pb-caption-color);
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
   }
 
   /* full-framed: one photo, matted per the style suite */
   .pb-framed { display: flex; align-items: center; justify-content: center; }
   .pb-framed-inner { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  .pb-framed-figure { flex: 0 0 auto; }
   .ph-frame {
     position: relative;
     box-sizing: border-box;
@@ -990,7 +1105,7 @@ ${
   }
   .ph-jrow { display: flex; justify-content: center; gap: ${PHOTO_GAP_MM}mm; flex: 0 0 auto; }
   .ph-jcell { height: 100%; }
-  .ph-jimg { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: var(--pb-photo-radius); }
+  .ph-jimg { width: 100%; height: 100%; object-fit: contain; display: block; border-radius: var(--pb-photo-radius); }
 
   .watermark {
     position: fixed;

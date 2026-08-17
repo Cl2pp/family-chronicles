@@ -169,14 +169,13 @@ function templateVocabularyText(): string {
  * width divided by the sum of the photos' aspect ratios. Three landscapes (≈1.5 each) come
  * out as a 1/4.5-of-the-width strip on a tall page. This paragraph is what stops that.
  */
-const SHAPE_RULES = `Photo shape rules — these are the difference between a book that looks designed and one that looks broken. Every page renders its photos UNCROPPED at their true shapes, arranged in justified rows that share one height and fill the page width; leftover space frames the arrangement symmetrically. That means a page only looks good when the shapes you combine actually fill it — check every photo's shape (landscape / portrait / square, given in the photo list below) before you put photos on a page together:
-- "three-column" places all three photos in ONE ROW at a shared height. Use it ONLY when all three photos are portrait. A single landscape photo in that row collapses the whole row into a thin horizontal strip with huge empty margins above and below — this is the single most common way this layout goes wrong.
-- Any trio that contains a landscape photo must use "three-mixed" instead, with the LANDSCAPE photo listed FIRST (it becomes the dominant one across the top).
-- "four-mixed" is the same idea for four photos: the FIRST photo spans the full width on top (must be landscape or square), the other three share the row below — the best way to combine one landscape with three portraits.
-- "two-vertical" is the side-by-side row for pairs: right for two portraits, and fine for one portrait + one landscape. Two landscapes side by side become a strip — stack them with "two-horizontal" instead.
-- "two-horizontal" renders both photos full-width, stacked. Both must be landscape (or square) — a portrait photo rendered full-width is taller than the page and forces everything to shrink.
-- "full-framed" shows one photo matted and completely uncropped — safe for any shape. "full-bleed" fills the whole page area and crops slightly to the page's shape, so use it only for a photo whose shape roughly matches the page (and never when the crop would cut into faces).
-- "collage-4"/"collage-5"/"collage-6" are justified mosaics — any mix of shapes works, but they read best when each row mixes orientations rather than stacking three landscapes.`;
+const SHAPE_RULES = `Photo fitting rules — these are the difference between a book that looks designed and one that looks broken. Every multi-photo page renders photos UNCROPPED at their true shapes in justified rows; the renderer balances stacked row heights when they would otherwise overflow. You still have to choose the template and asset order that use the page well:
+- "three-column" puts all three photos in ONE ROW and is very easy to turn into a thin strip. Prefer "three-mixed" unless three unusually tall portraits genuinely fill the page.
+- "three-mixed" and "four-mixed" put the FIRST photo in the dominant top row. Try different first photos mentally: the best ordering is the one whose top and bottom rows occupy comparable visual weight.
+- For pairs, use "two-vertical" when side-by-side shapes make a substantial row; use "two-horizontal" when stacking them fills the page better. Two landscapes almost always stack; two portraits usually sit side by side.
+- "full-framed" shows one photo matted and completely uncropped — safe for any shape. "full-bleed" fills the page and may crop, so use it only when the photo and page have closely compatible shapes. A landscape photo on a portrait page is NOT a slight crop.
+- "collage-4"/"collage-5"/"collage-6" are justified mosaics. Mix orientations within each row. If five or six similarly wide photos collapse into thin strips, split them across two pages instead.
+- Captions have a fixed two-line slot below their row. Keep them short; the photo itself is never allowed to crop to make room.`;
 
 function schemaText(): string {
   return `The layout plan is a single JSON object with this exact shape:
@@ -502,6 +501,7 @@ function acceptPlan(
         ? available.map((p) => p.assetId)
         : available.filter((p) => p.userDecision === 'include').map((p) => p.assetId),
     stories,
+    trim: TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'],
   });
   const fixes = [...coerced.changes, ...repaired.changes];
   if (fixes.length > 0) {
@@ -696,13 +696,13 @@ export async function proposePhotoBookPlan(
     if (options.review === false) return draft;
 
     const lintPhotos = toLintPhotos(available);
-    const draftFindings = lintPhotoBookPlan(draft, lintPhotos);
+    const trim = TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'];
+    const draftFindings = lintPhotoBookPlan(draft, lintPhotos, { trim });
     const draftScore = lintScore(draftFindings);
 
     // Render the draft and let the model look at it. A failure anywhere in here leaves the
     // draft standing — the review is an improvement pass, never a gate.
     await stage('proofing');
-    const trim = TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'];
     const { labels } = planPageLabels(draft);
     const wanted = selectProofPages(labels, flaggedPageIndices(draft, draftFindings));
     const proofs = await renderProofPages(loaded, draft, chronicleName, trim, wanted);
@@ -731,7 +731,7 @@ export async function proposePhotoBookPlan(
     const revised = acceptPlan(bookId, extractJson(reviewText), loaded, available, 'review');
     if (!revised) return draft;
 
-    const revisedScore = lintScore(lintPhotoBookPlan(revised, lintPhotos));
+    const revisedScore = lintScore(lintPhotoBookPlan(revised, lintPhotos, { trim }));
     if (revisedScore > draftScore) {
       console.log(
         `[photo-book-ai-layout] review round for ${bookId} scored worse (${revisedScore} vs ${draftScore}) — keeping the draft`,
