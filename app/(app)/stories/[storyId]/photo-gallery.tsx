@@ -228,8 +228,10 @@ function CaptionRow({
         setConfirmRemove(false);
         return;
       }
-      onRemoved();
+      // Refresh inside the transition so the button keeps its spinner until the grid
+      // has actually dropped the photo; only then close the lightbox.
       router.refresh();
+      onRemoved();
     });
   }
 

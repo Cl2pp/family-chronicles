@@ -285,9 +285,9 @@ export async function setAssetCaption(storyId: string, assetId: string, caption:
  * Remove one photo from a story for good: the `assets` row goes (its book mirror rows
  * cascade), and so does its stored object — unless a chat attachment still points at
  * the same object, which must keep rendering in the conversation history (same rule as
- * `deleteStoryForUser`). A photos-only contribution left with nothing in it is dropped
- * too, so the source timeline doesn't show an empty "added photos" entry. Callers check
- * edit rights; the story id scopes the asset.
+ * `deleteStoryForUser`). The contribution it arrived with stays as the who/when record
+ * (the story page hides contributions left with nothing to show). Callers check edit
+ * rights; the story id scopes the asset.
  */
 export async function removeStoryPhoto(
   storyId: string,
@@ -299,34 +299,13 @@ export async function removeStoryPhoto(
       s3Key: assets.s3Key,
       thumbS3Key: assets.thumbS3Key,
       displayS3Key: assets.displayS3Key,
-      contributionId: assets.contributionId,
     })
     .from(assets)
     .where(and(eq(assets.id, assetId), eq(assets.storyId, storyId), eq(assets.kind, 'photo')))
     .limit(1);
   if (!asset) return { ok: false, error: 'Photo not found.' };
 
-  await db.transaction(async (tx) => {
-    await tx.delete(assets).where(eq(assets.id, asset.id));
-    if (asset.contributionId) {
-      const [contribution] = await tx
-        .select({ id: contributions.id, text: contributions.text })
-        .from(contributions)
-        .where(eq(contributions.id, asset.contributionId))
-        .limit(1);
-      if (contribution && !contribution.text) {
-        const [remaining] = await tx
-          .select({ id: assets.id })
-          .from(assets)
-          .where(eq(assets.contributionId, contribution.id))
-          .limit(1);
-        if (!remaining) {
-          await tx.delete(contributions).where(eq(contributions.id, contribution.id));
-        }
-      }
-    }
-  });
-
+  await db.delete(assets).where(eq(assets.id, asset.id));
   await invalidateBooksForStoryPhotoRemoval(storyId);
 
   // Storage cleanup AFTER the row is gone — a failed object delete must not leave the

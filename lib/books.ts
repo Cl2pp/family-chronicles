@@ -1754,23 +1754,27 @@ export async function invalidateBooksForStory(storyId: string): Promise<void> {
  * may reference a figure that no longer exists (its `book_photos` mirror row already
  * cascaded away with the asset), and any rendered PDF still shows the photo. Flags the
  * plan stale so the next load repairs/rebuilds it, and drops a finished preview back to
- * draft. Locked (`ordered`) books keep their status — their print file is pinned under
- * the order and must not change. Best-effort; never fails the caller's own write.
+ * draft. Locked (`ordered`) books keep their STATUS — the print file the order was
+ * placed with is pinned under `orders/{id}/` and stays as printed; their plan is still
+ * flagged stale (same as `mirrorStoryPhotosIntoBooks` does on add) so a later builder
+ * visit doesn't render a figure whose asset is gone. Best-effort; never fails the
+ * caller's own write.
  */
 export async function invalidateBooksForStoryPhotoRemoval(storyId: string): Promise<void> {
   try {
-    const targets = db
-      .select({ id: bookStories.bookId })
-      .from(bookStories)
-      .where(eq(bookStories.storyId, storyId));
     await db
       .update(books)
-      .set({ layoutStale: true, updatedAt: new Date() })
-      .where(inArray(books.id, targets));
-    await db
-      .update(books)
-      .set({ status: 'draft', updatedAt: new Date() })
-      .where(and(eq(books.status, 'preview_ready'), inArray(books.id, targets)));
+      .set({
+        layoutStale: true,
+        status: sql`CASE WHEN ${books.status} = 'preview_ready' THEN 'draft' ELSE ${books.status} END`,
+        updatedAt: new Date(),
+      })
+      .where(
+        inArray(
+          books.id,
+          db.select({ id: bookStories.bookId }).from(bookStories).where(eq(bookStories.storyId, storyId)),
+        ),
+      );
   } catch (e) {
     console.error(`[books] could not invalidate books after photo removal for story ${storyId}:`, e);
   }

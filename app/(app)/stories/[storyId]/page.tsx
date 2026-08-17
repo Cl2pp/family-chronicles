@@ -95,22 +95,26 @@ export default async function StoryDetailPage({
     return (notYounger[notYounger.length - 1] ?? contributions[0]).id;
   }
 
-  const contributionViews: ContributionView[] = contributions.map((c) => ({
-    id: c.id,
-    contributorName: c.contributorName,
-    createdAt: c.createdAt.toISOString(),
-    text: c.text,
-    audio: audioAssets
-      .filter((a) => contributionIdFor(a) === c.id)
-      .map((a) => ({ id: a.id, url: presigned.get(a.id)!, durationSec: a.durationSec })),
-    photos: photoAssets
-      .filter((a) => contributionIdFor(a) === c.id)
-      .map((a) => ({
-        id: a.id,
-        url: presignedThumbs.get(a.id) ?? presigned.get(a.id)!,
-        caption: a.caption,
-      })),
-  }));
+  const contributionViews: ContributionView[] = contributions
+    .map((c) => ({
+      id: c.id,
+      contributorName: c.contributorName,
+      createdAt: c.createdAt.toISOString(),
+      text: c.text,
+      audio: audioAssets
+        .filter((a) => contributionIdFor(a) === c.id)
+        .map((a) => ({ id: a.id, url: presigned.get(a.id)!, durationSec: a.durationSec })),
+      photos: photoAssets
+        .filter((a) => contributionIdFor(a) === c.id)
+        .map((a) => ({
+          id: a.id,
+          url: presignedThumbs.get(a.id) ?? presigned.get(a.id)!,
+          caption: a.caption,
+        })),
+    }))
+    // A photos-only contribution whose photos were all removed since has nothing left
+    // to show — the row stays as the who/when record, but the timeline skips it.
+    .filter((c) => c.text || c.audio.length > 0 || c.photos.length > 0);
 
   // Stories from before the contributions table (not yet backfilled) still get the
   // timeline: their whole source is one entry by the submitter, dated to the story.
