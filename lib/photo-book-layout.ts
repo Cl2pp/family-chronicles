@@ -564,6 +564,14 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
       var PAGE_W_PX = ${pageW} * 96 / 25.4;
       var PAGE_H_PX = ${pageH} * 96 / 25.4;
       var BODY_PAD_PX = ${screenBodyPadMm} * 2 * 96 / 25.4;
+      // Paged.js measures live boxes while it paginates, so the zoom below must not be
+      // applied until it has finished. The ResizeObserver further down fires DURING
+      // pagination (the root element gains height as pages are appended); zooming then
+      // made Paged.js measure already-shrunken boxes, overfill every page, and leave the
+      // spill-over laid out past the sheet edge where it is clipped away — a small
+      // builder iframe silently lost roughly half the story and reported fewer pages than
+      // the print file has. Nothing scales the stack before this flag flips.
+      var paginated = false;
       // Fit ONE full page inside the iframe's own viewport — both axes, not just width —
       // so the builder shows a whole page rather than a native-size crop of its top-left
       // corner. The host page (photo-book-create-step.tsx) sizes the iframe box to this
@@ -571,6 +579,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
       // taking the min of both keeps this correct even when they don't (e.g. a very short
       // viewport), same "contain" logic as an image's object-fit: contain.
       function fitPages() {
+        if (!paginated) return;
         var pages = document.querySelector('.pagedjs_pages');
         if (!pages) return;
         var availW = document.documentElement.clientWidth - 16;
@@ -586,6 +595,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
       window.PagedConfig = {
         auto: true,
         after: function () {
+          paginated = true;
           fitPages();
           document.documentElement.setAttribute('data-pagedjs-ready', 'true');
         },
