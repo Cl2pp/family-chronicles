@@ -28,7 +28,10 @@ const images = new Map(
 
 const LOREM =
   'Es war ein Sommer, wie ihn nur die Erinnerung kennt: lang, golden und voller Stimmen. Jeden Morgen roch es nach Kaffee und frisch gemähtem Gras, und irgendwo klapperte immer eine Tür.';
-const paragraphs = Array.from({ length: 24 }, (_, i) => `Absatz ${i + 1}. ${LOREM}`);
+// Deliberately long enough that each text run MUST fragment over several physical pages.
+// This makes the sample a visual regression for clipped birthday messages, not merely a
+// typography preview that happens to fit one page per run.
+const paragraphs = Array.from({ length: 72 }, (_, i) => `Absatz ${i + 1}. ${LOREM}`);
 
 const plan: PhotoBookPlan = {
   kind: 'photo',
@@ -40,9 +43,9 @@ const plan: PhotoBookPlan = {
       dateLabel: '1962',
       storyId: 's1',
       pages: [
-        { template: 'text', from: 0, to: 9 },
+        { template: 'text', from: 0, to: 47 },
         { template: 'two-vertical', assetIds: ['p1', 'p2'] },
-        { template: 'text', from: 10, to: 23 },
+        { template: 'text', from: 48, to: 71 },
         { template: 'full-bleed', assetIds: ['l1'] },
       ],
     },

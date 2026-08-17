@@ -815,13 +815,26 @@ ${
     ? ''
     : `
   /* ---- Flowing story text (unified-book plan) ---- */
-  .text-flow { page: text-flow; }
+  /* Story prose is deliberately unconstrained: Chromium may fragment one text run over
+     as many named pages as it needs. Keep these explicit guards here because a fixed
+     height/max-height or clipped overflow silently discarded long birthday messages in
+     an earlier renderer. */
+  .text-flow {
+    page: text-flow;
+    display: block;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+    break-inside: auto;
+  }
   .text-flow p {
     margin: 0 0 var(--pb-paragraph-gap);
     font-size: var(--pb-body-size);
     line-height: var(--pb-body-line-height);
     text-align: var(--pb-text-align);
     hyphens: var(--pb-hyphens);
+    overflow-wrap: anywhere;
+    break-inside: auto;
     orphans: 2;
     widows: 2;
   }

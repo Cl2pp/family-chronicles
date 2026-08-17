@@ -481,7 +481,7 @@ describe('flowing story text (unified-book plan)', () => {
   it('renders text items as .text-flow divs on the named page, drop cap on the first', () => {
     const html = renderPhotoBookHtml(baseInput({ plan: textPlan(), storyParagraphs: paragraphs }));
     expect(html).toContain('@page text-flow {');
-    expect(html).toContain('.text-flow { page: text-flow; }');
+    expect(html).toMatch(/\.text-flow \{[\s\S]*?page: text-flow;[\s\S]*?height: auto;[\s\S]*?max-height: none;[\s\S]*?overflow: visible;[\s\S]*?break-inside: auto;/);
     const flows = html.match(/<div class="text-flow[^"]*">/g) ?? [];
     expect(flows).toEqual(['<div class="text-flow first-of-section">', '<div class="text-flow">']);
     expect(html).toContain('<p>Erster Absatz.</p>');
@@ -499,6 +499,35 @@ describe('flowing story text (unified-book plan)', () => {
   it('renders nothing for text items when no paragraphs were provided (dormant-safe)', () => {
     const html = renderPhotoBookHtml(baseInput({ plan: textPlan() }));
     expect(html).not.toContain('class="text-flow');
+  });
+
+  it('emits every paragraph of a long story into an unconstrained multipage flow', () => {
+    const longParagraphs = Array.from(
+      { length: 120 },
+      (_, index) => `TEXT-MARKER-${index + 1} ${'Eine lange Geburtstagserinnerung. '.repeat(12)}`,
+    );
+    const plan: PhotoBookPlan = {
+      kind: 'photo',
+      style: 'classic',
+      cover: { title: 'Geburtstagsbuch' },
+      sections: [
+        {
+          title: 'Lange Geschichte',
+          storyId: 'long-story',
+          pages: [{ template: 'text', from: 0, to: longParagraphs.length - 1 }],
+        },
+      ],
+    };
+
+    const html = renderPhotoBookHtml(
+      baseInput({ plan, storyParagraphs: new Map([['long-story', longParagraphs]]) }),
+    );
+
+    for (let index = 1; index <= longParagraphs.length; index++) {
+      expect(html.match(new RegExp(`TEXT-MARKER-${index}(?!\\d)`, 'g'))).toHaveLength(1);
+    }
+    expect(html).toContain('overflow-wrap: anywhere;');
+    expect(html).not.toMatch(/\.text-flow\s*\{[^}]*overflow:\s*hidden/);
   });
 
   it('sets the document language for hyphenation', () => {
