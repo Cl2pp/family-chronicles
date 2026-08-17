@@ -1749,6 +1749,33 @@ export async function invalidateBooksForStory(storyId: string): Promise<void> {
   }
 }
 
+/**
+ * A photo was REMOVED from a story: every book holding that story now has a plan that
+ * may reference a figure that no longer exists (its `book_photos` mirror row already
+ * cascaded away with the asset), and any rendered PDF still shows the photo. Flags the
+ * plan stale so the next load repairs/rebuilds it, and drops a finished preview back to
+ * draft. Locked (`ordered`) books keep their status — their print file is pinned under
+ * the order and must not change. Best-effort; never fails the caller's own write.
+ */
+export async function invalidateBooksForStoryPhotoRemoval(storyId: string): Promise<void> {
+  try {
+    const targets = db
+      .select({ id: bookStories.bookId })
+      .from(bookStories)
+      .where(eq(bookStories.storyId, storyId));
+    await db
+      .update(books)
+      .set({ layoutStale: true, updatedAt: new Date() })
+      .where(inArray(books.id, targets));
+    await db
+      .update(books)
+      .set({ status: 'draft', updatedAt: new Date() })
+      .where(and(eq(books.status, 'preview_ready'), inArray(books.id, targets)));
+  } catch (e) {
+    console.error(`[books] could not invalidate books after photo removal for story ${storyId}:`, e);
+  }
+}
+
 /** Guard shared by every mutation: member, contributor, and the book not locked.
  *  Also hands back the acting user's story-access context so mutations that need
  *  per-story checks don't load it a second time. */

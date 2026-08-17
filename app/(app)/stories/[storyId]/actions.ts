@@ -10,6 +10,7 @@ import {
   listStoryPeople,
   listStoryPeopleCandidates,
   removePeopleFromStory,
+  removeStoryPhoto,
   resetStoryForRetry,
   setAssetCaption,
 } from '@/lib/stories';
@@ -135,6 +136,24 @@ export async function updatePhotoCaption(input: {
   await setAssetCaption(input.storyId, input.assetId, caption || null);
   revalidatePath(`/stories/${input.storyId}`);
   return { ok: true };
+}
+
+/** Remove a photo from a story for good (author or chronicle owner only). */
+export async function deleteStoryPhoto(input: {
+  storyId: string;
+  assetId: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const user = await requireUser();
+  if (!(await canUserEditStory(input.storyId, user.id))) {
+    return { ok: false, error: "Only the story's author or a chronicle owner can remove photos." };
+  }
+  const result = await removeStoryPhoto(input.storyId, input.assetId);
+  if (result.ok) {
+    revalidatePath(`/stories/${input.storyId}`);
+    revalidatePath('/stories');
+    captureServerEvent(user.id, 'story_photo_removed', { story_id: input.storyId });
+  }
+  return result;
 }
 
 /**
