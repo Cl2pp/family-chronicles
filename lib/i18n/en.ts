@@ -753,7 +753,8 @@ export const en = {
           title: 'Content',
           intro: 'A book can draw on your written stories, on photos you upload, or on both.',
           storiesTitle: 'Stories',
-          storiesHint: 'Each story becomes a chapter. Choose whether it contributes its text, its photos, or both.',
+          storiesHint:
+            'Each story becomes a chapter. Choose whether it contributes its text, its photos, or both. Move stories to set your own order — the book then switches to “Custom” in the next step.',
           addStory: 'Add story',
           noStories: 'No stories in this book yet.',
           moveUp: 'Move up',
@@ -813,12 +814,14 @@ export const en = {
           bookTitle: 'Title',
           subtitle: 'Subtitle',
           grouping: 'How the book is organised',
-          groupingIntroWithChapters: 'Your stories are already chapters — this decides how the uploaded photos are grouped after them.',
+          groupingIntroWithChapters:
+            'Your stories are already chapters. This decides whether they run by date or in your own order, and how the uploaded photos are grouped after them.',
           groupingIntro: 'What should the chapters be built around?',
           groupingOptions: {
             chronological: 'Chronologically',
             topic: 'By topic',
             location: 'By place',
+            custom: 'Custom',
           },
           groupingHints: {
             chronological: 'One chapter per occasion, earliest first — like a diary.',
@@ -826,6 +829,8 @@ export const en = {
               'Photos showing the same thing go together — birthdays with birthdays, beach days with beach days, even years apart.',
             location:
               'Photos taken in the same place go together. Photos without GPS data get their own chapter at the end.',
+            custom:
+              'Your stories stay in the order you arranged them in the previous step. Uploaded photos follow after them, chronologically. Picking another option puts the stories back in date order.',
           },
           groupingWarnings: {
             location: (withGps: number, total: number) =>

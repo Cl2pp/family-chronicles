@@ -172,6 +172,28 @@ async function ensureUsableBookStories(
   return { ok: true };
 }
 
+/**
+ * `storyIds` in the order a chronological book puts its chapters — the same
+ * `(event_date, created_at)` sort `readyStoriesForChronicle`/`createBook` start every book
+ * with (Postgres `ASC` = undated stories last). The reference for the `custom` grouping
+ * (`lib/photo-book-grouping.ts`): a chapter order that differs from this IS a custom
+ * order, and leaving `custom` means going back to this.
+ */
+async function chronologicalStoryOrder(tx: DbLike, storyIds: string[]): Promise<string[]> {
+  if (storyIds.length === 0) return [];
+  const rows = await tx
+    .select({ id: stories.id })
+    .from(stories)
+    .where(inArray(stories.id, storyIds))
+    .orderBy(asc(stories.eventDate), asc(stories.createdAt), asc(stories.id));
+  const known = new Set(rows.map((r) => r.id));
+  // Ids the query didn't return (shouldn't happen after `ensureUsableBookStories`) keep
+  // their relative place at the end rather than vanishing from the comparison.
+  return [...rows.map((r) => r.id), ...storyIds.filter((id) => !known.has(id))];
+}
+
+const sameOrder = (a: string[], b: string[]) => a.length === b.length && a.every((id, i) => id === b[i]);
+
 export interface BookListItem {
   id: string;
   chronicleId: string;
@@ -1274,9 +1296,14 @@ export async function updatePhotoBookSettings(input: {
   // Deliberately does NOT flip `layoutStale`: that would make the next page load rebuild
   // the book behind the user's back (and for an AI-designed book only REPAIR it, which
   // never re-sections). Re-sectioning needs a real design pass, queued below.
-  const groupingChanged =
-    input.photoGrouping !== undefined && input.photoGrouping !== parsePhotoGrouping(row.photoGrouping);
+  const previousGrouping = parsePhotoGrouping(row.photoGrouping);
+  const groupingChanged = input.photoGrouping !== undefined && input.photoGrouping !== previousGrouping;
   if (input.photoGrouping !== undefined) set.photoGrouping = input.photoGrouping;
+  // Every grouping but `custom` promises chapters in date order (`lib/photo-book-grouping.ts`
+  // — `setBookStories` is what flips a book to `custom` when they aren't). So leaving
+  // `custom` for any other option puts the chapters back in that order; the layout is
+  // re-designed below anyway, and the sections follow `book_stories.position`.
+  const resortChapters = groupingChanged && previousGrouping === 'custom';
 
   const coverTextChanged =
     (input.title !== undefined && nextTitle !== row.title) ||
@@ -1304,7 +1331,31 @@ export async function updatePhotoBookSettings(input: {
     }
   }
 
-  await db.update(books).set(set).where(eq(books.id, input.bookId));
+  await db.transaction(async (tx) => {
+    if (resortChapters) {
+      const chapters = await tx
+        .select({ storyId: bookStories.storyId })
+        .from(bookStories)
+        .where(eq(bookStories.bookId, input.bookId))
+        .orderBy(asc(bookStories.position));
+      const ordered = await chronologicalStoryOrder(
+        tx,
+        chapters.map((c) => c.storyId),
+      );
+      // Position is the only thing that changes — include flags and photo mirrors stay.
+      for (const [position, storyId] of ordered.entries()) {
+        await tx
+          .update(bookStories)
+          .set({ position })
+          .where(and(eq(bookStories.bookId, input.bookId), eq(bookStories.storyId, storyId)));
+      }
+      // The stored plan's chapter sections are now in the wrong order for a book that was
+      // never generated (nothing to fix) or one about to be re-designed (fixed by the pass);
+      // a hand-edited plan is left alone below, so flag it stale for the repair path.
+      set.layoutStale = true;
+    }
+    await tx.update(books).set(set).where(eq(books.id, input.bookId));
+  });
 
   // Changing how the book is ORGANISED changes what a section is, which no in-place patch
   // can express — the book has to be designed again. That rule lives here, with the
@@ -1999,6 +2050,18 @@ export async function setBookStories(input: {
     // Cover may have belonged to a story that just left the book.
     const cover = gate.book.coverAssetId;
     const set: Partial<typeof books.$inferInsert> = { ...invalidatePreview() };
+    // A chapter order that no longer follows the stories' dates is the reader's OWN order:
+    // switch the book to the `custom` grouping so Step 2's "how is the book organised"
+    // choice tells the truth (`lib/photo-book-grouping.ts`). Decided here, with the
+    // mutation, so the panel's arrows and the chat agent's `set_book_stories` behave the
+    // same. Removing a chapter or appending one in date order changes nothing.
+    if (
+      unique.length > 0 &&
+      gate.book.photoGrouping !== 'custom' &&
+      !sameOrder(unique, await chronologicalStoryOrder(tx, unique))
+    ) {
+      set.photoGrouping = 'custom';
+    }
     if (cover) {
       const still = await tx
         .select({ id: assets.id })

@@ -772,7 +772,8 @@ export const de: Dictionary = {
           title: 'Inhalte',
           intro: 'Ein Buch kann aus euren geschriebenen Geschichten entstehen, aus hochgeladenen Fotos — oder aus beidem.',
           storiesTitle: 'Geschichten',
-          storiesHint: 'Jede Geschichte wird ein Kapitel. Du entscheidest, ob sie ihren Text, ihre Fotos oder beides beisteuert.',
+          storiesHint:
+            'Jede Geschichte wird ein Kapitel. Du entscheidest, ob sie ihren Text, ihre Fotos oder beides beisteuert. Verschiebe Geschichten, um deine eigene Reihenfolge festzulegen — das Buch wechselt im nächsten Schritt dann auf „Eigene Reihenfolge“.',
           addStory: 'Geschichte hinzufügen',
           noStories: 'Noch keine Geschichten in diesem Buch.',
           moveUp: 'Nach oben',
@@ -832,12 +833,14 @@ export const de: Dictionary = {
           bookTitle: 'Titel',
           subtitle: 'Untertitel',
           grouping: 'Aufbau des Buches',
-          groupingIntroWithChapters: 'Deine Geschichten sind bereits Kapitel — das hier bestimmt, wie die hochgeladenen Fotos danach gruppiert werden.',
+          groupingIntroWithChapters:
+            'Deine Geschichten sind bereits Kapitel. Das hier bestimmt, ob sie nach Datum oder in deiner eigenen Reihenfolge stehen — und wie die hochgeladenen Fotos danach gruppiert werden.',
           groupingIntro: 'Wonach sollen die Kapitel gebildet werden?',
           groupingOptions: {
             chronological: 'Chronologisch',
             topic: 'Nach Thema',
             location: 'Nach Ort',
+            custom: 'Eigene Reihenfolge',
           },
           groupingHints: {
             chronological:
@@ -846,6 +849,8 @@ export const de: Dictionary = {
               'Fotos, die dasselbe zeigen, kommen zusammen — Geburtstage zu Geburtstagen, Strandtage zu Strandtagen, auch über Jahre hinweg.',
             location:
               'Fotos vom selben Ort kommen zusammen. Fotos ohne GPS-Daten landen in einem eigenen Kapitel am Ende.',
+            custom:
+              'Deine Geschichten bleiben in der Reihenfolge, die du im vorigen Schritt festgelegt hast. Hochgeladene Fotos folgen danach chronologisch. Wählst du eine andere Option, stehen die Geschichten wieder nach Datum.',
           },
           groupingWarnings: {
             location: (withGps: number, total: number) =>

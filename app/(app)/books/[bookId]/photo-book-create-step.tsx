@@ -112,6 +112,12 @@ function PhotoBookConfigPanel({
 
   const disabled = locked || pending;
   const hasChapters = book.chapterCount > 0;
+  // "Custom" means "the chapter order you arranged in the content step" — meaningless for
+  // a book without chapters, so it's only offered when there are some (or when the book is
+  // already in it, so the selected option never disappears from the list).
+  const groupingOptions = PHOTO_BOOK_GROUPINGS.filter(
+    (option) => option !== 'custom' || hasChapters || book.photoGrouping === 'custom',
+  );
 
   // "By place" needs EXIF GPS and "by topic" needs a vision score; a photo set that mostly
   // lacks either would silently collapse into one meaningless chapter (photos stripped of
@@ -175,11 +181,12 @@ function PhotoBookConfigPanel({
         </Text>
         <Text fz={12} c="dimmed" mb={8}>
           {/* With chapters present, each story is already its own section — the grouping
-              only decides how the UPLOADED photos are clustered after them. */}
+              decides whether they run by date or in the reader's own order ("Custom"), and
+              how the UPLOADED photos are clustered after them. */}
           {hasChapters ? tc.groupingIntroWithChapters : tc.groupingIntro}
         </Text>
         <Stack gap={6}>
-          {PHOTO_BOOK_GROUPINGS.map((option) => (
+          {groupingOptions.map((option) => (
             <Button
               key={option}
               fullWidth

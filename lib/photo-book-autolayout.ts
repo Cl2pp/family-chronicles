@@ -1,5 +1,5 @@
 import { hammingDistance } from '@/lib/photo-hash';
-import { DEFAULT_PHOTO_BOOK_GROUPING, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
+import { DEFAULT_PHOTO_BOOK_GROUPING, photoSectioning, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
 import {
   photoOrientation,
@@ -868,7 +868,9 @@ export function computeCandidateSections(
   photos: AutoLayoutPhoto[],
   grouping: PhotoBookGrouping = DEFAULT_PHOTO_BOOK_GROUPING,
 ): AutoLayoutPhoto[][] {
-  if (grouping === 'chronological') {
+  // `custom` only fixes the CHAPTER order (which the caller already honours — chapters are
+  // never re-sorted here); its unowned photos section chronologically.
+  if (photoSectioning(grouping) === 'chronological') {
     const { dated, undated } = splitByCaptureTime(photos);
     let groups = mergeTinySections(sectionizeByBoundary(dated));
     if (undated.length > 0) groups = [...groups, undated];

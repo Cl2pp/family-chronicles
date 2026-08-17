@@ -247,6 +247,7 @@ const CLUSTER_BASIS: Record<PhotoBookGrouping, string> = {
   chronological: 'time and place',
   topic: 'shared subject matter',
   location: 'GPS proximity',
+  custom: 'time and place',
 };
 
 function systemPrompt(languageName: string, grouping: PhotoBookGrouping): string {
