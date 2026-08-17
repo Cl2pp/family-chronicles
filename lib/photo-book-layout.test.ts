@@ -189,6 +189,29 @@ describe('renderPhotoBookHtml', () => {
     expect(printHtml).not.toContain('PagedConfig');
   });
 
+  it('hides the screen page stack until Paged.js reports done, and only for screen', () => {
+    const screenHtml = renderPhotoBookHtml(baseInput({ variant: 'screen' }));
+    const previewHtml = renderPhotoBookHtml(baseInput({ variant: 'preview' }));
+    const printHtml = renderPhotoBookHtml(baseInput({ variant: 'print' }));
+
+    // Nothing scales the stack until pagination finishes, so it stays hidden until then
+    // rather than showing a native-size crop of page one for the whole run. The behavioral
+    // check lives in `photo-book-text-flow.integration.test.ts`, but it can only assert
+    // while pagination is still in flight — this is the guard that survives whatever the
+    // timing does, and it is the reason deleting the rule can't pass unnoticed.
+    expect(screenHtml).toContain('html:not([data-pagedjs-visible]) .pagedjs_pages');
+    expect(screenHtml).toContain('visibility: hidden');
+    // Both rescue paths that release it — a pagination that fails, and one that stops.
+    // They un-hide ONLY: neither may reach `fitPages`, since scaling a pagination that is
+    // still running is the bug this all exists to prevent.
+    expect(screenHtml).toContain("addEventListener('unhandledrejection', unhide)");
+    expect(screenHtml).toContain('setTimeout(unhide');
+    // Neither PDF variant paginates in a browser, so none of this may leak into one: a
+    // hidden stack there would render blank pages into the print file.
+    expect(previewHtml).not.toContain('data-pagedjs-visible');
+    expect(printHtml).not.toContain('data-pagedjs-visible');
+  });
+
   it('renders a divider ornament flourish only for suites with dividerOrnament (heirloom)', () => {
     const heirloomHtml = renderPhotoBookHtml(
       baseInput({ plan: basePlan({ style: 'heirloom' }), fontFaceCss: screenFontFaceCss('heirloom') }),

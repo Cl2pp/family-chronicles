@@ -592,17 +592,36 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
         if (availW <= 0 || availH <= 0) return;
         pages.style.zoom = Math.min(1, availW / PAGE_W_PX, availH / PAGE_H_PX);
       }
-      function reveal() {
-        paginated = true;
-        fitPages();
-        document.documentElement.setAttribute('data-pagedjs-ready', 'true');
+      // Showing the stack and SCALING it are deliberately separate. Un-hiding is
+      // best-effort and has two rescue paths below, because the worst outcome of a
+      // too-early un-hide is a native-size crop. Scaling happens in one place only —
+      // Paged.js's own "I am finished" hook — because a too-early zoom is the silent,
+      // half-the-book-missing bug this whole file guards against.
+      // Two signals, because they mean different things and the rescues below make them
+      // come apart: \`data-pagedjs-visible\` is "safe to show", \`data-pagedjs-ready\` is
+      // "Paged.js finished" and is set from its hook and nowhere else.
+      function unhide() {
+        document.documentElement.setAttribute('data-pagedjs-visible', 'true');
       }
-      window.PagedConfig = { auto: true, after: reveal };
+      window.PagedConfig = {
+        auto: true,
+        after: function () {
+          paginated = true;
+          fitPages();
+          unhide();
+          document.documentElement.setAttribute('data-pagedjs-ready', 'true');
+        },
+      };
       // Paged.js never handles its own bootstrap promise (see its \`ready.then(...)\` — no
-      // \`.catch\`), so a pagination failure surfaces here and nowhere else. Without this the
-      // stack would stay hidden (see \`screenChrome\`) and unscaled forever; a rejection also
-      // means pagination has stopped, so fitting from here can't disturb any measurement.
-      window.addEventListener('unhandledrejection', reveal);
+      // \`.catch\`), so a pagination failure surfaces here and nowhere else. UN-HIDE ONLY,
+      // never \`paginated\`: a stray rejection is not proof that pagination has stopped (any
+      // orphaned promise in this document fires this), and zooming a still-running
+      // pagination is exactly the bug.
+      window.addEventListener('unhandledrejection', unhide);
+      // Last resort, for a pagination that neither finishes nor rejects — a synchronous
+      // throw out of Paged.js's own resize handling leaves no promise to catch. Far longer
+      // than any real pagination, and it cannot re-introduce the bug: it never scales.
+      setTimeout(unhide, 20000);
       window.addEventListener('resize', fitPages);
       // A resize event alone isn't enough: an iframe that gains a layout box (its
       // container stops being display:none) doesn't reliably fire one in every browser.
@@ -628,8 +647,10 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
      not \`display\`/\`zoom\`: it hides without changing a single box, so it cannot perturb
      what Paged.js measures. Only ever matches once Paged.js has built the stack — if the
      polyfill fails to load at all there is no \`.pagedjs_pages\`, and the unpaginated
-     content stays visible as before. */
-  html:not([data-pagedjs-ready]) .pagedjs_pages { visibility: hidden; }`
+     content stays visible as before. Released by \`unhide\` above, which has a rescue path
+     for a pagination that fails and one for a pagination that just stops, so this can
+     never strand the builder in front of an empty box. */
+  html:not([data-pagedjs-visible]) .pagedjs_pages { visibility: hidden; }`
       : '';
 
   // Cover front — always a bleed page (edge-to-edge hero photo).

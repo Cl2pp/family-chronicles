@@ -62,10 +62,25 @@ type PageFit = {
  *  `getBoundingClientRect` reports boxes for hidden elements just the same, so a preview
  *  left permanently invisible would satisfy every size assertion below without this. */
 async function measurePageFit(page: Page): Promise<PageFit> {
-  return page.evaluate(async () => {
-    // ResizeObserver callbacks land before paint, so two frames is enough for a viewport
-    // change to have been turned into a new zoom.
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  // Wait for the fit to have settled rather than counting frames, so a slow machine gets
+  // more time — but swallow the timeout and measure anyway, so a genuine failure reports
+  // the actual numbers instead of hanging until the test's own deadline.
+  await page
+    .waitForFunction(
+      () => {
+        const sheet = document.querySelector('.pagedjs_page');
+        if (!sheet) return false;
+        const rect = sheet.getBoundingClientRect();
+        return (
+          rect.width > 0 &&
+          rect.width <= document.documentElement.clientWidth + 1 &&
+          rect.height <= document.documentElement.clientHeight + 1
+        );
+      },
+      { timeout: 2_000, polling: 'raf' },
+    )
+    .catch(() => {});
+  return page.evaluate(() => {
     const sheet = document.querySelector('.pagedjs_page');
     const rect = sheet?.getBoundingClientRect();
     return {
@@ -104,6 +119,13 @@ async function openScreenPage(
   html: string,
   polyfill: Buffer,
   viewport: { width: number; height: number },
+  // Which signal to wait for. `data-pagedjs-ready` means Paged.js finished and is what
+  // almost every test wants; `data-pagedjs-visible` only means the stack is safe to show,
+  // and is all a failed pagination ever sets.
+  { awaitAttribute = 'data-pagedjs-ready', timeoutMs = 30_000 } = {} as {
+    awaitAttribute?: 'data-pagedjs-ready' | 'data-pagedjs-visible';
+    timeoutMs?: number;
+  },
 ): Promise<Page> {
   // The `screen` variant references the app's self-hosted polyfill URL, so serve both the
   // HTML and the exact response from that route through a synthetic local origin rather
@@ -125,60 +147,92 @@ async function openScreenPage(
     }
   });
   await page.goto('http://book.test/', { waitUntil: 'load' });
+  // Snapshot the stack the moment Paged.js has built a couple of pages but has not yet
+  // reported done. Every other assertion in this file runs after that point, when the
+  // hiding rule no longer matches — so without this the rule could be deleted outright and
+  // nothing would notice.
+  await page.evaluate(() => {
+    const seen = (window as unknown as { __midRun?: unknown }).__midRun;
+    if (seen) return;
+    const tick = () => {
+      const stack = document.querySelector('.pagedjs_pages');
+      const ready = document.documentElement.getAttribute('data-pagedjs-visible') === 'true';
+      if (!ready && stack && stack.querySelectorAll('.pagedjs_page').length >= 2) {
+        (window as unknown as { __midRun?: unknown }).__midRun = {
+          visibility: getComputedStyle(stack).visibility,
+        };
+        return;
+      }
+      if (!ready) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
   await page.waitForFunction(
-    () => document.documentElement.getAttribute('data-pagedjs-ready') === 'true',
-    { timeout: 30_000 },
+    (attribute: string) => document.documentElement.getAttribute(attribute) === 'true',
+    { timeout: timeoutMs },
+    awaitAttribute,
   );
   return page;
 }
+
+/** One long story split across a photo page — enough text to span several pages either
+ *  side of it, which is what makes a mis-measured page break visible. */
+function storyFixture() {
+  const prose =
+    'Es war ein Sommer, wie ihn nur die Erinnerung kennt: lang, golden und voller Stimmen. ' +
+    'Jeden Morgen roch es nach Kaffee und frisch gemähtem Gras.';
+  const paragraphs = Array.from(
+    { length: PARAGRAPH_COUNT },
+    (_, index) => `${marker(index)} ${prose}`,
+  );
+  const plan: PhotoBookPlan = {
+    kind: 'photo',
+    style: 'classic',
+    cover: { title: 'Geburtstagsbuch' },
+    sections: [
+      {
+        title: 'Eine lange Geschichte',
+        storyId: 'story',
+        pages: [
+          { template: 'text', from: 0, to: 47 },
+          { template: 'full-bleed', assetIds: ['photo'] },
+          { template: 'text', from: 48, to: PARAGRAPH_COUNT - 1 },
+        ],
+      },
+    ],
+  };
+  const photo: PhotoLayoutImage = {
+    assetId: 'photo',
+    src:
+      'data:image/svg+xml;base64,' +
+      Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><rect width="100%" height="100%" fill="#ddd"/></svg>',
+      ).toString('base64'),
+    width: 1200,
+    height: 800,
+  };
+  return {
+    variant: 'print',
+    chronicleName: 'Familie Muster',
+    trim: { w: 210, h: 280 },
+    plan,
+    images: new Map([[photo.assetId, photo]]),
+    fontFaceCss: '',
+    createdLabel: 'August 2026',
+    storyParagraphs: new Map([['story', paragraphs]]),
+  } as const;
+}
+
+const launchBrowser = () =>
+  puppeteer.launch({
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
+  });
 
 describe('flowing story text PDF pagination', () => {
   it(
     'keeps every paragraph when long text runs span pages on both sides of a photo page',
     async () => {
-      const prose =
-        'Es war ein Sommer, wie ihn nur die Erinnerung kennt: lang, golden und voller Stimmen. ' +
-        'Jeden Morgen roch es nach Kaffee und frisch gemähtem Gras.';
-      const paragraphs = Array.from(
-        { length: PARAGRAPH_COUNT },
-        (_, index) => `${marker(index)} ${prose}`,
-      );
-      const plan: PhotoBookPlan = {
-        kind: 'photo',
-        style: 'classic',
-        cover: { title: 'Geburtstagsbuch' },
-        sections: [
-          {
-            title: 'Eine lange Geschichte',
-            storyId: 'story',
-            pages: [
-              { template: 'text', from: 0, to: 47 },
-              { template: 'full-bleed', assetIds: ['photo'] },
-              { template: 'text', from: 48, to: PARAGRAPH_COUNT - 1 },
-            ],
-          },
-        ],
-      };
-      const photo: PhotoLayoutImage = {
-        assetId: 'photo',
-        src:
-          'data:image/svg+xml;base64,' +
-          Buffer.from(
-            '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><rect width="100%" height="100%" fill="#ddd"/></svg>',
-          ).toString('base64'),
-        width: 1200,
-        height: 800,
-      };
-      const input = {
-        variant: 'print',
-        chronicleName: 'Familie Muster',
-        trim: { w: 210, h: 280 },
-        plan,
-        images: new Map([[photo.assetId, photo]]),
-        fontFaceCss: '',
-        createdLabel: 'August 2026',
-        storyParagraphs: new Map([['story', paragraphs]]),
-      } as const;
+      const input = storyFixture();
       const html = renderPhotoBookHtml(input);
 
       const browser = await puppeteer.launch({
@@ -209,13 +263,18 @@ describe('flowing story text PDF pagination', () => {
         const polyfill = Buffer.from(await polyfillResponse.arrayBuffer());
         for (const viewport of SCREEN_VIEWPORTS) {
           const measured = await openScreenPage(browser, screenHtml, polyfill, viewport);
-          const { pageCount, text } = await measured.evaluate(() => {
+          const { pageCount, text, midRun } = await measured.evaluate(() => {
             const pages = document.querySelector('.pagedjs_pages');
             return {
               pageCount: pages?.querySelectorAll('.pagedjs_page').length ?? 0,
               text: pages?.textContent?.replace(/\s+/g, '') ?? '',
+              midRun: (window as unknown as { __midRun?: { visibility: string } }).__midRun,
             };
           });
+          // Undefined only if pagination outran the observer — assert when we caught it,
+          // and let `photo-book-layout.test.ts` be the deterministic guard that the rule
+          // exists at all.
+          if (midRun) expect(midRun.visibility, `${viewport.label} mid-pagination`).toBe('hidden');
           const visible = await visibleMarkersPerScreenPage(measured);
           const fit = await measurePageFit(measured);
           // Gating the zoom on "Paged.js is done" must not disable the fitting itself:
@@ -289,6 +348,74 @@ describe('flowing story text PDF pagination', () => {
   );
 });
 
+describe('a stray unhandled rejection during pagination', () => {
+  it(
+    'never scales the stack, so pagination is untouched',
+    async () => {
+      // The preview un-hides itself on `unhandledrejection` so a dead Paged.js can't leave
+      // the builder facing an empty box. It deliberately does NOT fit from there: a stray
+      // rejection is no proof that pagination has stopped — an orphaned promise anywhere in
+      // this document fires the same event — and scaling a live pagination is precisely the
+      // bug this file guards. Wiring the fit to that event instead cost ~40% of the pages.
+      const input = storyFixture();
+      const screenHtml = renderPhotoBookHtml({ ...input, variant: 'screen' });
+      const polyfillResponse = await getPagedJsPolyfill();
+      const polyfill = Buffer.from(await polyfillResponse.arrayBuffer());
+      const viewport = { width: 480, height: 660 };
+
+      const browser = await launchBrowser();
+      try {
+        const baseline = await openScreenPage(browser, screenHtml, polyfill, viewport);
+        const baselinePages = await baseline.evaluate(
+          () => document.querySelectorAll('.pagedjs_page').length,
+        );
+        await baseline.close();
+
+        // Orphan a rejection as soon as Paged.js has laid out a couple of pages — i.e.
+        // right in the middle of the measuring it must not be disturbed during.
+        const injected = await browser.newPage();
+        await injected.setViewport(viewport);
+        await injected.evaluateOnNewDocument(() => {
+          const tick = () => {
+            if (document.querySelectorAll('.pagedjs_page').length >= 2) {
+              void Promise.reject(new Error('stray rejection from somewhere else'));
+              return;
+            }
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+        await injected.setRequestInterception(true);
+        injected.on('request', (request) => {
+          const url = new URL(request.url());
+          if (url.pathname === '/') {
+            void request.respond({ status: 200, contentType: 'text/html', body: screenHtml });
+          } else if (url.pathname === '/api/pagedjs-polyfill') {
+            void request.respond({ status: 200, contentType: 'text/javascript', body: polyfill });
+          } else {
+            void request.abort();
+          }
+        });
+        await injected.goto('http://book.test/', { waitUntil: 'load' });
+        await injected.waitForFunction(
+          () => document.documentElement.getAttribute('data-pagedjs-ready') === 'true',
+          { timeout: 30_000 },
+        );
+        const injectedPages = await injected.evaluate(
+          () => document.querySelectorAll('.pagedjs_page').length,
+        );
+        await injected.close();
+
+        expect(baselinePages).toBeGreaterThan(7);
+        expect(injectedPages).toBe(baselinePages);
+      } finally {
+        await browser.close();
+      }
+    },
+    120_000,
+  );
+});
+
 describe('builder preview when Paged.js dies mid-run', () => {
   it(
     'still reveals and fits whatever was laid out',
@@ -331,10 +458,16 @@ describe('builder preview when Paged.js dies mid-run', () => {
         args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
       });
       try {
-        const page = await openScreenPage(browser, html, Buffer.from(brokenPolyfill), {
-          width: 480,
-          height: 660,
-        });
+        // Waits on the visibility signal, the only one a failed pagination sets, with a
+        // short timeout: here the wait IS the assertion, so a broken rescue should fail in
+        // seconds rather than sitting out the default.
+        const page = await openScreenPage(
+          browser,
+          html,
+          Buffer.from(brokenPolyfill),
+          { width: 480, height: 660 },
+          { awaitAttribute: 'data-pagedjs-visible', timeoutMs: 5_000 },
+        );
         const { visibility, zoom } = await page.evaluate(() => {
           const pages = document.querySelector('.pagedjs_pages') as HTMLElement | null;
           return {
@@ -343,8 +476,10 @@ describe('builder preview when Paged.js dies mid-run', () => {
           };
         });
         expect(visibility).toBe('visible');
-        expect(Number(zoom)).toBeGreaterThan(0);
-        expect(Number(zoom)).toBeLessThan(1);
+        // Salvaged pages are shown at native size, NOT fitted: a rejection is not proof
+        // that pagination has stopped, and scaling one that is still running is the bug
+        // this file exists to prevent. An unzoomed crop is the deliberate price.
+        expect(zoom).toBe('');
       } finally {
         await browser.close();
       }
