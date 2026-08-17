@@ -933,6 +933,7 @@ export const en = {
       // --- Real ordering through Gelato (only for accounts `canUserOrderBooks` allows;
       //     everyone else keeps the mailto flow above, unchanged). ---
       orderStatusTitle: 'Your order',
+      previousOrderTitle: 'Previous order',
       orderPlacedOn: 'Placed',
       orderPrinterReference: 'Printer reference',
       orderShipTo: 'Delivery address',

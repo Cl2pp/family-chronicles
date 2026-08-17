@@ -138,6 +138,18 @@ export function OrderView({
   // Gelato. So: refresh fast while the hand-off is in flight, slowly while the order is
   // live, and not at all once it has finished, failed or been cancelled.
   const orderStatus = ordering.order?.status;
+  // A "dead" order is history, not a blocker: `cancelled`, or `failed` AFTER Gelato had
+  // already accepted it (a `gelatoOrderId` exists) — `retryBookOrder` refuses those by
+  // design (a resubmit would create a second Gelato order), so the only way forward is a
+  // fresh order, which the server allows once the last one is cancelled/failed. A
+  // `failed` order that never reached Gelato stays live: its "Try again" re-pins the
+  // current print file and re-quotes without retyping the address.
+  const deadOrder =
+    ordering.order &&
+    (orderStatus === 'cancelled' || (orderStatus === 'failed' && ordering.order.gelatoOrderId))
+      ? ordering.order
+      : null;
+  const liveOrder = ordering.order && !deadOrder ? ordering.order : null;
   useEffect(() => {
     if (!orderStatus) return;
     if (orderStatus === 'delivered' || orderStatus === 'failed' || orderStatus === 'cancelled') {
@@ -347,11 +359,13 @@ export function OrderView({
       </Card>
       )}
 
-      {/* Once an order exists it outranks everything else here — including the `preparing`
-          gate, so a placed order stays visible even if the book is mid-render for some
-          other reason. */}
-      {!book.accessBlocked && ordering.order ? (
-        <OrderStatusCard order={ordering.order} />
+      {/* A LIVE order outranks everything else here — including the `preparing` gate, so
+          a placed order stays visible even if the book is mid-render for some other
+          reason. A dead one (see `deadOrder`) doesn't block: the normal ordering UI
+          renders, and the old order's card follows BELOW it as a record (below, not
+          above, so its old price isn't the last thing read before the form). */}
+      {!book.accessBlocked && liveOrder ? (
+        <OrderStatusCard order={liveOrder} />
       ) : !book.accessBlocked && !preparing ? (
         // The in-app order form is only for the few accounts `canUserOrderBooks` allows,
         // and only when there is a real price to charge against. Everyone else — and the
@@ -377,6 +391,7 @@ export function OrderView({
               onCountryChange={changeCountry}
               userEmail={ordering.userEmail}
               userName={ordering.userName}
+              previousAddress={deadOrder?.shippingAddress ?? null}
             />
           ) : (
             <Alert color="yellow" icon={<IconInfoCircle size={16} />}>
@@ -422,6 +437,7 @@ export function OrderView({
           </>
         )
       ) : null}
+      {!book.accessBlocked && deadOrder && <OrderStatusCard order={deadOrder} history />}
     </Stack>
   );
 }

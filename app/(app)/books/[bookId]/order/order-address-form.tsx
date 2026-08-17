@@ -59,6 +59,7 @@ export function OrderAddressForm({
   onCountryChange,
   userEmail,
   userName,
+  previousAddress,
 }: {
   bookId: string;
   /** The quote for the currently picked country, or null when there is none for it —
@@ -72,6 +73,9 @@ export function OrderAddressForm({
   onCountryChange: (country: string) => void;
   userEmail: string;
   userName: string | null;
+  /** The address of this book's previous (cancelled/failed) order, when there is one —
+   *  prefills the form so reordering doesn't mean retyping everything. */
+  previousAddress?: BookShippingAddress | null;
 }) {
   const { t } = useI18n();
   const to = t.books.order;
@@ -83,14 +87,14 @@ export function OrderAddressForm({
   // shipping, so keeping a second copy here would only let the two drift apart.
   type AddressFields = Omit<BookShippingAddress, 'country'>;
   const [values, setValues] = useState<AddressFields>({
-    firstName: initial.first,
-    lastName: initial.last,
-    addressLine1: '',
-    addressLine2: '',
-    postCode: '',
-    city: '',
-    email: userEmail,
-    phone: '',
+    firstName: previousAddress?.firstName ?? initial.first,
+    lastName: previousAddress?.lastName ?? initial.last,
+    addressLine1: previousAddress?.addressLine1 ?? '',
+    addressLine2: previousAddress?.addressLine2 ?? '',
+    postCode: previousAddress?.postCode ?? '',
+    city: previousAddress?.city ?? '',
+    email: previousAddress?.email ?? userEmail,
+    phone: previousAddress?.phone ?? '',
   });
   const [errors, setErrors] = useState<Partial<Record<keyof BookShippingAddress, string>>>({});
 
