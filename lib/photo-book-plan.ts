@@ -28,6 +28,14 @@ import { z } from 'zod';
 export const PHOTO_BOOK_STYLES = ['classic', 'modern', 'gallery', 'heirloom', 'bold', 'journal'] as const;
 export type PhotoBookStyle = (typeof PHOTO_BOOK_STYLES)[number];
 
+/** Structural layout recipes. `standard` is implicit for every stored plan created
+ * before templates existed; `birthday` is the story-first recipe whose cover is a
+ * framed collage and whose chapters always start on a left-hand page. Kept inside the
+ * plan (rather than on the book row) so regeneration, manual edits, previews and print
+ * rendering all consume the same durable instruction. */
+export const PHOTO_BOOK_TEMPLATES = ['standard', 'birthday'] as const;
+export type PhotoBookTemplate = (typeof PHOTO_BOOK_TEMPLATES)[number];
+
 /** The fixed layout vocabulary (docs/PHOTO_BOOK_PLAN.md §5 table). Slot counts are
  *  enforced per-template below (mirrors `photoRowBlockSchema`/`photoGridBlockSchema` in
  *  `lib/book-layout-plan.ts`, which do the same thing for the story plan's blocks). */
@@ -195,6 +203,10 @@ const coverPlanSchema = z.object({
   /** Optional, like the story plan's `coverPlanSchema.heroAssetId` — a brand new photo
    *  book with zero uploaded (or all-excluded) photos has no possible hero yet. */
   heroAssetId: z.string().optional(),
+  /** Birthday-template front-cover collage. These references are decorative: unlike a
+   * standard hero they may also appear in the story's interior photo pages, because the
+   * template promises to append every story photo after its prose. */
+  assetIds: z.array(z.string()).max(6).optional(),
   title: z.string().min(1),
   subtitle: z.string().optional(),
   /** 0-3 small photos for the back cover (docs/PHOTO_BOOK_PLAN.md §5). PR2's
@@ -210,11 +222,18 @@ export const photoBookPlanSchema = z.object({
   /** Defensive self-tag — see the module header comment. Every photo-book plan is this
    *  literal; the real dispatch key is the owning `books.kind` row. */
   kind: z.literal('photo'),
+  /** Optional for backwards compatibility: plans without this field are the original
+   * standard recipe. Producers always stamp it on new Birthday Books. */
+  template: z.enum(PHOTO_BOOK_TEMPLATES).optional(),
   style: z.enum(PHOTO_BOOK_STYLES),
   cover: coverPlanSchema,
   sections: z.array(sectionPlanSchema),
 });
 export type PhotoBookPlan = z.infer<typeof photoBookPlanSchema>;
+
+export function photoBookTemplate(plan: Pick<PhotoBookPlan, 'template'>): PhotoBookTemplate {
+  return plan.template ?? 'standard';
+}
 
 export interface PhotoBookPlanValidationError {
   ok: false;
@@ -243,8 +262,11 @@ export interface PhotoPlanContent {
    *  that's excluded right now" read differently from "references a photo that was
    *  deleted / never belonged to this book". */
   allAssetIds: string[];
-  /** The book's story chapters with TEXT included (`book_stories` where `include_text`),
-   *  in order, with CURRENT paragraph counts — mirrors `PlanContent.chapters` of the
+  /** Story provenance for mirrored chapter photos. Fixed templates use this to keep a
+   * photo under the story it came from; direct uploads have `storyId: null`. */
+  photoStoryIds?: Array<{ assetId: string; storyId: string | null }>;
+  /** The book's story chapters, in order, with the paragraph count the plan should print
+   *  (`0` when text is disabled) — mirrors `PlanContent.chapters` of the
    *  retired story plan. When provided, the consistency check enforces the text rules
    *  (one section per story, gap-free in-order paragraph coverage). Optional so pure
    *  photo books — and pre-unification callers — change nothing. */
@@ -277,7 +299,26 @@ export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: Phot
     usageCount.set(id, (usageCount.get(id) ?? 0) + 1);
   }
 
-  if (plan.cover.heroAssetId) reference(plan.cover.heroAssetId, 'Cover');
+  const birthday = photoBookTemplate(plan) === 'birthday';
+
+  // Birthday cover photos are a decorative selection and intentionally repeat in the
+  // interior. Validate their availability, but don't add them to the placement counter.
+  // Standard books retain the original one-use-everywhere invariant unchanged.
+  const birthdayCoverIds = [...new Set(plan.cover.assetIds ?? [])];
+  if (birthday && birthdayCoverIds.length !== (plan.cover.assetIds ?? []).length) {
+    problems.push('Birthday cover contains the same photo more than once');
+  }
+  if (birthday) {
+    for (const id of birthdayCoverIds) {
+      if (!all.has(id)) problems.push(`Cover references a photo that is not in this book: ${id}`);
+      else if (!available.has(id)) problems.push(`Cover references an excluded photo: ${id}`);
+    }
+    if (plan.cover.heroAssetId && !birthdayCoverIds.includes(plan.cover.heroAssetId)) {
+      problems.push('Birthday cover heroAssetId must be one of its cover assetIds');
+    }
+  } else if (plan.cover.heroAssetId) {
+    reference(plan.cover.heroAssetId, 'Cover');
+  }
   for (const id of plan.cover.backAssetIds ?? []) reference(id, 'Cover back');
 
   // A book with actual PHOTO content must have a cover hero — a printed book can't
@@ -287,11 +328,16 @@ export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: Phot
   const hasPhotoContent = plan.sections.some((section) =>
     section.pages.some((page) => !isTextItem(page) && page.assetIds.length > 0),
   );
-  if (hasPhotoContent && !plan.cover.heroAssetId) {
-    problems.push('Cover has no heroAssetId, but the book has content');
+  if (hasPhotoContent && birthday && birthdayCoverIds.length === 0) {
+    problems.push('Birthday cover has no assetIds, but the book has photo content');
+  } else if (hasPhotoContent && !birthday && !plan.cover.heroAssetId) {
+    problems.push('Cover has no heroAssetId, but the book has photo content');
   }
 
   const storyById = content.stories ? new Map(content.stories.map((s) => [s.storyId, s])) : null;
+  const photoStoryById = content.photoStoryIds
+    ? new Map(content.photoStoryIds.map((photo) => [photo.assetId, photo.storyId]))
+    : null;
   const sectionsByStory = new Map<string, number>();
 
   for (const section of plan.sections) {
@@ -305,12 +351,22 @@ export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: Phot
       problems.push(`Section "${section.title}" has no pages`);
       continue;
     }
+    let birthdayPhotoSeen = false;
     for (const page of section.pages) {
       if (isTextItem(page)) {
         if (!section.storyId) {
           problems.push(`Section "${section.title}" has a text block but no storyId`);
         }
+        if (birthday && section.storyId && birthdayPhotoSeen) {
+          problems.push(`Birthday story "${section.title}" places text after its photos`);
+        }
         continue;
+      }
+      if (birthday && section.storyId) {
+        birthdayPhotoSeen = true;
+        if (page.template === 'divider') {
+          problems.push(`Birthday story "${section.title}" uses a divider instead of a photo layout`);
+        }
       }
       const slots = PHOTO_PAGE_TEMPLATE_SLOTS[page.template];
       if (page.assetIds.length < slots.min || page.assetIds.length > slots.max) {
@@ -324,7 +380,15 @@ export function checkPhotoBookPlanConsistency(plan: PhotoBookPlan, content: Phot
           `Section "${section.title}": a ${page.template} page has ${page.captions.length} caption(s) for ${page.assetIds.length} photo(s)`,
         );
       }
-      for (const id of page.assetIds) reference(id, `Section "${section.title}"`);
+      for (const id of page.assetIds) {
+        reference(id, `Section "${section.title}"`);
+        const sourceStoryId = photoStoryById?.get(id);
+        if (birthday && section.storyId && sourceStoryId != null && sourceStoryId !== section.storyId) {
+          problems.push(
+            `Birthday story "${section.title}" contains photo ${id} from story ${sourceStoryId}`,
+          );
+        }
+      }
     }
   }
 

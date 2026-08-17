@@ -6,6 +6,7 @@ import { eventLabel, orientedDimensions, paragraphs } from '@/lib/book-content';
 import {
   checkPhotoBookPlanConsistency,
   isTextItem,
+  photoBookTemplate,
   validatePhotoBookPlan,
   type PhotoBookPlan,
   type PhotoPlanContent,
@@ -88,16 +89,44 @@ export interface LoadedPhotoBook {
   chapters: BookChapterRef[];
 }
 
-/**
- * Every chapter that contributes TEXT, in reading order — the shape the plan schema's
- * consistency check, the repair pass and the auto-layouter all take as `stories`.
- */
+/** Every chapter that contributes actual prose, used to distinguish a genuinely
+ * text-bearing book from a photo-only one in fallback decisions. */
 export function textChapters(
   loaded: LoadedPhotoBook,
 ): Array<{ storyId: string; paragraphCount: number; title: string }> {
   return loaded.chapters
     .filter((c) => c.includeText && c.paragraphs.length > 0)
     .map((c) => ({ storyId: c.storyId, paragraphCount: c.paragraphs.length, title: c.title }));
+}
+
+/** Every attached chapter that contributes something to the current plan. A chapter
+ * whose text is disabled remains known while it has an available mirrored photo, so its
+ * provenance and Birthday parity survive; a chapter with neither prose nor photos is
+ * intentionally absent and must not invalidate the rest of the book. */
+export function planChapters(
+  loaded: LoadedPhotoBook,
+): Array<{ storyId: string; paragraphCount: number; title: string }> {
+  const storiesWithPhotos = new Set(
+    loaded.photos
+      // Keep this definition aligned with `autoLayoutPhotos` below: a pending mirror
+      // without dimensions cannot be placed yet and therefore must not force a chapter
+      // section that the current plan has no page material for.
+      .filter(
+        (photo) =>
+          !photo.excluded && photo.storyId && photo.width != null && photo.height != null,
+      )
+      .map((photo) => photo.storyId as string),
+  );
+  return loaded.chapters
+    .filter(
+      (chapter) =>
+        (chapter.includeText && chapter.paragraphs.length > 0) || storiesWithPhotos.has(chapter.storyId),
+    )
+    .map((chapter) => ({
+      storyId: chapter.storyId,
+      paragraphCount: chapter.includeText ? chapter.paragraphs.length : 0,
+      title: chapter.title,
+    }));
 }
 
 /** Paragraphs by storyId, for `renderPhotoBookHtml`'s `storyParagraphs` input. */
@@ -187,8 +216,12 @@ function normalizeUserDecision(value: string | null): 'include' | 'exclude' | nu
 /** A plan with no cover hero and no sections — used as a last-resort fallback if the
  *  auto-layouter (a pure function that should never produce an invalid plan) somehow
  *  did, so the preview route degrades to "blank photo book" instead of a 500. */
-function emptyPlan(style: PhotoBookPlan['style'], title: string): PhotoBookPlan {
-  return { kind: 'photo', style, cover: { title }, sections: [] };
+function emptyPlan(
+  style: PhotoBookPlan['style'],
+  title: string,
+  template?: PhotoBookPlan['template'],
+): PhotoBookPlan {
+  return { kind: 'photo', ...(template ? { template } : {}), style, cover: { title }, sections: [] };
 }
 
 /**
@@ -256,15 +289,25 @@ async function repairAndPersistPhotoPlan(
   if (available.length === 0 && textChapters(loaded).length === 0) return null;
 
   const { plan, changes } = repairPhotoBookPlan(stored.plan, {
-    photos: available.map((p) => ({ assetId: p.assetId, width: p.width, height: p.height, analysis: p.analysis })),
-    mustInclude: available.filter((p) => p.userDecision === 'include').map((p) => p.assetId),
-    stories: textChapters(loaded),
+    photos: available.map((p) => ({
+      assetId: p.assetId,
+      width: p.width,
+      height: p.height,
+      analysis: p.analysis,
+      storyId: p.storyId,
+    })),
+    mustInclude:
+      photoBookTemplate(stored.plan) === 'birthday'
+        ? available.map((p) => p.assetId)
+        : available.filter((p) => p.userDecision === 'include').map((p) => p.assetId),
+    stories: planChapters(loaded),
   });
 
   const content: PhotoPlanContent = {
     availableAssetIds: loaded.photos.filter((p) => !p.excluded).map((p) => p.assetId),
     allAssetIds: loaded.photos.map((p) => p.assetId),
-    stories: textChapters(loaded),
+    stories: planChapters(loaded),
+    photoStoryIds: loaded.photos.map((photo) => ({ assetId: photo.assetId, storyId: photo.storyId })),
   };
   const revalidated = validatePhotoBookPlan(plan);
   const problems = revalidated.ok ? checkPhotoBookPlanConsistency(revalidated.plan, content) : [revalidated.error];
@@ -364,7 +407,11 @@ export async function buildAndPersistPhotoAutoPlan(
     subtitle: row.subtitle,
     coverAssetId,
     existingStyle: existingPlan?.style ?? options.style,
+    existingTemplate: existingPlan?.template,
     existingHeroAssetId,
+    existingCoverAssetIds: existingPlan?.cover.assetIds?.filter((id) =>
+      available.some((photo) => photo.assetId === id),
+    ),
     grouping: parsePhotoGrouping(row.photoGrouping),
     photos: autoLayoutPhotos,
     chapters: loaded.chapters.map((c) => ({
@@ -395,12 +442,16 @@ export async function buildAndPersistPhotoAutoPlan(
   const content: PhotoPlanContent = {
     availableAssetIds: available.map((p) => p.assetId).filter((id) => !culledIds.has(id)),
     allAssetIds: loaded.photos.map((p) => p.assetId),
-    stories: textChapters(loaded),
+    stories: planChapters(loaded),
+    photoStoryIds: loaded.photos.map((photo) => ({ assetId: photo.assetId, storyId: photo.storyId })),
   };
 
   const validated = validatePhotoBookPlan(built);
   const problems = validated.ok ? checkPhotoBookPlanConsistency(validated.plan, content) : [validated.error];
-  const plan = validated.ok && problems.length === 0 ? validated.plan : emptyPlan(built.style, row.title);
+  const plan =
+    validated.ok && problems.length === 0
+      ? validated.plan
+      : emptyPlan(built.style, row.title, built.template);
   if (!validated.ok || problems.length > 0) {
     console.error(
       `[photo-book-content] auto-layouter produced an invalid/inconsistent plan for ${bookId}, falling back to empty:`,
@@ -421,6 +472,7 @@ export async function buildAndPersistPhotoAutoPlan(
 export function referencedPhotoAssetIds(plan: PhotoBookPlan): Set<string> {
   const ids = new Set<string>();
   if (plan.cover.heroAssetId) ids.add(plan.cover.heroAssetId);
+  for (const id of plan.cover.assetIds ?? []) ids.add(id);
   for (const id of plan.cover.backAssetIds ?? []) ids.add(id);
   for (const section of plan.sections) {
     for (const page of section.pages) {
@@ -465,6 +517,7 @@ export function photoAssetRenditionNeeds(
     needs.set(id, level);
   }
   if (plan.cover.heroAssetId) want(plan.cover.heroAssetId, 'display');
+  for (const id of plan.cover.assetIds ?? []) want(id, 'display');
   for (const id of plan.cover.backAssetIds ?? []) want(id, 'thumb');
 
   const slotWidths = trim && dims ? photoSlotPrintWidthsMm(plan, trim, dims) : null;

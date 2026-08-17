@@ -17,6 +17,7 @@ import {
   requestPreview,
   setBookStoryFlags,
   setBookStories,
+  setBirthdayCoverPhotos,
   setPhotoBookStyle,
   setPhotoExcluded,
   updateBook,
@@ -61,6 +62,28 @@ export async function createBookAction(): Promise<{ error: string } | never> {
   if (!result.ok) return { error: result.error };
   revalidatePath('/books');
   captureServerEvent(user.id, 'book_created', {
+    book_id: result.value.bookId,
+    chronicle_id: active.id,
+  });
+  redirect(`/books/${result.value.bookId}`);
+}
+
+/** Create the fixed story-first Birthday Book template from every ready story. */
+export async function createBirthdayBookAction(): Promise<{ error: string } | never> {
+  const user = await requireUser();
+  const { active } = await getActiveChronicle(user.id);
+  const { t } = await getI18n();
+  if (!active) return { error: t.books.needStories };
+
+  const result = await createBook({
+    chronicleId: active.id,
+    userId: user.id,
+    title: t.books.defaultBirthdayBookTitle(active.name),
+    template: 'birthday',
+  });
+  if (!result.ok) return { error: result.error };
+  revalidatePath('/books');
+  captureServerEvent(user.id, 'birthday_book_created', {
     book_id: result.value.bookId,
     chronicle_id: active.id,
   });
@@ -177,6 +200,18 @@ export async function setPhotoBookStyleAction(input: {
   const result = await setPhotoBookStyle({ ...input, userId: user.id });
   if (result.ok) revalidatePath(`/books/${input.bookId}`);
   return result.ok ? {} : { error: result.error };
+}
+
+/** Replace the Birthday Book cover collage selection (1-6 included photos). */
+export async function setBirthdayCoverPhotosAction(input: {
+  bookId: string;
+  assetIds: string[];
+}): Promise<{ coverAssetIds?: string[]; error?: string }> {
+  const user = await requireUser();
+  const result = await setBirthdayCoverPhotos({ ...input, userId: user.id });
+  if (!result.ok) return { error: result.error };
+  revalidatePath(`/books/${input.bookId}`);
+  return { coverAssetIds: result.value.coverAssetIds };
 }
 
 /** Rebuild the photo book's layout from scratch (the builder's "Regenerate" button).

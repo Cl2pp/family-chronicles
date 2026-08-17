@@ -2,6 +2,7 @@ import { type Browser } from 'puppeteer';
 import { withChromium } from '@/lib/chromium';
 import sharp from 'sharp';
 import { PDFDocument } from 'pdf-lib';
+import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { db } from '@/db';
 import { books, chronicles } from '@/db/schema';
@@ -25,7 +26,7 @@ import {
   type PrintTargetSizeMm,
 } from '@/lib/photo-book-content';
 import { embeddedFontFaceCss } from '@/lib/photo-book-fonts';
-import type { PhotoBookPlan } from '@/lib/photo-book-plan';
+import { photoBookTemplate, type PhotoBookPlan } from '@/lib/photo-book-plan';
 
 /**
  * The worker side of book rendering: load content, build/refresh the layout plan,
@@ -80,11 +81,29 @@ async function padPdf(pdf: Buffer): Promise<Buffer> {
 /** Sets `html` as a Chromium page's content and prints it to a PDF buffer — the one
  *  low-level step shared by every render, story or photo. All images (and, for photo
  *  books, fonts) are inline `data:`/embedded, so 'load' means the page is fully ready to
- *  print; nothing here waits on the network. */
-async function htmlToPdf(browser: Browser, html: string): Promise<Buffer> {
+ *  print; nothing here waits on the network.
+ *
+ * Birthday Books opt into the same bundled Paged.js engine used by the live preview.
+ * Chromium's native printer treats `break-before: left` as a plain page break and does
+ * not insert a parity sheet; Paged.js implements the paged-media rule and therefore
+ * keeps every story on the promised verso page in both the proof and final print PDFs. */
+async function htmlToPdf(browser: Browser, html: string, paginate: boolean = false): Promise<Buffer> {
   const page = await browser.newPage();
   try {
     await page.setContent(html, { waitUntil: 'load', timeout: 120_000 });
+    if (paginate) {
+      await page.evaluate(() => {
+        (window as typeof window & { PagedConfig?: { auto: boolean } }).PagedConfig = { auto: false };
+      });
+      await page.addScriptTag({
+        path: join(process.cwd(), 'node_modules/pagedjs/dist/paged.polyfill.min.js'),
+      });
+      await page.evaluate(async () => {
+        await (
+          window as typeof window & { PagedPolyfill: { preview: () => Promise<unknown> } }
+        ).PagedPolyfill.preview();
+      });
+    }
     const pdf = await page.pdf({
       printBackground: true,
       preferCSSPageSize: true,
@@ -229,7 +248,10 @@ async function renderPhotoBookVariant(
     watermarkText: 'VORSCHAU · PREVIEW',
   });
 
-  return { pdf: await htmlToPdf(browser, html), images: resolved };
+  return {
+    pdf: await htmlToPdf(browser, html, photoBookTemplate(plan) === 'birthday'),
+    images: resolved,
+  };
 }
 
 /**
@@ -276,18 +298,39 @@ async function buildGelatoPrintFile(
   try {
     const dims = await getGelatoCoverDimensions(productUid, input.innerPageCount);
 
-    // The hero has to cover the front panel AND the wrap around it — a taller, wider box
-    // than the single page it was embedded for, so re-embed it at that size rather than
-    // upscaling the print variant's copy.
+    // A standard hero covers the whole front panel AND its wrap. Birthday photos each
+    // occupy only one collage cell; sizing all six like full-panel heroes would make
+    // Chromium decode hundreds of unnecessary megapixels on the worker.
     const images = new Map(input.printImages);
-    const heroId = plan.cover.heroAssetId;
-    const hero = heroId ? loaded.photos.find((p) => p.assetId === heroId) : undefined;
-    if (heroId && hero?.width && hero.height) {
-      const src = await embedPhotoDataUri(hero, 'print', 'display', {
-        w: dims.spread.width - dims.contentFrontSize.left,
-        h: dims.spread.height,
-      });
-      if (src) images.set(heroId, { assetId: heroId, src, width: hero.width, height: hero.height });
+    const birthday = photoBookTemplate(plan) === 'birthday';
+    const coverIds = plan.cover.assetIds?.length
+      ? plan.cover.assetIds
+      : plan.cover.heroAssetId
+        ? [plan.cover.heroAssetId]
+        : [];
+    const birthdayCell = (() => {
+      if (!birthday) return null;
+      const count = Math.max(1, coverIds.length);
+      const widthFraction = count === 1 ? 1 : count === 2 || count === 4 || count === 5 ? 0.55 : 0.38;
+      const heightFraction = count <= 3 ? 0.8 : 0.5;
+      return {
+        w: (dims.spread.width - dims.contentFrontSize.left) * widthFraction,
+        h: dims.spread.height * heightFraction,
+      };
+    })();
+    for (const coverId of coverIds) {
+      const photo = loaded.photos.find((p) => p.assetId === coverId);
+      if (!photo?.width || !photo.height) continue;
+      const src = await embedPhotoDataUri(
+        photo,
+        'print',
+        'display',
+        birthdayCell ?? {
+          w: dims.spread.width - dims.contentFrontSize.left,
+          h: dims.spread.height,
+        },
+      );
+      if (src) images.set(coverId, { assetId: coverId, src, width: photo.width, height: photo.height });
     }
 
     const spreadPdf = await htmlToPdf(

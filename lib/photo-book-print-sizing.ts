@@ -4,7 +4,7 @@ import {
   rowStackCellSizesMm,
   TEMPLATE_ROW_ARRANGEMENT,
 } from '@/lib/photo-book-layout';
-import { isTextItem, type PhotoBookPlan } from '@/lib/photo-book-plan';
+import { isTextItem, photoBookTemplate, type PhotoBookPlan } from '@/lib/photo-book-plan';
 
 /** Pixel dimensions of the photos a plan places, keyed by assetId — lets the sizing
  *  functions below replay the renderer's exact justified-row math instead of guessing
@@ -40,9 +40,17 @@ export function countPhotoBookPages(
 ): number {
   const wordsByStory = new Map((stories ?? []).map((s) => [s.storyId, s.paragraphWordCounts]));
   const coverPages = 2; // front + back
-  let sectionPages = 0;
+  const birthday = photoBookTemplate(plan) === 'birthday';
+  let totalPages = coverPages;
   for (const section of plan.sections) {
-    sectionPages += 1; // divider
+    if (birthday && section.storyId) {
+      // Story starts use `break-before: left`. With the two cover sheets at the front,
+      // the next document page is odd/right; count the blank parity sheet Chromium or
+      // Paged.js inserts whenever the next story would otherwise open on the right.
+      if ((totalPages + 1) % 2 === 1) totalPages += 1;
+    } else {
+      totalPages += 1; // standard section divider
+    }
     for (const page of section.pages) {
       if (isTextItem(page)) {
         // A flowing text run spans as many pages as its words need — estimated, since
@@ -51,13 +59,13 @@ export function countPhotoBookPages(
         const words = counts
           ? counts.slice(page.from, page.to + 1).reduce((a, b) => a + b, 0)
           : WORDS_PER_TEXT_PAGE;
-        sectionPages += Math.max(1, Math.ceil(words / WORDS_PER_TEXT_PAGE));
+        totalPages += Math.max(1, Math.ceil(words / WORDS_PER_TEXT_PAGE));
       } else {
-        sectionPages += 1;
+        totalPages += 1;
       }
     }
   }
-  return coverPages + sectionPages;
+  return totalPages;
 }
 
 /** A photo's target size in mm — the physical box its template slot occupies on the
@@ -103,7 +111,12 @@ export function photoAssetPrintTargetSizeMm(
     sizes.set(id, prev ? { w: Math.max(prev.w, w), h: Math.max(prev.h, h) } : { w, h });
   }
 
-  if (plan.cover.heroAssetId) set(plan.cover.heroAssetId, pageW, pageH);
+  const birthday = photoBookTemplate(plan) === 'birthday';
+  if (!birthday && plan.cover.heroAssetId) set(plan.cover.heroAssetId, pageW, pageH);
+  // Birthday collage cells never exceed roughly half the cover in either direction;
+  // the same selection may also appear inside and the max-merge below keeps whichever
+  // role needs more resolution.
+  for (const id of plan.cover.assetIds ?? []) set(id, pageW * 0.55, pageH * 0.55);
   // Back-cover photos are fixed-size (`.pb-cover-back-photos .ph-frame` in
   // `lib/photo-book-layout.ts`).
   for (const id of plan.cover.backAssetIds ?? []) set(id, 40, 50);

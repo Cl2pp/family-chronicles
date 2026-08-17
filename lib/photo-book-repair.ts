@@ -1,5 +1,7 @@
 import {
   isTextItem,
+  photoBookTemplate,
+  PHOTO_BOOK_TEMPLATES,
   PHOTO_BOOK_STYLES,
   PHOTO_PAGE_TEMPLATES,
   PHOTO_PAGE_TEMPLATE_SLOTS,
@@ -7,6 +9,7 @@ import {
   templateRendersCaptions,
   type PhotoBookPlan,
   type PhotoBookStyle,
+  type PhotoBookTemplate,
   type PhotoFlowItem,
   type PhotoPagePlan,
   type PhotoPageTemplate,
@@ -63,6 +66,7 @@ export interface PhotoBookCoerceInput {
   photos: LintPhoto[];
   fallbackTitle: string;
   fallbackStyle: PhotoBookStyle;
+  fallbackTemplate?: PhotoBookTemplate;
   /** The book's story chapters (unified-book plan). Story content is only accepted when
    *  the caller declares it: without this, a `storyId` (and any text run under it) the
    *  model invented is stripped rather than persisted — otherwise a hallucinated id
@@ -94,6 +98,14 @@ export function coercePhotoBookPlan(
   const style = (PHOTO_BOOK_STYLES as readonly string[]).includes(styleValue ?? '')
     ? (styleValue as PhotoBookStyle)
     : input.fallbackStyle;
+  const templateValue = asString(obj.template);
+  // When the caller supplies a template it is authoritative book metadata, not a model
+  // design choice. Raw JSON is only consulted by generic import/repair callers that do
+  // not already know the owning book's structural recipe.
+  const bookTemplate = input.fallbackTemplate ??
+    ((PHOTO_BOOK_TEMPLATES as readonly string[]).includes(templateValue ?? '')
+      ? (templateValue as PhotoBookTemplate)
+      : undefined);
 
   const rawCover = (obj.cover && typeof obj.cover === 'object' ? obj.cover : {}) as Record<string, unknown>;
   const cover: PhotoBookPlan['cover'] = { title: asString(rawCover.title) ?? input.fallbackTitle };
@@ -101,6 +113,12 @@ export function coercePhotoBookPlan(
   if (subtitle) cover.subtitle = subtitle;
   const hero = asString(rawCover.heroAssetId);
   if (hero) cover.heroAssetId = hero;
+  const coverAssetIds = asArray(rawCover.assetIds)
+    .map(asString)
+    .filter((id): id is string => id != null)
+    .filter((id, index, ids) => ids.indexOf(id) === index)
+    .slice(0, 6);
+  if (coverAssetIds.length > 0) cover.assetIds = coverAssetIds;
   const backIds = asArray(rawCover.backAssetIds)
     .map(asString)
     .filter((id): id is string => id != null)
@@ -204,7 +222,10 @@ export function coercePhotoBookPlan(
     });
   });
 
-  return { plan: { kind: 'photo', style, cover, sections }, changes };
+  return {
+    plan: { kind: 'photo', ...(bookTemplate ? { template: bookTemplate } : {}), style, cover, sections },
+    changes,
+  };
 }
 
 function asIndex(value: unknown): number | null {
@@ -223,7 +244,7 @@ export interface PhotoBookRepairInput {
   /** Every photo currently available to the layout (`book_photos.excluded = false`), with
    *  dimensions — the same set `checkPhotoBookPlanConsistency` calls `availableAssetIds`,
    *  plus the shapes needed to re-pick a template. */
-  photos: LintPhoto[];
+  photos: Array<LintPhoto & { storyId?: string | null }>;
   /** Photos the user explicitly re-included (`book_photos.user_decision = 'include'`) —
    *  these MUST end up somewhere in the plan; any that the incoming plan omits are
    *  appended (see `appendMissingPhotos` below). */
@@ -357,25 +378,74 @@ function rebuildPage(page: PhotoPagePlan, survivors: LintPhoto[]): PhotoPagePlan
   return next;
 }
 
-/** Places photos the plan left out but must contain, as extra pages on the last section
- *  (or a new trailing one when the plan has no sections at all). */
+/** Places photos the plan left out but must contain. Birthday photos return to their own
+ * story section (creating it when a newly attached story is absent from the stale plan);
+ * unowned uploads get a separate trailing photo section. */
 function appendMissingPhotos(
   sections: PhotoSectionPlan[],
-  missing: LintPhoto[],
+  missing: Array<LintPhoto & { storyId?: string | null }>,
   fallbackTitle: string,
+  placeByStory: boolean,
+  stories?: PhotoBookRepairInput['stories'],
 ): PhotoSectionPlan[] {
   if (missing.length === 0) return sections;
+  if (placeByStory) {
+    const out = sections.slice();
+    const groups = new Map<string | null, Array<LintPhoto & { storyId?: string | null }>>();
+    for (const photo of missing) {
+      const key = photo.storyId ?? null;
+      groups.set(key, [...(groups.get(key) ?? []), photo]);
+    }
+    for (const [storyId, photos] of groups) {
+      const pages = pagesForPhotos(photos);
+      const index = storyId ? out.findIndex((section) => section.storyId === storyId) : -1;
+      if (index >= 0) {
+        out[index] = { ...out[index], pages: [...out[index].pages, ...pages] };
+      } else {
+        const story = storyId ? stories?.find((candidate) => candidate.storyId === storyId) : null;
+        if (storyId && story) {
+          out.push({
+            title: story.title?.trim() || fallbackTitle,
+            storyId,
+            pages,
+          });
+          continue;
+        }
+        let unownedIndex = -1;
+        for (let i = out.length - 1; i >= 0; i--) {
+          if (!out[i].storyId) {
+            unownedIndex = i;
+            break;
+          }
+        }
+        if (unownedIndex >= 0) {
+          out[unownedIndex] = {
+            ...out[unownedIndex],
+            pages: [...out[unownedIndex].pages, ...pages],
+          };
+        } else {
+          out.push({ title: fallbackTitle, pages });
+        }
+      }
+    }
+    return out;
+  }
+  const pages = pagesForPhotos(missing);
+  if (sections.length === 0) return [{ title: fallbackTitle, pages }];
+  const last = sections[sections.length - 1];
+  return [...sections.slice(0, -1), { ...last, pages: [...last.pages, ...pages] }];
+}
+
+function pagesForPhotos(photos: LintPhoto[]): PhotoPagePlan[] {
   const pages: PhotoPagePlan[] = [];
   let offset = 0;
-  for (const size of pageSizes(missing.length)) {
-    const group = missing.slice(offset, offset + size);
+  for (const size of pageSizes(photos.length)) {
+    const group = photos.slice(offset, offset + size);
     offset += size;
     const { template, ordered } = templateForGroup(group);
     pages.push({ template, assetIds: ordered.map((p) => p.assetId) } as PhotoPagePlan);
   }
-  if (sections.length === 0) return [{ title: fallbackTitle, pages }];
-  const last = sections[sections.length - 1];
-  return [...sections.slice(0, -1), { ...last, pages: [...last.pages, ...pages] }];
+  return pages;
 }
 
 /**
@@ -388,6 +458,7 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
   const changes: string[] = [];
   /** Every id already spoken for — the plan may place a photo at most once anywhere. */
   const used = new Set<string>();
+  const birthday = photoBookTemplate(plan) === 'birthday';
 
   function claim(id: string): LintPhoto | null {
     if (used.has(id)) return null;
@@ -399,7 +470,22 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
 
   // ── Cover ────────────────────────────────────────────────────────────────────
   const cover: PhotoBookPlan['cover'] = { ...plan.cover };
-  if (cover.heroAssetId && !claim(cover.heroAssetId)) {
+  if (birthday) {
+    const requested = cover.assetIds ?? (cover.heroAssetId ? [cover.heroAssetId] : []);
+    const kept = requested
+      .filter((id, index, ids) => byId.has(id) && ids.indexOf(id) === index)
+      .slice(0, 6);
+    if (kept.length !== requested.length) {
+      changes.push(`dropped ${requested.length - kept.length} unusable Birthday cover photo(s)`);
+    }
+    if (kept.length > 0) {
+      cover.assetIds = kept;
+      cover.heroAssetId = kept[0];
+    } else {
+      delete cover.assetIds;
+      delete cover.heroAssetId;
+    }
+  } else if (cover.heroAssetId && !claim(cover.heroAssetId)) {
     changes.push(`dropped cover hero ${cover.heroAssetId} (not an available photo)`);
     delete cover.heroAssetId;
   }
@@ -459,8 +545,14 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
   const missing = (input.mustInclude ?? [])
     .filter((id) => !used.has(id))
     .map((id) => byId.get(id))
-    .filter((p): p is LintPhoto => p != null);
-  let repaired = appendMissingPhotos(sections, missing, plan.sections[0]?.title ?? 'Weitere Fotos');
+    .filter((p): p is LintPhoto & { storyId?: string | null } => p != null);
+  let repaired = appendMissingPhotos(
+    sections,
+    missing,
+    plan.sections[0]?.title ?? 'Weitere Fotos',
+    birthday,
+    input.stories,
+  );
   if (missing.length > 0) {
     changes.push(`placed ${missing.length} photo(s) the user re-included but the plan had left out`);
     for (const p of missing) used.add(p.assetId);
@@ -469,13 +561,33 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
   // ── Text coverage (unified-book plan) ────────────────────────────────────────
   repaired = repairTextCoverage(repaired, input.stories, changes);
 
+  if (birthday) {
+    repaired = repaired.map((section) => {
+      if (!section.storyId) return section;
+      const text = section.pages.filter(isTextItem);
+      const photos = section.pages.filter((item) => !isTextItem(item));
+      if (text.length === 0 || photos.length === 0) return section;
+      const first = text[0];
+      const last = text[text.length - 1];
+      return {
+        ...section,
+        pages: [{ template: 'text' as const, from: first.from, to: last.to }, ...photos],
+      };
+    });
+  }
+
   // ── Cover hero of last resort ────────────────────────────────────────────────
   // A book with PHOTO content must have a front-cover photo
   // (`checkPhotoBookPlanConsistency`) — a text-only book has no photo a hero could be.
   // Prefer an unplaced photo so no page has to be rebuilt; only borrow from page one when
   // every available photo is already spoken for.
   const hasContent = repaired.some((s) => s.pages.some((p) => !isTextItem(p) && p.assetIds.length > 0));
-  if (hasContent && !cover.heroAssetId) {
+  if (birthday && hasContent && (!cover.assetIds || cover.assetIds.length === 0)) {
+    const picks = input.photos.slice(0, 6).map((photo) => photo.assetId);
+    cover.assetIds = picks;
+    cover.heroAssetId = picks[0];
+    changes.push(`picked ${picks.length} Birthday cover photo(s) (the plan had none)`);
+  } else if (!birthday && hasContent && !cover.heroAssetId) {
     const spare = input.photos.find((p) => !used.has(p.assetId));
     if (spare) {
       cover.heroAssetId = spare.assetId;

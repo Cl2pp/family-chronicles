@@ -224,6 +224,27 @@ describe('renderCoverSpreadHtml', () => {
     const html = spreadHtml(HARDCOVER_DIMS, { title: 'A & <B>' });
     expect(html).toContain('<h1>A &amp; &lt;B&gt;</h1>');
   });
+
+  it('uses the Birthday collage and date fallback on the printer cover spread', () => {
+    const birthdayPlan: PhotoBookPlan = {
+      kind: 'photo',
+      template: 'birthday',
+      style: 'classic',
+      cover: { title: 'Birthday Book', heroAssetId: 'a1', assetIds: ['a1', 'a2', 'a3'] },
+      sections: [],
+    };
+    const html = renderCoverSpreadHtml({
+      dims: HARDCOVER_DIMS,
+      plan: birthdayPlan,
+      chronicleName: 'Chronik Müller',
+      createdLabel: 'März 2026',
+      fontFaceCss: '',
+      images: new Map(),
+    });
+    expect(html).toContain('class="pb-spread-birthday-collage" data-count="3"');
+    expect(html).toContain('<p class="pb-spread-subtitle">März 2026</p>');
+    expect(html).not.toContain('class="pb-spread-hero"');
+  });
 });
 
 describe('spineTextFor', () => {

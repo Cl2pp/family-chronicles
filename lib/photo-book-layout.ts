@@ -1,5 +1,6 @@
 import {
   isTextItem,
+  photoBookTemplate,
   type PhotoBookPlan,
   type PhotoPagePlan,
   type PhotoPageTemplate,
@@ -196,13 +197,46 @@ function framedFigure(image: PhotoLayoutImage | undefined, caption?: string | nu
  * so text ↔ photo-page sequences break correctly with no extra rules (validated by the
  * unified-book spike). `first-of-section` drives the suite's drop cap.
  */
-function textFlowHtml(item: TextBlockPlan, paragraphs: string[], isFirstOfSection: boolean): string {
+function textFlowHtml(
+  item: TextBlockPlan,
+  paragraphs: string[],
+  isFirstOfSection: boolean,
+  birthdayHeading?: { title: string; dateLabel?: string },
+): string {
   const slice = paragraphs.slice(item.from, item.to + 1);
   if (slice.length === 0) return '';
   return `
       <div class="text-flow${isFirstOfSection ? ' first-of-section' : ''}">
+        ${
+          birthdayHeading
+            ? `<header class="pb-story-heading"><h2>${esc(birthdayHeading.title)}</h2>${
+                birthdayHeading.dateLabel
+                  ? `<p>${esc(birthdayHeading.dateLabel)}</p>`
+                  : ''
+              }</header>`
+            : ''
+        }
         ${slice.map((p) => `<p>${esc(p)}</p>`).join('\n')}
       </div>`;
+}
+
+/** Framed collage used by both the proof cover and the Gelato spread front. Exported so
+ * the spread renderer can reuse exactly the same image ordering/markup. */
+export function birthdayCoverCollageHtml(
+  assetIds: readonly string[],
+  images: Map<string, PhotoLayoutImage>,
+  className: string = 'pb-birthday-cover-collage',
+): string {
+  if (assetIds.length === 0) return '';
+  return `<div class="${className}" data-count="${assetIds.length}">${assetIds
+    .map(
+      (id, index) =>
+        `<div class="pb-birthday-cover-photo pb-birthday-cover-photo-${index + 1}">${img(
+          images.get(id),
+          'pb-birthday-cover-img',
+        )}</div>`,
+    )
+    .join('\n')}</div>`;
 }
 
 /** The page's content box in mm — what a content-box page's photos may fill. */
@@ -387,6 +421,7 @@ function renderPage(page: PhotoPagePlan, images: Map<string, PhotoLayoutImage>, 
 
 export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
   const style = PHOTO_STYLE_TOKENS[input.plan.style];
+  const birthday = photoBookTemplate(input.plan) === 'birthday';
   // Bleed only applies to `print`: `screen` is never printed, and `preview` is a proof,
   // not the binding print file — same split as `lib/book-layout.ts`'s `renderBookHtml`.
   // Bleed pages (cover front/back, divider) bleed to the physical page
@@ -483,7 +518,17 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
 
   // Cover front — always a bleed page (edge-to-edge hero photo).
   const coverHero = input.plan.cover.heroAssetId ? input.images.get(input.plan.cover.heroAssetId) : undefined;
-  const coverFront = `
+  const birthdayCoverIds = input.plan.cover.assetIds ?? (input.plan.cover.heroAssetId ? [input.plan.cover.heroAssetId] : []);
+  const coverFront = birthday
+    ? `
+    <section class="page pb-cover-front pb-birthday-cover">
+      ${birthdayCoverCollageHtml(birthdayCoverIds, input.images)}
+      <div class="pb-cover-text pb-birthday-cover-text">
+        <h1>${esc(input.plan.cover.title)}</h1>
+        <p class="pb-cover-subtitle">${esc(input.plan.cover.subtitle || input.createdLabel)}</p>
+      </div>
+    </section>`
+    : `
     <section class="page pb-cover-front">
       ${coverHero ? img(coverHero, 'ph-cover-bg-img') : ''}
       <div class="pb-cover-text">
@@ -519,7 +564,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
 
   const sectionsHtml = input.plan.sections
     .map((section) => {
-      const divider = `
+      const divider = birthday && section.storyId ? '' : `
       <section class="page pb-divider">
         <p class="pb-divider-kicker">${esc(input.chronicleName)}</p>
         <h2>${esc(section.title)}</h2>
@@ -536,13 +581,24 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
             if (!sectionParagraphs) return '';
             const isFirst = !firstTextSeen;
             firstTextSeen = true;
-            return textFlowHtml(page, sectionParagraphs, isFirst);
+            return textFlowHtml(
+              page,
+              sectionParagraphs,
+              isFirst,
+              birthday && isFirst ? { title: section.title, dateLabel: section.dateLabel } : undefined,
+            );
           }
           return renderPage(page, input.images, contentBox);
         })
         .join('\n');
 
-      return `${divider}\n${pages}`;
+      const content = `${divider}\n${pages}`;
+      // The parity opener belongs to the STORY SECTION, not its first text block: a user
+      // can intentionally disable a chapter's prose and its photo-only chapter must still
+      // begin on a left-hand page.
+      return birthday && section.storyId
+        ? `<div class="pb-birthday-story-start">${content}\n</div>`
+        : content;
     })
     .join('\n');
 
@@ -559,7 +615,7 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
     </section>`
       : '';
 
-  const toc = hasChapters
+  const toc = hasChapters && !birthday
     ? `
     <section class="page pb-toc">
       <h2>Inhalt</h2>
@@ -668,6 +724,17 @@ ${
   .text-flow.first-of-section > p:first-child::first-letter {
     font-size: calc(1em * var(--pb-dropcap-scale));
   }
+  /* A Birthday story always opens on the verso (left-hand/even) page. Browsers and
+     Paged.js insert one blank page when parity requires it. */
+  .pb-birthday-story-start { break-before: left; page-break-before: left; }
+  .pb-story-heading { margin: 0 0 10mm; break-after: avoid; }
+  .pb-story-heading h2 {
+    margin: 0 0 2mm;
+    font-family: var(--pb-font-heading);
+    font-size: 21pt;
+    line-height: 1.15;
+  }
+  .pb-story-heading p { margin: 0; color: var(--pb-color-muted); font-size: 9.5pt; }
 
   /* ---- Table of contents (only emitted for books with story chapters) ---- */
   .pb-toc {
@@ -725,6 +792,48 @@ ${
   .pb-cover-text h1 { font-family: var(--pb-font-heading); font-size: 26pt; margin: 0 0 3mm; font-weight: 700; }
   .pb-cover-subtitle { font-size: 12.5pt; margin: 0 0 3mm; opacity: 0.85; }
   .pb-cover-chronicle { font-size: 9.5pt; letter-spacing: 0.1em; font-variant: small-caps; margin: 0; opacity: 0.75; }
+
+  /* ---- Birthday Book cover: a framed, user-selected 1-6 photo collage ---- */
+  .pb-birthday-cover { background: var(--pb-cover-bg); align-items: stretch; }
+  .pb-birthday-cover-collage {
+    position: absolute;
+    inset: 10mm 10mm 45mm;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    grid-auto-rows: minmax(0, 1fr);
+    gap: 4mm;
+    align-items: stretch;
+  }
+  .pb-birthday-cover-photo {
+    grid-column: span 2;
+    min-width: 0;
+    min-height: 0;
+    padding: 2.2mm;
+    background: #fff;
+    border: 0.3mm solid rgba(30, 36, 48, 0.18);
+    box-shadow: 0 2mm 5mm rgba(20, 20, 20, 0.18);
+    overflow: hidden;
+  }
+  .pb-birthday-cover-collage[data-count="1"] .pb-birthday-cover-photo { grid-column: span 6; }
+  .pb-birthday-cover-collage[data-count="2"] .pb-birthday-cover-photo { grid-column: span 3; }
+  .pb-birthday-cover-collage[data-count="4"] .pb-birthday-cover-photo { grid-column: span 3; }
+  .pb-birthday-cover-collage[data-count="5"] .pb-birthday-cover-photo:nth-child(-n + 2) { grid-column: span 3; }
+  .pb-birthday-cover-photo:nth-child(3n + 1) { transform: rotate(-0.7deg); }
+  .pb-birthday-cover-photo:nth-child(3n + 2) { transform: rotate(0.6deg); }
+  .pb-birthday-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pb-birthday-cover-text {
+    position: absolute;
+    left: 16mm;
+    right: 16mm;
+    bottom: 13mm;
+    width: auto;
+    padding: 5mm 8mm;
+    text-align: center;
+    color: var(--pb-cover-heading-color);
+    background: color-mix(in srgb, var(--pb-cover-bg) 92%, transparent);
+  }
+  .pb-birthday-cover-text h1 { margin-bottom: 1.5mm; }
+  .pb-birthday-cover-text .pb-cover-subtitle { margin: 0; color: var(--pb-cover-muted-color); }
 
   .pb-cover-back {
     background: var(--pb-cover-back-bg);

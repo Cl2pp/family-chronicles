@@ -75,6 +75,53 @@ describe('renderPhotoBookHtml', () => {
     }
   });
 
+  it('renders the Birthday recipe with a cover collage, no contents/divider, and left-page story starts', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { heroAssetId: 'a1', assetIds: ['a1', 'a2', 'a3', 'a4'], title: 'Birthday Book' },
+      sections: [
+        {
+          title: 'Omas Geburtstag',
+          dateLabel: '12. Mai 2025',
+          storyId: 'story-1',
+          pages: [
+            { template: 'text', from: 0, to: 1 },
+            { template: 'collage-4', assetIds: ['a1', 'a2', 'a3', 'a4'] },
+          ],
+        },
+      ],
+    });
+    const html = renderPhotoBookHtml(
+      baseInput({
+        plan,
+        storyParagraphs: new Map([['story-1', ['Der erste Absatz.', 'Der zweite Absatz.']]]),
+      }),
+    );
+
+    expect(html).toContain('class="pb-birthday-cover-collage" data-count="4"');
+    expect(html).toContain('<h2>Omas Geburtstag</h2>');
+    expect(html).toContain('12. Mai 2025');
+    expect(html).toContain('break-before: left');
+    expect(html).toContain('<p class="pb-cover-subtitle">July 2026</p>');
+    expect(html).not.toContain('<section class="page pb-toc">');
+    expect(html).not.toContain('<section class="page pb-divider">');
+    expect(html.indexOf('Der erste Absatz.')).toBeLessThan(html.indexOf('class="page photo-page pb-rows-page"'));
+  });
+
+  it('puts the Birthday parity opener around photo-only story sections too', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { heroAssetId: 'a1', assetIds: ['a1', 'a2'], title: 'Birthday Book' },
+      sections: [
+        { title: 'Photo story one', storyId: 's1', pages: [{ template: 'full-framed', assetIds: ['a1'] }] },
+        { title: 'Photo story two', storyId: 's2', pages: [{ template: 'full-framed', assetIds: ['a2'] }] },
+      ],
+    });
+    const html = renderPhotoBookHtml(baseInput({ plan, storyParagraphs: new Map() }));
+    expect(html.match(/class="pb-birthday-story-start"/g)).toHaveLength(2);
+    expect(html).toContain('.pb-birthday-story-start { break-before: left;');
+  });
+
   it('gives the divider-page template an explicit full-sheet size so it never collapses to a blank page', () => {
     // Regression: `.pb-divider-page` used to be only `position: relative` with no
     // width/height; its sole child (`.ph-divider-bg`) is absolutely positioned, so the

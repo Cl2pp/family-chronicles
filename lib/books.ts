@@ -35,14 +35,17 @@ import {
   countPhotoBookPages,
   loadOrBuildPhotoPlan,
   loadPhotoBook,
+  planChapters,
   referencedPhotoAssetIds,
 } from '@/lib/photo-book-content';
 import {
   checkPhotoBookPlanConsistency,
   isTextItem,
+  photoBookTemplate,
   validatePhotoBookPlan,
   type PhotoBookPlan,
   type PhotoBookStyle,
+  type PhotoBookTemplate,
   type PhotoPageTemplate,
   type PhotoPlanContent,
 } from '@/lib/photo-book-plan';
@@ -504,6 +507,8 @@ export async function createBook(input: {
   userId: string;
   title: string;
   storyIds?: string[];
+  /** Structural recipe to seed. Omitted keeps the existing standard story book. */
+  template?: PhotoBookTemplate;
 }): Promise<Result<{ bookId: string; customOrder: boolean }>> {
   const gate = await ensureBookAccess(input.chronicleId, input.userId);
   if (!gate.ok) return gate;
@@ -530,12 +535,24 @@ export async function createBook(input: {
     // is truthful from the start. The default list above IS in date order.
     const custom = input.storyIds !== undefined && !isDateOrdered(storyIds, await storyDateKeys(tx, storyIds));
     customOrder = custom;
+    const title = input.title.trim() || 'Familienwerk';
     const [created] = await tx
       .insert(books)
       .values({
         chronicleId: input.chronicleId,
         createdBy: input.userId,
-        title: input.title.trim() || 'Familienwerk',
+        title,
+        ...(input.template === 'birthday'
+          ? {
+              layoutPlan: {
+                kind: 'photo',
+                template: 'birthday',
+                style: 'classic',
+                cover: { title },
+                sections: [],
+              } satisfies PhotoBookPlan,
+            }
+          : {}),
         ...(custom ? { photoGrouping: 'custom' } : {}),
       })
       .returning();
@@ -1186,7 +1203,7 @@ export async function setPhotoExcluded(input: {
 export async function getPhotoBookStyle(
   bookId: string,
   userId: string,
-): Promise<Result<{ style: PhotoBookStyle }>> {
+): Promise<Result<{ style: PhotoBookStyle; template: PhotoBookTemplate; coverAssetIds: string[] }>> {
   const [row] = await db
     .select({ chronicleId: books.chronicleId, layoutPlan: books.layoutPlan, layoutStale: books.layoutStale })
     .from(books)
@@ -1198,14 +1215,85 @@ export async function getPhotoBookStyle(
 
   if (row.layoutPlan && !row.layoutStale) {
     const validated = validatePhotoBookPlan(row.layoutPlan);
-    if (validated.ok) return { ok: true, value: { style: validated.plan.style } };
+    if (validated.ok) {
+      return {
+        ok: true,
+        value: {
+          style: validated.plan.style,
+          template: photoBookTemplate(validated.plan),
+          coverAssetIds: validated.plan.cover.assetIds ?? [],
+        },
+      };
+    }
     // Falls through to the full build below — same "rebuild on invalid stored plan"
     // behavior `loadOrBuildPhotoPlan` has, just reached via the cheap path's own check.
   }
 
   const loaded = await loadPhotoBook(bookId);
   const plan = await loadOrBuildPhotoPlan(bookId, loaded);
-  return { ok: true, value: { style: plan.style } };
+  return {
+    ok: true,
+    value: {
+      style: plan.style,
+      template: photoBookTemplate(plan),
+      coverAssetIds: plan.cover.assetIds ?? [],
+    },
+  };
+}
+
+/** Replaces the Birthday Book's user-controlled front-cover collage selection. Cover
+ * photos remain in their story pages; this is a decorative reference list, not a move.
+ * The first selected photo is mirrored into the legacy single-cover column so existing
+ * tooling that asks for a primary cover still gets a useful answer. */
+export async function setBirthdayCoverPhotos(input: {
+  bookId: string;
+  userId: string;
+  assetIds: string[];
+}): Promise<Result<{ coverAssetIds: string[] }>> {
+  const gate = await editablePhotoBook(input.bookId, input.userId);
+  if (!gate.ok) return gate;
+
+  const assetIds = [...new Set(input.assetIds)];
+  if (assetIds.length > 6) return err('A Birthday Book cover can use at most 6 photos.');
+
+  const availableRows = await db
+    .select({ assetId: bookPhotos.assetId })
+    .from(bookPhotos)
+    .where(and(eq(bookPhotos.bookId, input.bookId), eq(bookPhotos.excluded, false)));
+  const available = new Set(availableRows.map((row) => row.assetId));
+  if (available.size > 0 && assetIds.length === 0) {
+    return err('Choose at least one photo for the Birthday Book cover.');
+  }
+  const unavailable = assetIds.filter((id) => !available.has(id));
+  if (unavailable.length > 0) return err('Every cover photo must be included in this book.');
+
+  const loaded = await loadPhotoBook(input.bookId);
+  const plan = await loadOrBuildPhotoPlan(input.bookId, loaded);
+  if (photoBookTemplate(plan) !== 'birthday') {
+    return err('Cover collages are only available for the Birthday Book template.');
+  }
+  const next: PhotoBookPlan = {
+    ...plan,
+    cover: {
+      ...plan.cover,
+      assetIds,
+      heroAssetId: assetIds[0],
+    },
+  };
+  const validated = validatePhotoBookPlan(next);
+  if (!validated.ok) return err(`That cover selection is invalid: ${validated.error}`);
+
+  await db
+    .update(books)
+    .set({
+      coverAssetId: assetIds[0] ?? null,
+      layoutPlan: validated.plan,
+      layoutStale: false,
+      updatedAt: new Date(),
+      ...invalidatePhotoBookPrint(gate.status),
+    })
+    .where(eq(books.id, input.bookId));
+  return { ok: true, value: { coverAssetIds: assetIds } };
 }
 
 /**
@@ -1763,6 +1851,11 @@ export async function updatePhotoBookLayout(input: {
     const content: PhotoPlanContent = {
       availableAssetIds: [...availableIds],
       allAssetIds: [...allIds],
+      stories: planChapters(loaded),
+      photoStoryIds: loaded.photos.map((photo) => ({
+        assetId: photo.assetId,
+        storyId: photo.storyId,
+      })),
     };
     const problems = checkPhotoBookPlanConsistency(validated.plan, content);
     if (problems.length > 0) {

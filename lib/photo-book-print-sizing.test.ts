@@ -59,6 +59,50 @@ describe('countPhotoBookPages', () => {
   it('always counts the 2 cover pages even for a content-free plan', () => {
     expect(countPhotoBookPages(basePlan({ sections: [] }))).toBe(2);
   });
+
+  it('counts the blank parity sheets that keep Birthday stories on left pages', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { title: 'Geburtstagsbuch', heroAssetId: 'a', assetIds: ['a'] },
+      sections: [
+        {
+          title: 'A',
+          storyId: 's1',
+          pages: [
+            { template: 'text', from: 0, to: 0 },
+            { template: 'full-framed', assetIds: ['a'] },
+          ],
+        },
+        {
+          title: 'B',
+          storyId: 's2',
+          pages: [
+            { template: 'text', from: 0, to: 0 },
+            { template: 'full-framed', assetIds: ['b'] },
+          ],
+        },
+      ],
+    });
+    // Cover sheets 1-2, blank right page 3, story A on 4 + photo on 5,
+    // story B on 6 + photo on 7.
+    expect(countPhotoBookPages(plan, [
+      { storyId: 's1', paragraphWordCounts: [20] },
+      { storyId: 's2', paragraphWordCounts: [20] },
+    ])).toBe(7);
+  });
+
+  it('keeps consecutive photo-only Birthday chapters on left pages too', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { title: 'Geburtstagsbuch', heroAssetId: 'a', assetIds: ['a'] },
+      sections: [
+        { title: 'A', storyId: 's1', pages: [{ template: 'full-framed', assetIds: ['a'] }] },
+        { title: 'B', storyId: 's2', pages: [{ template: 'full-framed', assetIds: ['b'] }] },
+      ],
+    });
+    // Cover 1-2, blank 3, story A photo 4, blank 5, story B photo 6.
+    expect(countPhotoBookPages(plan)).toBe(6);
+  });
 });
 
 describe('photoAssetPrintTargetSizeMm', () => {
