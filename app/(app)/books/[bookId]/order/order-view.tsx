@@ -138,6 +138,8 @@ export function OrderView({
   // Gelato. So: refresh fast while the hand-off is in flight, slowly while the order is
   // live, and not at all once it has finished, failed or been cancelled.
   const orderStatus = ordering.order?.status;
+  const cancelledOrder = orderStatus === 'cancelled' ? ordering.order : null;
+  const liveOrder = ordering.order && orderStatus !== 'cancelled' ? ordering.order : null;
   useEffect(() => {
     if (!orderStatus) return;
     if (orderStatus === 'delivered' || orderStatus === 'failed' || orderStatus === 'cancelled') {
@@ -347,11 +349,15 @@ export function OrderView({
       </Card>
       )}
 
-      {/* Once an order exists it outranks everything else here — including the `preparing`
-          gate, so a placed order stays visible even if the book is mid-render for some
-          other reason. */}
-      {!book.accessBlocked && ordering.order ? (
-        <OrderStatusCard order={ordering.order} />
+      {/* A LIVE order (anything but `cancelled`) outranks everything else here — including
+          the `preparing` gate, so a placed order stays visible even if the book is
+          mid-render for some other reason. A `cancelled` order is history, not a blocker:
+          the server already allows a fresh order once the last one is cancelled/failed
+          (`placeBookOrder`), so its card is shown for the record and the normal ordering
+          UI follows underneath. */}
+      {!book.accessBlocked && cancelledOrder && <OrderStatusCard order={cancelledOrder} />}
+      {!book.accessBlocked && liveOrder ? (
+        <OrderStatusCard order={liveOrder} />
       ) : !book.accessBlocked && !preparing ? (
         // The in-app order form is only for the few accounts `canUserOrderBooks` allows,
         // and only when there is a real price to charge against. Everyone else — and the
