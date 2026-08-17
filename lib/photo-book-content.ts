@@ -599,6 +599,7 @@ export async function backfillPhotoBookDimensionsFromOriginals(
 // here anyway so existing callers of this module don't need a second import.
 export {
   countPhotoBookPages,
+  croppedSquareTargetMm,
   photoAssetPrintTargetSizeMm,
   photoSlotPrintWidthsMm,
   type PhotoDimsById,

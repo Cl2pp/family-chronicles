@@ -9,11 +9,17 @@ import { books, chronicles } from '@/db/schema';
 import { deleteObject, getObjectBuffer, putObjectBuffer } from '@/lib/s3';
 import { env } from '@/lib/env';
 import { MIN_PAGES, MAX_PAGES, getGelatoCoverDimensions, productUidForFormat } from '@/lib/gelato';
-import { assembleGelatoPdf, countGelatoInnerPages, renderCoverSpreadHtml } from '@/lib/book-print-file';
+import {
+  assembleGelatoPdf,
+  birthdayCoverSpreadTileMm,
+  countGelatoInnerPages,
+  renderCoverSpreadHtml,
+} from '@/lib/book-print-file';
 import { TRIM } from '@/lib/book-content';
 import { renderPhotoBookHtml, type PhotoLayoutImage } from '@/lib/photo-book-layout';
 import {
   backfillPhotoBookDimensionsFromOriginals,
+  croppedSquareTargetMm,
   loadOrBuildPhotoPlan,
   loadPhotoBook,
   photoAssetPrintTargetSizeMm,
@@ -305,9 +311,12 @@ async function buildGelatoPrintFile(
   }
   try {
     const dims = await getGelatoCoverDimensions(productUid, input.innerPageCount);
+    // One label for the whole spread: the Birthday cover falls back to it when the plan has
+    // no subtitle, and the subtitle is part of what the collage geometry below measures.
+    const createdLabel = printCreatedLabel();
 
     // A standard hero covers the whole front panel AND its wrap. Birthday photos each
-    // occupy only one collage cell; sizing all six like full-panel heroes would make
+    // occupy only one square collage tile; sizing them like full-panel heroes would make
     // Chromium decode hundreds of unnecessary megapixels on the worker.
     const images = new Map(input.printImages);
     const birthday = photoBookTemplate(plan) === 'birthday';
@@ -316,16 +325,19 @@ async function buildGelatoPrintFile(
       : plan.cover.heroAssetId
         ? [plan.cover.heroAssetId]
         : [];
-    const birthdayCell = (() => {
-      if (!birthday) return null;
-      const count = Math.max(1, coverIds.length);
-      const widthFraction = count === 1 ? 1 : count === 2 || count === 4 || count === 5 ? 0.55 : 0.38;
-      const heightFraction = count <= 3 ? 0.8 : 0.5;
-      return {
-        w: (dims.spread.width - dims.contentFrontSize.left) * widthFraction,
-        h: dims.spread.height * heightFraction,
-      };
-    })();
+    // The tile comes from the spread renderer's OWN geometry (`renderCoverSpreadHtml` calls
+    // the same helper with the same front-panel box), never from a guessed fraction of the
+    // spread — the previous fractions still described a retired six-column grid and printed
+    // a 3-photo cover at ~185 dpi, narrower than the tile it lands in.
+    const birthdayTileMm =
+      birthday && coverIds.length > 0
+        ? birthdayCoverSpreadTileMm({
+            dims,
+            plan,
+            createdLabel,
+            coverPhotoCount: coverIds.length,
+          })
+        : null;
     for (const coverId of coverIds) {
       const photo = loaded.photos.find((p) => p.assetId === coverId);
       if (!photo?.width || !photo.height) continue;
@@ -333,10 +345,15 @@ async function buildGelatoPrintFile(
         photo,
         'print',
         'display',
-        birthdayCell ?? {
-          w: dims.spread.width - dims.contentFrontSize.left,
-          h: dims.spread.height,
-        },
+        // A tile crops (`object-fit: cover`), so the pixel budget is the box the crop
+        // needs, not the square itself — `croppedSquareTargetMm`, the same correction the
+        // proof cover's budget uses.
+        birthdayTileMm != null
+          ? croppedSquareTargetMm(birthdayTileMm, photo.width / photo.height)
+          : {
+              w: dims.spread.width - dims.contentFrontSize.left,
+              h: dims.spread.height,
+            },
       );
       if (src) {
         images.set(coverId, {
@@ -355,7 +372,7 @@ async function buildGelatoPrintFile(
         dims,
         plan,
         chronicleName: input.chronicleName,
-        createdLabel: printCreatedLabel(),
+        createdLabel,
         fontFaceCss: embeddedFontFaceCss(plan.style),
         images,
       }),

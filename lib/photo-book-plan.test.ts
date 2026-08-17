@@ -109,7 +109,7 @@ describe('validatePhotoBookPlan', () => {
     // Anything that isn't a stored cover selection reports nothing to trim, so an ordinary
     // book never gets a spurious change (and so never writes on read).
     for (const notACover of [null, undefined, 'nonsense', [], {}, { cover: {} }, basePlan()]) {
-      expect(storedCoverPhotoCount(notACover)).toBeLessThanOrEqual(BIRTHDAY_COVER_PHOTO_MAX);
+      expect(storedCoverPhotoCount(notACover)).toBe(0);
     }
   });
 

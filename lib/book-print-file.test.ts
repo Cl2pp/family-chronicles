@@ -14,8 +14,17 @@ import { PDFDocument } from 'pdf-lib';
  */
 vi.mock('@/lib/env', () => ({ env: {} }));
 
-import { assembleGelatoPdf, countGelatoInnerPages, gelatoInnerPageCount, renderCoverSpreadHtml, spineTextFor } from './book-print-file';
+import {
+  assembleGelatoPdf,
+  birthdayCoverSpreadGeometryMm,
+  birthdayCoverSpreadTileMm,
+  countGelatoInnerPages,
+  gelatoInnerPageCount,
+  renderCoverSpreadHtml,
+  spineTextFor,
+} from './book-print-file';
 import { MAX_PAGES, type GelatoCoverDimensions } from './gelato';
+import { croppedSquareTargetMm } from './photo-book-print-sizing';
 import type { PhotoBookPlan } from './photo-book-plan';
 
 const COVER_W = 100;
@@ -147,6 +156,20 @@ const HARDCOVER_DIMS: GelatoCoverDimensions = {
   spineSize: { width: 6, height: 285, left: 231, top: 20 },
   jointFrontSize: { width: 8, height: 285, left: 237, top: 20 },
   contentFrontSize: { width: 203, height: 285, left: 245, top: 20 },
+};
+
+/** The same shape for a 20×20 square hardcover — the height-constrained cover, where the
+ *  title block's room comes out of the collage rather than out of slack. */
+const SQUARE_DIMS: GelatoCoverDimensions = {
+  productUid: 'test-uid-square',
+  pagesCount: 38,
+  spread: { width: 448, height: 245, left: 0, top: 0 },
+  wraparoundInsideSize: { width: 448, height: 245, left: 0, top: 0 },
+  contentBackSize: { width: 193, height: 205, left: 20, top: 20 },
+  jointBackSize: { width: 8, height: 205, left: 213, top: 20 },
+  spineSize: { width: 6, height: 205, left: 221, top: 20 },
+  jointFrontSize: { width: 8, height: 205, left: 227, top: 20 },
+  contentFrontSize: { width: 193, height: 205, left: 235, top: 20 },
 };
 
 function plan(overrides: Partial<PhotoBookPlan['cover']> = {}): PhotoBookPlan {
@@ -285,6 +308,10 @@ describe('renderCoverSpreadHtml', () => {
     expect(html).toContain('grid-template-columns: repeat(2, 91.50mm);');
     expect(html).toContain('grid-auto-rows: 91.50mm;');
     expect(html).toMatch(/\.pb-spread-birthday-text \{\s*flex: 0 0 auto;/);
+    // Title→subtitle gap = COVER_TITLE_METRICS.gapMm, the same one the proof cover uses.
+    // The standard spread's own 3mm would space the printed cover differently from the
+    // proof the user approved.
+    expect(html).toContain('.pb-spread-birthday-text h1 { margin-bottom: 1.50mm; }');
 
     // The same per-count arrangements the proof cover uses: one photo fills the square,
     // three centre the odd tile across the bottom row, 2 and 4 need no rule at all.
@@ -306,6 +333,85 @@ describe('renderCoverSpreadHtml', () => {
     expect(collageRules.length).toBeGreaterThan(0);
     expect(collageRules.join('\n')).not.toContain('grid-column: span');
     expect(collageRules.join('\n')).not.toContain('repeat(6, 1fr)');
+  });
+});
+
+describe('birthdayCoverSpreadGeometryMm', () => {
+  const birthdayPlan = (assetIds: string[], title = 'Birthday Book'): PhotoBookPlan => ({
+    kind: 'photo',
+    template: 'birthday',
+    style: 'classic',
+    cover: { title, heroAssetId: assetIds[0], assetIds },
+    sections: [],
+  });
+
+  it('reports the very square and tile the spread stylesheet prints', () => {
+    // The point of the helper: `lib/book-render.ts` sizes the cover photos it embeds from
+    // this, and `renderCoverSpreadHtml` writes its CSS from the same call — so the numbers
+    // here must BE the numbers in the document, not a second estimate of them.
+    const plan = birthdayPlan(['a1', 'a2', 'a3']);
+    const { collage, inset } = birthdayCoverSpreadGeometryMm({
+      dims: HARDCOVER_DIMS,
+      plan,
+      createdLabel: 'März 2026',
+    });
+    const html = renderCoverSpreadHtml({
+      dims: HARDCOVER_DIMS,
+      plan,
+      chronicleName: 'Chronik Müller',
+      createdLabel: 'März 2026',
+      fontFaceCss: '',
+      images: new Map(),
+    });
+    expect(collage.side).toBeCloseTo(187, 2);
+    expect(collage.cell).toBeCloseTo(91.5, 2);
+    expect(html).toContain(`width: ${collage.side.toFixed(2)}mm;`);
+    expect(html).toContain(`grid-template-columns: repeat(2, ${collage.cell.toFixed(2)}mm);`);
+    expect(html).toContain(
+      `padding: ${inset.top.toFixed(2)}mm ${inset.right.toFixed(2)}mm ${inset.bottom.toFixed(2)}mm ${inset.left.toFixed(2)}mm;`,
+    );
+    // The subtitle the geometry measured is the one that gets printed under the title.
+    expect(html).toContain('<p class="pb-spread-subtitle">März 2026</p>');
+  });
+
+  it('gives the printed cover photos 300 dpi across the crop, whatever their shape', () => {
+    // The bug this replaces: `buildGelatoPrintFile` sized these from fractions of a retired
+    // six-column grid (0.38 × the front half for 3 photos), which handed a 3:2 landscape
+    // 1001 × 667 px for a 91.5mm tile — ~185 dpi, and narrower than the tile itself.
+    const mmToPx = (v: number) => Math.max(1, Math.round((v / 25.4) * 300));
+    const croppedSquarePx = (budget: { w: number; h: number }, aspect: number) => {
+      const boxW = mmToPx(budget.w);
+      const boxH = mmToPx(budget.h);
+      const fitted = boxW / boxH <= aspect ? { w: boxW, h: boxW / aspect } : { w: boxH * aspect, h: boxH };
+      return Math.min(fitted.w, fitted.h);
+    };
+
+    for (const dims of [HARDCOVER_DIMS, SQUARE_DIMS]) {
+      for (const count of [1, 2, 3, 4]) {
+        const assetIds = ['a1', 'a2', 'a3', 'a4'].slice(0, count);
+        const tile = birthdayCoverSpreadTileMm({
+          dims,
+          plan: birthdayPlan(assetIds),
+          createdLabel: 'März 2026',
+          coverPhotoCount: count,
+        });
+        const { collage } = birthdayCoverSpreadGeometryMm({
+          dims,
+          plan: birthdayPlan(assetIds),
+          createdLabel: 'März 2026',
+        });
+        expect(tile, `${dims.productUid} ${count}: lone photo fills the square`).toBeCloseTo(
+          count === 1 ? collage.side : collage.cell,
+          6,
+        );
+        for (const [shape, aspect] of [['landscape', 3 / 2], ['portrait', 2 / 3], ['square', 1]] as const) {
+          const budget = croppedSquareTargetMm(tile, aspect);
+          const where = `${dims.productUid} ${count}-photo ${shape}`;
+          expect(croppedSquarePx(budget, aspect) / (tile / 25.4), `${where}: dpi`).toBeGreaterThan(299);
+          expect(budget.w, `${where}: never narrower than its tile`).toBeGreaterThanOrEqual(tile);
+        }
+      }
+    }
   });
 });
 

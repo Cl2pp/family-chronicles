@@ -339,6 +339,14 @@ const BIRTHDAY_COVER_INSET_MM = { top: 10, side: 10, bottom: 18 } as const;
  *  of that block's own top padding. */
 const BIRTHDAY_COVER_TITLE_GAP_MM = 4;
 
+/** Most of the cover's inner box the title block may ever take from the collage. `title` is
+ *  user-typed, so its estimated height is unbounded — without this cap a pathological one
+ *  reserved nearly the whole box and left the photographs as ~3mm stamps, which is not a
+ *  cover at all. Past the cap the title simply keeps wrapping past the bottom of its own
+ *  room (the sheet clips it) while the collage keeps a usable floor: at 20×20 that floor is
+ *  ~94mm, at 21×28 ~138mm. */
+const BIRTHDAY_COVER_TITLE_MAX_FRACTION = 0.45;
+
 /** `body { line-height }` — unitless, so every block inherits it, the cover's title and
  *  subtitle included. */
 const BODY_LINE_HEIGHT = 1.5;
@@ -353,7 +361,10 @@ export const COVER_TITLE_METRICS = {
   titlePt: 26,
   /** `.pb-cover-subtitle`. */
   subtitlePt: 12.5,
-  /** `.pb-birthday-cover-text h1`'s margin-bottom. */
+  /** The margin-bottom under the Birthday cover title, in BOTH renderers:
+   *  `.pb-birthday-cover-text h1` here and `.pb-spread-birthday-text h1` on the Gelato
+   *  spread (`lib/book-print-file.ts`). The proof a user approves and the sheet that gets
+   *  printed have to space title and subtitle identically. */
   gapMm: 1.5,
   /** `.pb-birthday-cover-text` padding. */
   padTopMm: 5,
@@ -419,11 +430,17 @@ export function birthdayCoverFrontGeometryMm(input: {
   title: string;
   subtitle: string;
 }): { side: number; cell: number; titleMm: number } {
-  const titleMm = estimateBirthdayCoverTitleMm({
-    title: input.title,
-    subtitle: input.subtitle,
-    widthMm: Math.max(1, input.inner.w - COVER_TITLE_METRICS.padSideMm * 2),
-  });
+  // Capped at BIRTHDAY_COVER_TITLE_MAX_FRACTION of the box: past that the collage would be
+  // stamps, so a runaway title wraps on past its room (and is clipped by the sheet) instead
+  // of eating the cover.
+  const titleMm = Math.min(
+    estimateBirthdayCoverTitleMm({
+      title: input.title,
+      subtitle: input.subtitle,
+      widthMm: Math.max(1, input.inner.w - COVER_TITLE_METRICS.padSideMm * 2),
+    }),
+    input.inner.h * BIRTHDAY_COVER_TITLE_MAX_FRACTION,
+  );
   const side = Math.max(
     PHOTO_GAP_MM,
     Math.min(input.inner.w, input.inner.h - titleMm - BIRTHDAY_COVER_TITLE_GAP_MM),
@@ -995,7 +1012,11 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
               sectionParagraphs,
               isFirst,
               birthday && isFirst ? { title: section.title } : undefined,
-              shared ? sharedPhotoBlockHtml(shared.page, input.images, sharedPhotoBox) : '',
+              // `isFirst` as well as `shared`: the gate only ever fires on a section with
+              // exactly ONE text run today, so the two are equivalent — but if it is ever
+              // loosened, the block belongs to the FIRST run, and without this it would be
+              // emitted once per run (i.e. the same photos printed several times).
+              shared && isFirst ? sharedPhotoBlockHtml(shared.page, input.images, sharedPhotoBox) : '',
             );
           }
           // Already rendered inside the text flow above.
@@ -1243,7 +1264,10 @@ ${
     ${!birthday && input.plan.cover.heroAssetId ? 'color: #fff;' : ''}
     width: 100%;
   }
-  .pb-cover-text h1 { font-family: var(--pb-font-heading); font-size: ${COVER_TITLE_METRICS.titlePt}pt; margin: 0 0 3mm; font-weight: 700; }
+  /* overflow-wrap: a title is user-typed, and one unbreakable 200-character "word" would
+     otherwise run straight off the sheet edge instead of wrapping. Nothing a real title
+     does changes: it only ever breaks a word that has no break opportunity at all. */
+  .pb-cover-text h1 { font-family: var(--pb-font-heading); font-size: ${COVER_TITLE_METRICS.titlePt}pt; margin: 0 0 3mm; font-weight: 700; overflow-wrap: anywhere; }
   .pb-cover-subtitle { font-size: ${COVER_TITLE_METRICS.subtitlePt}pt; margin: 0 0 3mm; opacity: 0.85; }
   .pb-cover-chronicle { font-size: 9.5pt; letter-spacing: 0.1em; font-variant: small-caps; margin: 0; opacity: 0.75; }
 

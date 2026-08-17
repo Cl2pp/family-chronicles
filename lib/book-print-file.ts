@@ -180,6 +180,78 @@ function areaStyle(a: GelatoCoverArea): string {
   return `left: ${mm(a.left)}; top: ${mm(a.top)}; width: ${mm(a.width)}; height: ${mm(a.height)};`;
 }
 
+/** How far `.pb-spread-front-text` is padded off the spread's right/bottom edges: the wrap
+ *  that lies outside the front panel, plus the safe inset, so every line sits inside
+ *  `contentFrontSize`. */
+function frontTextPadMm(dims: GelatoCoverDimensions): { right: number; bottom: number } {
+  const { spread, contentFrontSize: front } = dims;
+  return {
+    right: spread.width - (front.left + front.width) + FRONT_TEXT_INSET_MM,
+    bottom: spread.height - (front.top + front.height) + FRONT_TEXT_INSET_MM + 4,
+  };
+}
+
+/**
+ * The Birthday front panel of the Gelato spread, in millimetres: the padding
+ * `.pb-spread-front-birthday` gets, and the collage geometry inside it.
+ *
+ * Exported because `lib/book-render.ts` has to size the cover photos it embeds for THIS
+ * spread from the same numbers the spread's own stylesheet uses — it used to size them from
+ * hard-coded fractions of a retired six-column grid, which printed a 3-photo cover at ~185
+ * dpi. One helper, called by both, is what keeps the file that gets printed and the pixels
+ * embedded into it describing the same tile.
+ */
+export function birthdayCoverSpreadGeometryMm(input: {
+  dims: GelatoCoverDimensions;
+  plan: PhotoBookPlan;
+  /** The month-and-year line the cover falls back to when the plan has no subtitle. */
+  createdLabel: string;
+}): {
+  subtitle: string;
+  inset: { left: number; top: number; right: number; bottom: number };
+  collage: { side: number; cell: number; titleMm: number };
+} {
+  const { dims, plan } = input;
+  const front = dims.contentFrontSize;
+  const pad = frontTextPadMm(dims);
+  // Measured inside `.pb-spread-front` (which starts at the front panel's left edge and
+  // runs the full spread height): the safe inset on the left, the wrap + inset on the
+  // right, the panel's top + inset above and the same padding the title block already sat
+  // on below.
+  const inset = {
+    left: FRONT_TEXT_INSET_MM,
+    top: front.top + FRONT_TEXT_INSET_MM,
+    right: pad.right,
+    bottom: pad.bottom,
+  };
+  const subtitle = plan.cover.subtitle || input.createdLabel;
+  return {
+    subtitle,
+    inset,
+    collage: birthdayCoverFrontGeometryMm({
+      inner: {
+        w: dims.spread.width - front.left - inset.left - inset.right,
+        h: dims.spread.height - inset.top - inset.bottom,
+      },
+      title: plan.cover.title,
+      subtitle,
+    }),
+  };
+}
+
+/** The square millimetres ONE cover photo occupies on the printed spread — the whole
+ *  collage when it is the only photo, one 2×2 cell otherwise. What `lib/book-render.ts`
+ *  turns into a pixel budget (via `croppedSquareTargetMm`, since the tile crops). */
+export function birthdayCoverSpreadTileMm(input: {
+  dims: GelatoCoverDimensions;
+  plan: PhotoBookPlan;
+  createdLabel: string;
+  coverPhotoCount: number;
+}): number {
+  const { collage } = birthdayCoverSpreadGeometryMm(input);
+  return input.coverPhotoCount === 1 ? collage.side : collage.cell;
+}
+
 /**
  * The wraparound cover as ONE page: back panel on the left, spine in the middle, front
  * panel on the right, all positioned at the exact mm rectangles Gelato returned.
@@ -215,33 +287,18 @@ export function renderCoverSpreadHtml(input: CoverSpreadInput): string {
   // so the title's dark scrim fades out past the spread's edges instead of ending in a
   // visible rectangle right where the board folds. The text is pushed back inside
   // `contentFrontSize` by padding: the wrap that lies outside the panel, plus the inset.
-  const frontTextPad = {
-    right: spread.width - (front.left + front.width) + FRONT_TEXT_INSET_MM,
-    bottom: spread.height - (front.top + front.height) + FRONT_TEXT_INSET_MM + 4,
-  };
+  const frontTextPad = frontTextPadMm(dims);
 
-  // The Birthday front, measured inside `.pb-spread-front` (which starts at the front
-  // panel's left edge and runs the full spread height): the safe inset on the left, the
-  // wrap + inset on the right, the panel's top + inset above and the same padding the
-  // title block already sat on below. Laid out as a COLUMN — collage band, then title —
-  // exactly like the proof cover, so a long title shrinks the collage in both instead of
-  // printing over it in either; `birthdayCoverFrontGeometryMm` sizes the same square 2x2
-  // box from that box, so the printed cover and the preview a user approves agree.
-  const birthdaySubtitle = plan.cover.subtitle || input.createdLabel;
-  const collageInset = {
-    left: FRONT_TEXT_INSET_MM,
-    top: front.top + FRONT_TEXT_INSET_MM,
-    right: frontTextPad.right,
-    bottom: frontTextPad.bottom,
-  };
-  const collage = birthdayCoverFrontGeometryMm({
-    inner: {
-      w: frontBleedWidth - collageInset.left - collageInset.right,
-      h: spread.height - collageInset.top - collageInset.bottom,
-    },
-    title: plan.cover.title,
+  // The Birthday front is laid out as a COLUMN — collage band, then title — exactly like
+  // the proof cover, so a long title shrinks the collage in both instead of printing over
+  // it in either. `birthdayCoverSpreadGeometryMm` sizes the square 2x2 box from the front
+  // panel, and `lib/book-render.ts` embeds this spread's cover photos from the very same
+  // call, so the printed cover, the pixels in it, and the preview a user approves agree.
+  const {
     subtitle: birthdaySubtitle,
-  });
+    inset: collageInset,
+    collage,
+  } = birthdayCoverSpreadGeometryMm({ dims, plan, createdLabel: input.createdLabel });
 
   return `<!doctype html>
 <html lang="${esc(input.language ?? 'de')}">
@@ -372,7 +429,10 @@ ${styleVarsCss(style)}
     color: ${hero ? '#fff' : 'var(--pb-cover-heading-color)'};
     background: ${hero ? 'linear-gradient(transparent, rgba(0,0,0,0.55) 55%)' : 'none'};
   }
-  .pb-spread-front-text h1 { font-family: var(--pb-font-heading); font-size: ${COVER_TITLE_METRICS.titlePt}pt; margin: 0 0 3mm; font-weight: 700; }
+  /* overflow-wrap: the title is user-typed; one unbreakable 200-character "word" would run
+     off the panel instead of wrapping. It only ever breaks a word with no break
+     opportunity at all, so no real title renders differently. */
+  .pb-spread-front-text h1 { font-family: var(--pb-font-heading); font-size: ${COVER_TITLE_METRICS.titlePt}pt; margin: 0 0 3mm; font-weight: 700; overflow-wrap: anywhere; }
   .pb-spread-subtitle { font-size: ${COVER_TITLE_METRICS.subtitlePt}pt; margin: 0 0 3mm; opacity: 0.85; }
   .pb-spread-chronicle { font-size: 9.5pt; letter-spacing: 0.1em; font-variant: small-caps; margin: 0; opacity: 0.75; }
   /* No background panel behind the title — same reason as .pb-birthday-cover-text
@@ -387,6 +447,10 @@ ${styleVarsCss(style)}
     text-align: center;
     color: var(--pb-cover-heading-color);
   }
+  /* The same title→subtitle gap the proof cover's .pb-birthday-cover-text h1 uses — the
+     shared metric, not the standard spread's 3mm, or the sheet that gets printed would
+     space the cover differently from the proof the user approved. */
+  .pb-spread-birthday-text h1 { margin-bottom: ${mm(COVER_TITLE_METRICS.gapMm)}; }
   .pb-spread-birthday-text .pb-spread-subtitle { margin-bottom: 0; color: var(--pb-cover-muted-color); }
 
   /* Spine: the cover colour with the title reading top-to-bottom (vertical-rl rotates

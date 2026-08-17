@@ -335,7 +335,9 @@ describe('Birthday cover: a long title can never print over the collage', () => 
       // The column layout — not the estimate — is what makes the overlap impossible, so
       // this drives the estimate past anything a real book would produce (`books.title` is
       // user-typed, so "absurd" is reachable) and checks the geometry still holds. The
-      // collage shrinks to its floor and the title takes the rest; the two never meet.
+      // title's reserve is capped at BIRTHDAY_COVER_TITLE_MAX_FRACTION of the cover, so the
+      // collage keeps a usable floor and the runaway title wraps on past its own room
+      // instead of shrinking the photographs to stamps.
       const absurd = `${'Ein wirklich unfassbar langer Geburtstagsbuchtitel '.repeat(6)}Ende`;
       for (const { name, trim } of TRIMS) {
         const html = renderPhotoBookHtml({
@@ -368,7 +370,12 @@ describe('Birthday cover: a long title can never print over the collage', () => 
         expect(measured.clearanceMm, `${name}: title over the collage`).toBeGreaterThanOrEqual(
           -SLACK_MM,
         );
-        expect(measured.collageSideMm, `${name}: the collage still prints`).toBeGreaterThan(0);
+        // Not merely "still prints": the photographs are the cover. Even here the collage
+        // keeps more than 40% of the sheet's width (~94mm at 20×20, ~138mm at 21×28) —
+        // before the cap it collapsed to 9.5mm, i.e. four ~2.8mm tiles.
+        expect(measured.collageSideMm, `${name}: the collage keeps a usable floor`).toBeGreaterThan(
+          trim.w * 0.4,
+        );
       }
     },
     180_000,

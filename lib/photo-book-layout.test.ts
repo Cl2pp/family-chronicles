@@ -245,6 +245,15 @@ describe('renderPhotoBookHtml', () => {
     expect(standard).toMatch(/\.pb-cover-text \{[^}]*color: #fff;/);
   });
 
+  it('lets the cover title break a single unbreakable word instead of running off the sheet', () => {
+    // `books.title` is user-typed: one 200-character "word" has no break opportunity, so
+    // without this it lays out as one line straight past the trim edge. Nothing a real
+    // title does changes — the rule only ever fires on a word that cannot wrap at all.
+    expect(renderPhotoBookHtml(baseInput())).toMatch(
+      /\.pb-cover-text h1 \{[^}]*overflow-wrap: anywhere;/,
+    );
+  });
+
   it('keeps the section date on a standard divider, and off a Birthday chapter heading', () => {
     const standard = renderPhotoBookHtml(baseInput());
     expect(standard).toContain('<p class="pb-divider-date">June 2025</p>');
@@ -851,6 +860,24 @@ describe('birthdayCoverFrontGeometryMm', () => {
     });
     expect(squeezed.side).toBeGreaterThan(0);
     expect(squeezed.cell).toBeGreaterThanOrEqual(0);
+  });
+
+  it('caps what the title may take, so the photographs keep a usable floor', () => {
+    // The 20×20 print sheet's cover box, with a title far past anything a real book would
+    // have: uncapped, the estimate wanted 164mm of 178 and left a 9.5mm collage — four
+    // ~2.8mm stamps. The cap holds the reserve at 45% of the box, and the title simply
+    // wraps on past its own room (the cover's overflow: hidden clips it).
+    const inner = { w: 186, h: 178 };
+    const absurd = birthdayCoverFrontGeometryMm({
+      inner,
+      title: 'Ein wirklich unfassbar langer Geburtstagsbuchtitel '.repeat(6),
+      subtitle: 'August 2026',
+    });
+    expect(absurd.titleMm).toBeCloseTo(inner.h * 0.45, 6);
+    expect(absurd.side).toBeGreaterThan(90);
+    // A title short enough to fit inside the cap is untouched by it.
+    const normal = birthdayCoverFrontGeometryMm({ inner, ...short });
+    expect(normal.titleMm).toBeLessThan(inner.h * 0.45);
   });
 
   it('errs high on the title, so the reserve can only ever be too generous', () => {

@@ -35,6 +35,14 @@ export type PhotoDimsById = Map<string, { width: number; height: number }>;
  *  rendered PDF (`padPdf`). */
 const WORDS_PER_TEXT_PAGE = 350;
 
+/** Known and deliberate over-count: a Birthday chapter whose first photo group rides along
+ *  at the end of its own text page (`birthdaySharedPhotos`, `lib/photo-book-layout.ts`) is
+ *  still counted below as a page of its own, so this reads one page high per such chapter.
+ *  Modelling it here would mean re-running that gate — which needs the paragraph TEXT, the
+ *  style tokens and the trim's text box, none of which this function is given (it only ever
+ *  sees word counts) — so the copy would be a different rule wearing the same name, and
+ *  would drift the first time either side changed. This feeds the pre-render quote estimate
+ *  only; the authoritative `books.page_count` is counted off the rendered PDF. */
 export function countPhotoBookPages(
   plan: PhotoBookPlan,
   stories?: Array<{ storyId: string; paragraphWordCounts: number[] }>,
@@ -77,6 +85,26 @@ export function countPhotoBookPages(
 export interface PrintTargetSizeMm {
   w: number;
   h: number;
+}
+
+/**
+ * The print target for a SQUARE slot whose photo is CROPPED into it (`object-fit: cover` on
+ * `.pb-birthday-cover-img`) — every Birthday cover tile, in both renderers.
+ *
+ * The budget must be the box the CROP needs, not the box the tile is. `lib/book-render.ts`
+ * downscales with `fit: 'inside'`, which fits the whole photo inside the box: a 3:2 photo
+ * given a `tile × tile` box comes back `tile` px wide and only `tile / 1.5` px tall, and the
+ * cover then throws away the wide part — so a 96mm tile that needs 1134 px on both axes gets
+ * 1134 × 756 and prints at 200 dpi. Growing the box by the photo's own aspect on the axis
+ * the crop eats (and only there) makes the fitted image `tile` px on its SHORT side, which
+ * is exactly the square the tile prints, at the full 300 dpi.
+ *
+ * `aspect` is the source's width/height; a non-finite or non-positive one falls back to 1
+ * (the uncorrected square), since a photo with no usable dimensions can't be corrected for.
+ */
+export function croppedSquareTargetMm(tileMm: number, aspect: number): PrintTargetSizeMm {
+  if (!Number.isFinite(aspect) || aspect <= 0) return { w: tileMm, h: tileMm };
+  return { w: tileMm * Math.max(1, aspect), h: tileMm * Math.max(1, 1 / aspect) };
 }
 
 /**
@@ -123,6 +151,11 @@ export function photoAssetPrintTargetSizeMm(
   // square the cover really prints, never under-state it. The same selection may also
   // appear inside the book, and the max-merge above keeps whichever role needs more
   // resolution.
+  //
+  // A cover tile CROPS, so the budget is the box the crop needs, not the box the tile is —
+  // see `croppedSquareTargetMm`. Without the photo's dimensions there is nothing to correct
+  // by and the plain square stands (it errs small for a non-square photo, which is the
+  // best that can be done blind).
   const coverIds = plan.cover.assetIds ?? [];
   if (coverIds.length > 0) {
     const collage = birthdayCoverPageGeometryMm(
@@ -130,7 +163,11 @@ export function photoAssetPrintTargetSizeMm(
       { title: plan.cover.title, subtitle: plan.cover.subtitle ?? '' },
     );
     const tile = coverIds.length === 1 ? collage.side : collage.cell;
-    for (const id of coverIds) set(id, tile, tile);
+    for (const id of coverIds) {
+      const d = dims?.get(id);
+      const target = croppedSquareTargetMm(tile, d ? d.width / d.height : 1);
+      set(id, target.w, target.h);
+    }
   }
   // Back-cover photos are fixed-size (`.pb-cover-back-photos .ph-frame` in
   // `lib/photo-book-layout.ts`).
