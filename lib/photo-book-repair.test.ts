@@ -28,9 +28,9 @@ function photoPage(item: PhotoFlowItem): PhotoPagePlan {
 }
 
 describe('templateForGroup', () => {
-  it('keeps three portraits as a three-column row', () => {
+  it('uses a balanced mixed stack for three portraits instead of a thin row', () => {
     const { template } = templateForGroup([portrait('a'), portrait('b'), portrait('c')]);
-    expect(template).toBe('three-column');
+    expect(template).toBe('three-mixed');
   });
 
   it('switches a trio containing a landscape to three-mixed, landscape first', () => {
@@ -39,16 +39,17 @@ describe('templateForGroup', () => {
     expect(ordered[0].assetId).toBe('b');
   });
 
-  it('stacks a pair of landscapes but rows a mixed pair', () => {
+  it('stacks landscapes and mixed pairs, but keeps two portraits side by side', () => {
     expect(templateForGroup([landscape('a'), landscape('b')]).template).toBe('two-horizontal');
-    expect(templateForGroup([landscape('a'), portrait('b')]).template).toBe('two-vertical');
+    expect(templateForGroup([landscape('a'), portrait('b')]).template).toBe('two-horizontal');
+    expect(templateForGroup([portrait('a'), portrait('b')]).template).toBe('two-vertical');
   });
 });
 
 describe('repairPhotoBookPlan', () => {
   it('leaves a clean plan untouched', () => {
     const photos = [portrait('a'), portrait('b'), portrait('c'), landscape('hero')];
-    const plan = planOf([{ title: 'Tag 1', pages: [{ template: 'three-column', assetIds: ['a', 'b', 'c'] }] }], {
+    const plan = planOf([{ title: 'Tag 1', pages: [{ template: 'three-mixed', assetIds: ['a', 'b', 'c'] }] }], {
       heroAssetId: 'hero',
     });
     const { plan: repaired, changes } = repairPhotoBookPlan(plan, { photos });
@@ -77,7 +78,7 @@ describe('repairPhotoBookPlan', () => {
       { heroAssetId: 'hero' },
     );
     const { plan: repaired } = repairPhotoBookPlan(plan, { photos });
-    expect(repaired.sections[0].pages[0]).toMatchObject({ template: 'full-framed', assetIds: ['a'] });
+    expect(repaired.sections[0].pages[0]).toMatchObject({ template: 'full-bleed', assetIds: ['a'] });
     expect(checkPhotoBookPlanConsistency(repaired, contentOf(photos))).toEqual([]);
   });
 
@@ -221,6 +222,51 @@ describe('repair regressions', () => {
     expect(repaired.sections[0].pages[0]).toMatchObject({ template: 'two-vertical', assetIds: ['a', 'b'] });
   });
 
+  it('splits a legacy dense landscape collage into fuller pages', () => {
+    const photos = [landscape('hero'), ...Array.from({ length: 6 }, (_, i) => landscape(`l${i + 1}`))];
+    const plan = planOf(
+      [
+        {
+          title: 'S',
+          pages: [{ template: 'collage-6', assetIds: photos.slice(1).map((p) => p.assetId) }],
+        },
+      ],
+      { heroAssetId: 'hero' },
+    );
+
+    const { plan: repaired, changes } = repairPhotoBookPlan(plan, { photos });
+
+    expect(changes.join(' ')).toContain('split a poorly fitted');
+    expect(repaired.sections[0].pages).toHaveLength(2);
+    expect(repaired.sections[0].pages.map((p) => photoPage(p).assetIds.length)).toEqual([3, 3]);
+    expect(checkPhotoBookPlanConsistency(repaired, contentOf(photos))).toEqual([]);
+  });
+
+  it('re-fits a captioned stack using the reduced image area the renderer actually has', () => {
+    const tallPortrait = (id: string): LintPhoto => ({ assetId: id, width: 2960, height: 4000 });
+    const photos = [landscape('hero'), tallPortrait('a'), tallPortrait('b')];
+    const plan = planOf(
+      [
+        {
+          title: 'S',
+          pages: [
+            {
+              template: 'two-horizontal',
+              assetIds: ['a', 'b'],
+              captions: ['Oben', 'Unten'],
+            },
+          ],
+        },
+      ],
+      { heroAssetId: 'hero' },
+    );
+
+    const { plan: repaired, changes } = repairPhotoBookPlan(plan, { photos });
+
+    expect(changes.join(' ')).toContain('re-fitted');
+    expect(photoPage(repaired.sections[0].pages[0]).template).toBe('two-vertical');
+  });
+
   it('reports "no content" when every photo the model named is unusable', () => {
     // Was: this repaired to zero sections, which is legal AND consistency-clean (no content
     // means no cover hero is required), so the design pass persisted it as an AI design and
@@ -255,9 +301,9 @@ describe('templateForGroup — four-mixed / collage-6', () => {
     expect(ordered[0].assetId).toBe('b');
   });
 
-  it('keeps four photos with several landscapes as a collage-4', () => {
+  it('uses the arrangement with the greatest photo area for several landscapes', () => {
     const { template } = templateForGroup([landscape('a'), landscape('b'), portrait('c'), portrait('d')]);
-    expect(template).toBe('collage-4');
+    expect(template).toBe('four-mixed');
   });
 
   it('maps six photos to collage-6', () => {

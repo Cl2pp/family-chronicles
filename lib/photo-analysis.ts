@@ -43,6 +43,14 @@ export const photoAnalysisSchema = z.object({
   /** A warm, clear, well-composed photo of people — a candidate for the book cover or a
    *  section opener. */
   coverCandidate: z.boolean(),
+  /** Normalized location of the most important visible subject. Optional so every stored
+   *  analysis produced before focal-point scoring remains valid. */
+  focalPoint: z
+    .object({
+      x: z.number().min(0).max(1),
+      y: z.number().min(0).max(1),
+    })
+    .optional(),
 });
 export type PhotoAnalysis = z.infer<typeof photoAnalysisSchema>;
 

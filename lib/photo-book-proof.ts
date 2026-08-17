@@ -138,6 +138,7 @@ async function embedImages(loaded: LoadedPhotoBook, plan: PhotoBookPlan): Promis
         src: `data:image/jpeg;base64,${out.toString('base64')}`,
         width: photo.width,
         height: photo.height,
+        ...(photo.analysis?.focalPoint ? { focalPoint: photo.analysis.focalPoint } : {}),
       });
     } catch (e) {
       // A photo that won't decode renders as an empty slot — the proof is still useful.

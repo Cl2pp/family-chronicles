@@ -1170,7 +1170,7 @@ describe('buildPhotoBookAutoLayout — userDecision overrides (re-include fix re
 });
 
 describe('buildPhotoBookAutoLayout — mixed-orientation grouping (four-mixed / three-mixed order)', () => {
-  it('turns a leftover group of one landscape + three portraits into four-mixed, landscape first', () => {
+  it('chooses the higher-coverage collage for one wide landscape + three tall portraits', () => {
     const photos = [
       photo({ assetId: 'opener', position: 0, takenAt: new Date(t0), width: 3000, height: 2000 }),
       photo({ assetId: 'p1', position: 1, takenAt: new Date(t0 + HOUR), width: 1000, height: 1600 }),
@@ -1180,8 +1180,8 @@ describe('buildPhotoBookAutoLayout — mixed-orientation grouping (four-mixed / 
     ];
     const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
     const group = plan.sections[0].pages.find((p) => (isTextItem(p) ? [] : p.assetIds).length === 4);
-    expect(group?.template).toBe('four-mixed');
-    expect(photoPage(group!).assetIds[0]).toBe('l1');
+    expect(group?.template).toBe('collage-4');
+    expect(photoPage(group!).assetIds).toContain('l1');
   });
 
   it('puts the landscape first in a three-mixed group regardless of its incoming order', () => {
@@ -1195,6 +1195,18 @@ describe('buildPhotoBookAutoLayout — mixed-orientation grouping (four-mixed / 
     const trio = plan.sections[0].pages.find((p) => (isTextItem(p) ? [] : p.assetIds).length === 3);
     expect(trio?.template).toBe('three-mixed');
     expect(photoPage(trio!).assetIds[0]).toBe('l1');
+  });
+
+  it('splits five landscapes instead of rendering a thin 2+3 contact strip', () => {
+    const photos = [
+      photo({ assetId: 'opener', position: 0, takenAt: new Date(t0), width: 3000, height: 2000 }),
+      ...Array.from({ length: 5 }, (_, i) =>
+        photo({ assetId: `l${i}`, position: i + 1, takenAt: new Date(t0 + (i + 1) * HOUR), width: 1600, height: 1000 }),
+      ),
+    ];
+    const { plan } = buildPhotoBookAutoLayout({ ...baseInput(photos), coverAssetId: 'unrelated-cover' });
+    const groups = plan.sections[0].pages.map((p) => (isTextItem(p) ? 0 : p.assetIds.length));
+    expect(groups).toEqual([1, 3, 2]);
   });
 });
 

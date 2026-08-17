@@ -2,13 +2,18 @@ import { hammingDistance } from '@/lib/photo-hash';
 import { DEFAULT_PHOTO_BOOK_GROUPING, photoSectioning, type PhotoBookGrouping } from '@/lib/photo-book-grouping';
 import type { PhotoAnalysis } from '@/lib/photo-analysis';
 import {
-  photoOrientation,
-  type PhotoBookTemplate,
+  bestPhotoPageForGroup,
+  MIN_MULTI_PHOTO_AREA_RATIO,
+  type FittablePhoto,
+} from '@/lib/photo-book-fit';
+import { coverCropRetention, MIN_SAFE_COVER_RETENTION } from '@/lib/photo-book-layout';
+import {
   type PhotoBookPlan,
   type PhotoFlowItem,
   type PhotoBookStyle,
   type PhotoPagePlan,
   type PhotoSectionPlan,
+  type PhotoBookTemplate,
 } from '@/lib/photo-book-plan';
 
 /**
@@ -128,6 +133,10 @@ export interface PhotoBookAutoLayoutInput {
    *  `lib/photo-book-grouping.ts`). Defaults to chronological — what every book did before
    *  the setting existed. */
   grouping?: PhotoBookGrouping;
+  /** Physical trim size used for aspect-aware cover and page fitting. Defaults to the
+   *  portrait 21x28 format for pure/test callers; production always passes the book's
+   *  actual format. */
+  trim?: { w: number; h: number };
   /** Every photo currently AVAILABLE to the layout — i.e. `book_photos.excluded = false`
    *  (a user's own exclusions are never second-guessed here; see the module header). */
   photos: AutoLayoutPhoto[];
@@ -202,10 +211,6 @@ const BLUR_RELATIVE_THRESHOLD = 0.12;
 
 /** Never blur-cull a section (or the whole book, for cover-picking) down to zero. */
 const MIN_SURVIVORS = 1;
-
-/** Aspect-ratio classification driving template choice (docs/PHOTO_BOOK_PLAN.md §6 pacing)
- *  — the one shared definition, see `photoOrientation` in `lib/photo-book-plan.ts`. */
-const classify = photoOrientation;
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -535,9 +540,22 @@ function nonBlurryPool(photos: AutoLayoutPhoto[]): AutoLayoutPhoto[] {
  * assetId only as the final tiebreak — so a book whose vision pass is still catching up
  * on a handful of photos already benefits from whatever scores it has.
  */
-function pickBestPhoto(photos: AutoLayoutPhoto[]): AutoLayoutPhoto | null {
+function pickBestPhoto(
+  photos: AutoLayoutPhoto[],
+  preferredAspect?: number,
+): AutoLayoutPhoto | null {
   if (photos.length === 0) return null;
-  const pool = nonBlurryPool(photos);
+  const sharpPool = nonBlurryPool(photos);
+  // For the front cover, prefer a photo that can fill the target shape without destructive
+  // cropping whenever at least one such candidate exists. Explicit/carry-over cover pins
+  // bypass this picker and remain authoritative.
+  const compatible =
+    preferredAspect == null
+      ? []
+      : sharpPool.filter(
+          (p) => coverCropRetention(p.width / p.height, preferredAspect) >= MIN_SAFE_COVER_RETENTION,
+        );
+  const pool = compatible.length > 0 ? compatible : sharpPool;
   const anyAnalyzed = pool.some((p) => p.analysis != null);
 
   return pool.reduce((best, p) => {
@@ -556,56 +574,25 @@ function pickBestPhoto(photos: AutoLayoutPhoto[]): AutoLayoutPhoto | null {
   });
 }
 
-function singleTemplate(p: AutoLayoutPhoto): 'full-bleed' | 'full-framed' {
-  return classify(p) === 'landscape' ? 'full-bleed' : 'full-framed';
-}
-
-function pairTemplate(a: AutoLayoutPhoto, b: AutoLayoutPhoto): 'two-vertical' | 'two-horizontal' {
-  return classify(a) === 'portrait' && classify(b) === 'portrait' ? 'two-vertical' : 'two-horizontal';
-}
-
-function groupPage(group: AutoLayoutPhoto[]): PhotoPagePlan {
-  const assetIds = group.map((g) => g.assetId);
-  if (group.length === 1) return { template: singleTemplate(group[0]), assetIds };
-  if (group.length === 2) return { template: pairTemplate(group[0], group[1]), assetIds };
-  if (group.length === 3) {
-    if (group.every((p) => classify(p) === 'portrait')) {
-      return { template: 'three-column', assetIds };
-    }
-    // three-mixed's dominant (first) slot spans the full width, so it must be the
-    // landscape — or failing that a square — photo (`TEMPLATE_SHAPE_RULES`,
-    // `lib/photo-book-lint.ts`); promote one to the front rather than trusting order.
-    const dominant =
-      group.find((p) => classify(p) === 'landscape') ?? group.find((p) => classify(p) === 'square') ?? group[0];
-    const rest = group.filter((p) => p !== dominant);
-    return { template: 'three-mixed', assetIds: [dominant.assetId, ...rest.map((p) => p.assetId)] };
-  }
-  if (group.length === 4) {
-    // Exactly one landscape among four reads best as the dominant full-width photo with
-    // the other three justified below it (mirrors `templateForGroup` in
-    // `lib/photo-book-repair.ts`); any other mix balances fine as a 2+2 grid.
-    const landscapes = group.filter((p) => classify(p) === 'landscape');
-    if (landscapes.length === 1) {
-      const rest = group.filter((p) => p !== landscapes[0]);
-      return { template: 'four-mixed', assetIds: [landscapes[0].assetId, ...rest.map((p) => p.assetId)] };
-    }
-    return { template: 'collage-4', assetIds };
-  }
-  if (group.length === 5) return { template: 'collage-5', assetIds };
-  return { template: 'collage-6', assetIds };
+function fittedPage(group: AutoLayoutPhoto[], trim: { w: number; h: number }): PhotoPagePlan {
+  const fitted = bestPhotoPageForGroup(group satisfies FittablePhoto[], trim);
+  return { template: fitted.template, assetIds: fitted.ordered.map((p) => p.assetId) } as PhotoPagePlan;
 }
 
 /** Birthday pages favor compact collages so a story's complete photo set follows its
  * prose in as few well-filled pages as possible. Groups are 2-6 photos whenever the
- * count permits; a true one-photo story still gets a framed full page. */
-function paceBirthdayPhotos(photos: AutoLayoutPhoto[]): PhotoPagePlan[] {
+ * count permits; a true one-photo story still gets a fitted full page. */
+function paceBirthdayPhotos(
+  photos: AutoLayoutPhoto[],
+  trim: { w: number; h: number },
+): PhotoPagePlan[] {
   const queue = photos.slice();
   const pages: PhotoPagePlan[] = [];
   while (queue.length > 0) {
     let take = Math.min(6, queue.length);
     // Avoid leaving a single orphan for the next page: 7 becomes 3+4, 13 becomes 6+3+4.
     if (queue.length > 6 && queue.length - take === 1) take = 3;
-    pages.push(groupPage(queue.splice(0, take)));
+    pages.push(fittedPage(queue.splice(0, take), trim));
   }
   return pages;
 }
@@ -617,32 +604,41 @@ function paceBirthdayPhotos(photos: AutoLayoutPhoto[]): PhotoPagePlan[] {
  * leftover photo squeezed onto a multi-slot template (any true leftover of 1 becomes its
  * own full page instead, which fills it rather than stranding it in white space).
  */
-function paceSection(photos: AutoLayoutPhoto[]): PhotoPagePlan[] {
+function paceSection(photos: AutoLayoutPhoto[], trim: { w: number; h: number }): PhotoPagePlan[] {
   if (photos.length === 0) return [];
   const opener = pickBestPhoto(photos)!;
-  const pages: PhotoPagePlan[] = [{ template: singleTemplate(opener), assetIds: [opener.assetId] }];
+  const pages: PhotoPagePlan[] = [fittedPage([opener], trim)];
 
   const queue = photos.filter((p) => p.assetId !== opener.assetId);
   while (queue.length > 0) {
     const remaining = queue.length;
     if (remaining === 1) {
       const p = queue.shift()!;
-      pages.push({ template: singleTemplate(p), assetIds: [p.assetId] });
+      pages.push(fittedPage([p], trim));
       break;
     }
     if (remaining === 2) {
-      pages.push(groupPage(queue.splice(0, 2)));
+      pages.push(fittedPage(queue.splice(0, 2), trim));
       break;
     }
     if (remaining <= 5) {
-      pages.push(groupPage(queue.splice(0, remaining)));
+      const tail = queue.splice(0, remaining);
+      const fitted = bestPhotoPageForGroup(tail, trim);
+      // Five same-shaped landscapes are the pathological dense-page case: their only
+      // legal 2+3 collage becomes two thin strips. Split it into a fitted trio and pair;
+      // every other five-photo combination keeps the more compact single page.
+      if (remaining === 5 && fitted.areaRatio < MIN_MULTI_PHOTO_AREA_RATIO) {
+        pages.push(fittedPage(tail.slice(0, 3), trim), fittedPage(tail.slice(3), trim));
+      } else {
+        pages.push({ template: fitted.template, assetIds: fitted.ordered.map((p) => p.assetId) } as PhotoPagePlan);
+      }
       break;
     }
     // remaining >= 6: peel off 3 or 4 so what's left after this page is never 1 or 2 —
     // remaining % 3 === 1 (4, 7, 10, …) takes 4 now to leave a multiple of 3; every other
     // case takes 3. The tail this converges to is always 3, 4, or 5, handled above.
     const take = remaining % 3 === 1 ? 4 : 3;
-    pages.push(groupPage(queue.splice(0, take)));
+    pages.push(fittedPage(queue.splice(0, take), trim));
   }
   return pages;
 }
@@ -676,12 +672,13 @@ function paceChapter(
   chapter: AutoLayoutChapter,
   photos: AutoLayoutPhoto[],
   template: PhotoBookTemplate,
+  trim: { w: number; h: number },
 ): PhotoFlowItem[] {
   const pages: PhotoFlowItem[] =
     photos.length > 0
       ? template === 'birthday'
-        ? paceBirthdayPhotos(photos)
-        : paceSection(photos)
+        ? paceBirthdayPhotos(photos, trim)
+        : paceSection(photos, trim)
       : [];
   const paragraphCount = chapter.includeText ? chapter.paragraphCount : 0;
   if (paragraphCount === 0) return pages;
@@ -965,6 +962,7 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   const locale = input.dateLocale ?? 'de-DE';
   const undatedTitle = input.undatedSectionTitle ?? 'Weitere Fotos';
   const template = input.existingTemplate ?? 'standard';
+  const trim = input.trim ?? { w: 210, h: 280 };
 
   // A force-excluded photo is dropped before anything else runs — it must never be
   // sectioned, culled (it's not a "cull", the user already decided), placed, or picked as
@@ -1049,7 +1047,7 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
     groupKeeps.push({ group, keep, chapter });
   }
 
-  const bestOverall = pickBestPhoto(survivorsForCover);
+  const bestOverall = pickBestPhoto(survivorsForCover, trim.w / trim.h);
   const heroAssetId = protectedHeroId ?? bestOverall?.assetId;
   const birthdayCoverIds = (() => {
     if (template !== 'birthday') return [];
@@ -1083,7 +1081,7 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
       // A story chapter is always its own section, in chapter order, even if every one
       // of its photos went to the cover or got culled — the TEXT is the content that
       // matters here, and dropping the section would lose the chapter from the book.
-      const pages = paceChapter(chapter, interior, template);
+      const pages = paceChapter(chapter, interior, template, trim);
       if (pages.length === 0) continue;
       sections.push({
         title: chapter.title,
@@ -1099,7 +1097,10 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
     if (interior.length === 0) continue;
     sections.push({
       title: sectionTitle(group, locale, undatedTitle, grouping),
-      pages: template === 'birthday' ? paceBirthdayPhotos(interior) : paceSection(interior),
+      pages:
+        template === 'birthday'
+          ? paceBirthdayPhotos(interior, trim)
+          : paceSection(interior, trim),
     });
   }
 

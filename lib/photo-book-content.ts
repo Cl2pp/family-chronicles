@@ -2,7 +2,7 @@ import { and, asc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/db';
 import { assets, bookPhotos, books, bookStories, stories } from '@/db/schema';
 import { getObjectBuffer } from '@/lib/s3';
-import { eventLabel, orientedDimensions, paragraphs } from '@/lib/book-content';
+import { eventLabel, orientedDimensions, paragraphs, TRIM } from '@/lib/book-content';
 import {
   checkPhotoBookPlanConsistency,
   isTextItem,
@@ -227,18 +227,21 @@ function emptyPlan(
 /**
  * Loads the book's stored layout plan, or builds a fresh one with the deterministic
  * auto-layouter when there isn't one yet or it's stale — the photo-book counterpart of
- * `loadOrBuildPlan` in `lib/book-content.ts`. Same trust model: a non-stale stored plan
- * is only re-validated against the SCHEMA, not re-checked against current content —
- * `books.layout_stale` is the single source of truth for "does this plan still match
- * what's in the book", flipped by every mutation that changes the available photo set
- * (`lib/books.ts`'s `setPhotoExcluded`/`addBookPhotos`).
+ * `loadOrBuildPlan` in `lib/book-content.ts`. A valid stored plan also passes through the
+ * deterministic repairer. That is normally a byte-identical no-op, but it upgrades old
+ * plans whose templates would crop heavily or leave a thin contact strip, so existing
+ * books benefit from fitter improvements without requiring the user to regenerate them.
+ * `books.layout_stale` remains the source of truth for content-set changes.
  */
 export async function loadOrBuildPhotoPlan(bookId: string, loaded: LoadedPhotoBook): Promise<PhotoBookPlan> {
   const { row } = loaded;
 
   if (row.layoutPlan && !row.layoutStale) {
     const validated = validatePhotoBookPlan(row.layoutPlan);
-    if (validated.ok) return validated.plan;
+    if (validated.ok) {
+      const repaired = await repairAndPersistPhotoPlan(bookId, loaded);
+      return repaired ?? validated.plan;
+    }
     console.warn(
       `[photo-book-content] stored plan for ${bookId} failed validation, rebuilding:`,
       validated.error,
@@ -301,6 +304,7 @@ async function repairAndPersistPhotoPlan(
         ? available.map((p) => p.assetId)
         : available.filter((p) => p.userDecision === 'include').map((p) => p.assetId),
     stories: planChapters(loaded),
+    trim: TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'],
   });
 
   const content: PhotoPlanContent = {
@@ -324,10 +328,14 @@ async function repairAndPersistPhotoPlan(
   // `layoutSource` is deliberately left alone: this is the same design, adjusted — not a
   // new one. Keeping it as 'ai'/'edited' also keeps the builder's "replace your manual
   // edits?" consent prompt honest.
-  await db
-    .update(books)
-    .set({ layoutPlan: revalidated.plan, layoutStale: false, updatedAt: new Date() })
-    .where(eq(books.id, bookId));
+  // Avoid turning every preview GET into a database write. A stale plan still needs its
+  // flag cleared even when the repair itself was a no-op.
+  if (changes.length > 0 || loaded.row.layoutStale) {
+    await db
+      .update(books)
+      .set({ layoutPlan: revalidated.plan, layoutStale: false, updatedAt: new Date() })
+      .where(eq(books.id, bookId));
+  }
   return revalidated.plan;
 }
 
@@ -413,6 +421,7 @@ export async function buildAndPersistPhotoAutoPlan(
       available.some((photo) => photo.assetId === id),
     ),
     grouping: parsePhotoGrouping(row.photoGrouping),
+    trim: TRIM[row.format] ?? TRIM['hardcover-21x28'],
     photos: autoLayoutPhotos,
     chapters: loaded.chapters.map((c) => ({
       storyId: c.storyId,

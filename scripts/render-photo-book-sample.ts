@@ -40,10 +40,14 @@ const plan: PhotoBookPlan = {
       pages: [
         { template: 'full-bleed', assetIds: ['l1'], captions: ['Der erste Abend am See'] },
         { template: 'full-framed', assetIds: ['p1'] },
-        { template: 'two-vertical', assetIds: ['p2', 'p3'] },
+        {
+          template: 'two-vertical',
+          assetIds: ['p2', 'p3'],
+          captions: ['Ein etwas längerer Bildtext, der die gemeinsame Zeile testet', null],
+        },
         { template: 'two-horizontal', assetIds: ['l2', 'l3'] },
         { template: 'three-mixed', assetIds: ['l4', 'p4', 'p5'] },
-        { template: 'three-column', assetIds: ['p6', 's1', 's2'] },
+        { template: 'three-mixed', assetIds: ['s1', 'p6', 's2'] },
       ],
     },
   ],

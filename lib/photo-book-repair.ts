@@ -5,7 +5,6 @@ import {
   PHOTO_BOOK_STYLES,
   PHOTO_PAGE_TEMPLATES,
   PHOTO_PAGE_TEMPLATE_SLOTS,
-  photoOrientation,
   templateRendersCaptions,
   type PhotoBookPlan,
   type PhotoBookStyle,
@@ -17,6 +16,14 @@ import {
   type TextBlockPlan,
 } from '@/lib/photo-book-plan';
 import { templateFits, type LintPhoto } from '@/lib/photo-book-lint';
+import {
+  bestPhotoPageForGroup,
+  MIN_AREA_RATIO_IMPROVEMENT,
+  MIN_MULTI_PHOTO_AREA_RATIO,
+  photoBookContentBox,
+  photoPageAreaRatio,
+} from '@/lib/photo-book-fit';
+import { coverCropRetention, MIN_SAFE_COVER_RETENTION, TEMPLATE_ROW_ARRANGEMENT } from '@/lib/photo-book-layout';
 
 /**
  * Turns an *almost* valid photo-book plan into a valid one.
@@ -203,7 +210,7 @@ export function coercePhotoBookPlan(
           .filter((photo): photo is LintPhoto => photo != null);
         offset += size;
         if (group.length === 0) continue;
-        const fitted = templateForGroup(group);
+        const fitted = templateForGroup(group, undefined, captionFor);
         pages.push(
           withCaptions(
             { template: fitted.template, assetIds: fitted.ordered.map((g) => g.assetId) } as PhotoPagePlan,
@@ -253,6 +260,8 @@ export interface PhotoBookRepairInput {
    *  text coverage is repaired mechanically: every listed story ends up with exactly one
    *  section covering its paragraphs 0..n-1 gap-free (see `repairTextCoverage`). */
   stories?: Array<{ storyId: string; paragraphCount: number; title?: string }>;
+  /** Actual book trim for aspect-aware fitting. Defaults to portrait 21x28. */
+  trim?: { w: number; h: number };
 }
 
 export interface PhotoBookRepairResult {
@@ -261,21 +270,20 @@ export interface PhotoBookRepairResult {
   changes: string[];
 }
 
-/** The shared definitions — see `photoOrientation`'s doc comment in
- *  `lib/photo-book-plan.ts` for why these live in exactly one place. */
-const orientationOf = photoOrientation;
 const rendersCaptions = templateRendersCaptions;
 
 /**
- * The best template for a given set of photos — the shared "which layout fits these
- * shapes" decision, encoding exactly the rules `TEMPLATE_SHAPE_RULES`
- * (`lib/photo-book-lint.ts`) checks for, so a repaired page is always lint-clean by
- * construction. Also returns the photo ORDER the template wants (`three-mixed` needs its
- * landscape first — that slot is the dominant one).
+ * The best template for a given set of photos — the shared aspect/area decision the
+ * auto-layouter and linter use too, so a repaired page is lint-clean by construction.
+ * It also returns the within-page order that makes the justified rows use the most area.
  *
  * Only ever called with 1-6 photos; `pageSizes` below is what guarantees that.
  */
-export function templateForGroup(input: LintPhoto[]): { template: PhotoPageTemplate; ordered: LintPhoto[] } {
+export function templateForGroup(
+  input: LintPhoto[],
+  trim: { w: number; h: number } = { w: 210, h: 280 },
+  captionFor?: Map<string, string | null>,
+): { template: PhotoPageTemplate; ordered: LintPhoto[] } {
   // Deduplicate FIRST, and pick the template from what survives. A model that lists the
   // same photo twice on one page used to slip through here and come out as a `three-mixed`
   // holding only two ids (the landscape-promotion below filtered by assetId, which removed
@@ -283,45 +291,30 @@ export function templateForGroup(input: LintPhoto[]): { template: PhotoPageTempl
   // took the entire design down with it, which is precisely the single-duplicate failure
   // this module exists to absorb.
   const seen = new Set<string>();
-  const photos = input.filter((p) => !seen.has(p.assetId) && seen.add(p.assetId));
-  const shapes = photos.map(orientationOf);
-  // Index-based, so promotion can never depend on assetId uniqueness again.
-  const landscapeIndex = shapes.indexOf('landscape');
+  const photos = input
+    .filter((p) => !seen.has(p.assetId) && seen.add(p.assetId))
+    .map((photo) => ({ ...photo, captioned: !!captionFor?.get(photo.assetId) }));
+  const fitted = bestPhotoPageForGroup(photos, trim);
+  return { template: fitted.template, ordered: fitted.ordered };
+}
 
-  switch (photos.length) {
-    case 1:
-      // Mirrors `singleTemplate` in `lib/photo-book-autolayout.ts`: a landscape fills an
-      // edge-to-edge page well, a portrait reads better matted.
-      return { template: shapes[0] === 'landscape' ? 'full-bleed' : 'full-framed', ordered: photos };
-    case 2:
-      // All landscape/square → stacked full-width; anything with a portrait in it → the
-      // justified side-by-side row, which handles a mixed pair gracefully.
-      return shapes.every((s) => s !== 'portrait')
-        ? { template: 'two-horizontal', ordered: photos }
-        : { template: 'two-vertical', ordered: photos };
-    case 3:
-      // A single landscape ruins a 3-up justified row (see `three-column`'s rule) — those
-      // trios become `three-mixed` with the landscape promoted to the dominant slot.
-      return landscapeIndex >= 0
-        ? {
-            template: 'three-mixed',
-            ordered: [photos[landscapeIndex], ...photos.filter((_, i) => i !== landscapeIndex)],
-          }
-        : { template: 'three-column', ordered: photos };
-    case 4:
-      // Exactly one landscape among four reads best as the dominant full-width photo with
-      // the other three justified below it; any other mix balances fine as a 2+2 grid.
-      return shapes.filter((s) => s === 'landscape').length === 1
-        ? {
-            template: 'four-mixed',
-            ordered: [photos[landscapeIndex], ...photos.filter((_, i) => i !== landscapeIndex)],
-          }
-        : { template: 'collage-4', ordered: photos };
-    case 5:
-      return { template: 'collage-5', ordered: photos };
-    default:
-      return { template: 'collage-6', ordered: photos };
+function pageFitsWell(
+  page: PhotoPagePlan,
+  photos: LintPhoto[],
+  trim: { w: number; h: number },
+): boolean {
+  if (!templateFits(page.template, photos)) return false;
+  if (page.template === 'full-bleed') {
+    const photo = photos[0];
+    return !!photo && coverCropRetention(photo.width / photo.height, trim.w / trim.h) >= MIN_SAFE_COVER_RETENTION;
   }
+  if (!TEMPLATE_ROW_ARRANGEMENT[page.template]) return true;
+  const captionFor = new Map(page.assetIds.map((id, index) => [id, page.captions?.[index] ?? null]));
+  const measured = photos.map((photo) => ({ ...photo, captioned: !!captionFor.get(photo.assetId) }));
+  const box = photoBookContentBox(trim);
+  const current = photoPageAreaRatio(page.template, measured, box);
+  const best = bestPhotoPageForGroup(measured, trim);
+  return current >= MIN_MULTI_PHOTO_AREA_RATIO && best.areaRatio - current < MIN_AREA_RATIO_IMPROVEMENT;
 }
 
 /** Splits n photos into page-sized groups of 1-6, never leaving a group of exactly 1 when
@@ -353,7 +346,11 @@ function pageSizes(n: number): number[] {
  *  `full-framed` for a single photo is exactly that kind of judgment call: both render a
  *  portrait fine, and a design pass that deliberately chose the edge-to-edge one shouldn't
  *  have it quietly rewritten. */
-function rebuildPage(page: PhotoPagePlan, survivors: LintPhoto[]): PhotoPagePlan | null {
+function rebuildPage(
+  page: PhotoPagePlan,
+  survivors: LintPhoto[],
+  trim: { w: number; h: number },
+): PhotoPagePlan | null {
   if (survivors.length === 0) return null;
   const intact = survivors.length === page.assetIds.length;
   const captionsOk = !page.captions || page.captions.length === page.assetIds.length;
@@ -364,12 +361,12 @@ function rebuildPage(page: PhotoPagePlan, survivors: LintPhoto[]): PhotoPagePlan
   // through and repair silently failed to repair it.
   const slots = PHOTO_PAGE_TEMPLATE_SLOTS[page.template];
   const arityOk = survivors.length >= slots.min && survivors.length <= slots.max;
-  if (intact && captionsOk && arityOk && templateFits(page.template, survivors)) return page;
+  if (intact && captionsOk && arityOk && pageFitsWell(page, survivors, trim)) return page;
 
   const captionFor = new Map<string, string | null>();
   page.assetIds.forEach((id, i) => captionFor.set(id, page.captions?.[i] ?? null));
 
-  const { template, ordered } = templateForGroup(survivors);
+  const { template, ordered } = templateForGroup(survivors, trim, captionFor);
   const next: PhotoPagePlan = { template, assetIds: ordered.map((p) => p.assetId) } as PhotoPagePlan;
   if (rendersCaptions(template)) {
     const captions = ordered.map((p) => captionFor.get(p.assetId) ?? null);
@@ -385,6 +382,7 @@ function appendMissingPhotos(
   sections: PhotoSectionPlan[],
   missing: Array<LintPhoto & { storyId?: string | null }>,
   fallbackTitle: string,
+  trim: { w: number; h: number },
   placeByStory: boolean,
   stories?: PhotoBookRepairInput['stories'],
 ): PhotoSectionPlan[] {
@@ -397,7 +395,7 @@ function appendMissingPhotos(
       groups.set(key, [...(groups.get(key) ?? []), photo]);
     }
     for (const [storyId, photos] of groups) {
-      const pages = pagesForPhotos(photos);
+      const pages = pagesForPhotos(photos, trim);
       const index = storyId ? out.findIndex((section) => section.storyId === storyId) : -1;
       if (index >= 0) {
         out[index] = { ...out[index], pages: [...out[index].pages, ...pages] };
@@ -430,19 +428,22 @@ function appendMissingPhotos(
     }
     return out;
   }
-  const pages = pagesForPhotos(missing);
+  const pages = pagesForPhotos(missing, trim);
   if (sections.length === 0) return [{ title: fallbackTitle, pages }];
   const last = sections[sections.length - 1];
   return [...sections.slice(0, -1), { ...last, pages: [...last.pages, ...pages] }];
 }
 
-function pagesForPhotos(photos: LintPhoto[]): PhotoPagePlan[] {
+function pagesForPhotos(
+  photos: LintPhoto[],
+  trim: { w: number; h: number },
+): PhotoPagePlan[] {
   const pages: PhotoPagePlan[] = [];
   let offset = 0;
   for (const size of pageSizes(photos.length)) {
     const group = photos.slice(offset, offset + size);
     offset += size;
-    const { template, ordered } = templateForGroup(group);
+    const { template, ordered } = templateForGroup(group, trim);
     pages.push({ template, assetIds: ordered.map((p) => p.assetId) } as PhotoPagePlan);
   }
   return pages;
@@ -454,6 +455,7 @@ function pagesForPhotos(photos: LintPhoto[]): PhotoPagePlan[] {
  * photo is placed. Never throws.
  */
 export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairInput): PhotoBookRepairResult {
+  const trim = input.trim ?? { w: 210, h: 280 };
   const byId = new Map(input.photos.map((p) => [p.assetId, p]));
   const changes: string[] = [];
   /** Every id already spoken for — the plan may place a photo at most once anywhere. */
@@ -525,9 +527,45 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
         pages.push({ template: 'divider', assetIds: [survivors[0].assetId] });
         continue;
       }
-      const rebuilt = rebuildPage(page, survivors);
+
+      // Five/six very wide photos have no better legal same-count template: their
+      // collage is necessarily two contact strips. Split those dense legacy pages into
+      // a fitted trio plus pair/trio so existing books gain the same protection as newly
+      // auto-laid-out books.
+      const rows = TEMPLATE_ROW_ARRANGEMENT[page.template];
+      if (survivors.length >= 5 && rows) {
+        const captionFor = new Map<string, string | null>();
+        page.assetIds.forEach((id, i) => captionFor.set(id, page.captions?.[i] ?? null));
+        const measured = survivors.map((photo) => ({ ...photo, captioned: !!captionFor.get(photo.assetId) }));
+        const current = photoPageAreaRatio(page.template, measured, photoBookContentBox(trim));
+        if (current < MIN_MULTI_PHOTO_AREA_RATIO) {
+          const splitAt = 3;
+          for (const group of [survivors.slice(0, splitAt), survivors.slice(splitAt)]) {
+            const fitted = templateForGroup(group, trim, captionFor);
+            pages.push(
+              withCaptions(
+                {
+                  template: fitted.template,
+                  assetIds: fitted.ordered.map((photo) => photo.assetId),
+                } as PhotoPagePlan,
+                captionFor,
+              ),
+            );
+          }
+          changes.push(
+            `split a poorly fitted ${page.template} page in "${section.title}" into two fuller pages`,
+          );
+          continue;
+        }
+      }
+
+      const rebuilt = rebuildPage(page, survivors, trim);
       if (!rebuilt) continue;
-      if (rebuilt.template !== page.template || rebuilt.assetIds.length !== page.assetIds.length) {
+      const refitted =
+        rebuilt.template !== page.template ||
+        rebuilt.assetIds.length !== page.assetIds.length ||
+        rebuilt.assetIds.some((id, index) => id !== page.assetIds[index]);
+      if (refitted) {
         changes.push(
           `re-fitted a page in "${section.title}": ${page.template} (${page.assetIds.length} photos) → ${rebuilt.template} (${rebuilt.assetIds.length} photos)`,
         );
@@ -550,6 +588,7 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
     sections,
     missing,
     plan.sections[0]?.title ?? 'Weitere Fotos',
+    trim,
     birthday,
     input.stories,
   );
@@ -610,7 +649,7 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
           .slice(1)
           .map((id) => byId.get(id))
           .filter((p): p is LintPhoto => p != null);
-        const rebuilt = remaining.length > 0 ? rebuildPage(donor, remaining) : null;
+        const rebuilt = remaining.length > 0 ? rebuildPage(donor, remaining, trim) : null;
         const pages = rebuilt
           ? repaired[si].pages.map((p, i) => (i === pi ? rebuilt : p))
           : repaired[si].pages.filter((_, i) => i !== pi);

@@ -39,15 +39,28 @@ describe('empty-page finding', () => {
   });
 });
 
-describe('four-mixed shape rule', () => {
-  it('accepts a landscape-first four-mixed and rejects a portrait-first one', () => {
+describe('aspect-aware fitting findings', () => {
+  it('lets balanced mixed templates accept any first-photo orientation', () => {
     expect(templateFits('four-mixed', [landscape('l'), portrait('a'), portrait('b'), portrait('c')])).toBe(true);
-    expect(templateFits('four-mixed', [portrait('a'), landscape('l'), portrait('b'), portrait('c')])).toBe(false);
+    expect(templateFits('four-mixed', [portrait('a'), landscape('l'), portrait('b'), portrait('c')])).toBe(true);
   });
 
   it('collage-6 accepts any shape mix', () => {
     expect(
       templateFits('collage-6', [landscape('a'), portrait('b'), landscape('c'), portrait('d'), landscape('e'), portrait('f')]),
     ).toBe(true);
+  });
+
+  it('flags a landscape cover and landscape full-bleed page on a portrait book', () => {
+    const plan = planOf([{ title: 'Tag 1', pages: [{ template: 'full-bleed', assetIds: ['a'] }] }]);
+    const findings = lintPhotoBookPlan(plan, [landscape('hero'), landscape('a')]);
+    expect(findings.filter((f) => f.code === 'excessive-crop')).toHaveLength(2);
+  });
+
+  it('flags a thin three-column row and names the materially better template', () => {
+    const plan = planOf([{ title: 'Tag 1', pages: [{ template: 'three-column', assetIds: ['a', 'b', 'c'] }] }]);
+    const findings = lintPhotoBookPlan(plan, [portrait('hero'), portrait('a'), portrait('b'), portrait('c')]);
+    expect(findings.map((f) => f.code)).toContain('poor-page-fill');
+    expect(findings.find((f) => f.code === 'suboptimal-template')?.message).toContain('three-mixed');
   });
 });
