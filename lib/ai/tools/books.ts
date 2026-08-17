@@ -128,6 +128,7 @@ export const createBookTool = defineTool({
   description:
     'Create a book from stories of the active chronicle. Without storyIds it includes ALL ready ' +
     'stories in chronological order — usually the right start; the user can prune afterwards. ' +
+    'storyIds given out of date order create the book with a custom chapter order (a book setting). ' +
     'After creating, tell the user they can review it under Books and ask you for any changes.',
   schema: z.object({
     title: z.string().min(1).describe('The book title, e.g. the family or chronicle name.'),
@@ -148,7 +149,11 @@ export const createBookTool = defineTool({
     if (!result.ok) return { ok: false, error: result.error };
     return {
       ok: true,
-      message: `Book created (id ${result.value.bookId}).`,
+      message:
+        `Book created (id ${result.value.bookId}).` +
+        (result.value.customOrder
+          ? ' Its chapters are not in date order, so the book uses a custom chapter order (its "how is the book organised" setting is custom) — mention this to the user.'
+          : ''),
       receipt: { label: `Created book "${args.title}"`, href: `/books/${result.value.bookId}` },
     };
   },
