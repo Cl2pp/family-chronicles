@@ -592,14 +592,17 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
         if (availW <= 0 || availH <= 0) return;
         pages.style.zoom = Math.min(1, availW / PAGE_W_PX, availH / PAGE_H_PX);
       }
-      window.PagedConfig = {
-        auto: true,
-        after: function () {
-          paginated = true;
-          fitPages();
-          document.documentElement.setAttribute('data-pagedjs-ready', 'true');
-        },
-      };
+      function reveal() {
+        paginated = true;
+        fitPages();
+        document.documentElement.setAttribute('data-pagedjs-ready', 'true');
+      }
+      window.PagedConfig = { auto: true, after: reveal };
+      // Paged.js never handles its own bootstrap promise (see its \`ready.then(...)\` — no
+      // \`.catch\`), so a pagination failure surfaces here and nowhere else. Without this the
+      // stack would stay hidden (see \`screenChrome\`) and unscaled forever; a rejection also
+      // means pagination has stopped, so fitting from here can't disturb any measurement.
+      window.addEventListener('unhandledrejection', reveal);
       window.addEventListener('resize', fitPages);
       // A resize event alone isn't enough: an iframe that gains a layout box (its
       // container stops being display:none) doesn't reliably fire one in every browser.
@@ -618,7 +621,15 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
   html, body { background: #d7d9dd; }
   body { padding: ${screenBodyPadMm}mm 0; }
   .pagedjs_pages { display: flex; flex-direction: column; align-items: center; gap: 8mm; }
-  .pagedjs_page { background: var(--pb-page-bg, #fff); box-shadow: 0 3mm 10mm rgba(15, 15, 20, 0.28); }`
+  .pagedjs_page { background: var(--pb-page-bg, #fff); box-shadow: 0 3mm 10mm rgba(15, 15, 20, 0.28); }
+  /* Nothing scales the stack until Paged.js is done (see \`fitPages\`), so without this the
+     iframe would show a native-size crop of page one for the whole of pagination — seconds
+     of giant, half-visible page on a long book, then a snap down to size. \`visibility\`,
+     not \`display\`/\`zoom\`: it hides without changing a single box, so it cannot perturb
+     what Paged.js measures. Only ever matches once Paged.js has built the stack — if the
+     polyfill fails to load at all there is no \`.pagedjs_pages\`, and the unpaginated
+     content stays visible as before. */
+  html:not([data-pagedjs-ready]) .pagedjs_pages { visibility: hidden; }`
       : '';
 
   // Cover front — always a bleed page (edge-to-edge hero photo).

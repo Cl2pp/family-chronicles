@@ -49,9 +49,18 @@ async function visibleMarkersPerScreenPage(page: Page): Promise<number[][]> {
   });
 }
 
-type PageFit = { pageWidth: number; pageHeight: number; availWidth: number; availHeight: number };
+type PageFit = {
+  pageWidth: number;
+  pageHeight: number;
+  availWidth: number;
+  availHeight: number;
+  visibility: string;
+};
 
-/** How big one rendered sheet ends up next to the space the viewport actually offers. */
+/** How big one rendered sheet ends up next to the space the viewport actually offers —
+ *  plus whether it is actually on screen. The stack is hidden until Paged.js finishes, and
+ *  `getBoundingClientRect` reports boxes for hidden elements just the same, so a preview
+ *  left permanently invisible would satisfy every size assertion below without this. */
 async function measurePageFit(page: Page): Promise<PageFit> {
   return page.evaluate(async () => {
     // ResizeObserver callbacks land before paint, so two frames is enough for a viewport
@@ -64,6 +73,7 @@ async function measurePageFit(page: Page): Promise<PageFit> {
       pageHeight: rect?.height ?? 0,
       availWidth: document.documentElement.clientWidth,
       availHeight: document.documentElement.clientHeight,
+      visibility: sheet ? getComputedStyle(sheet).visibility : 'missing',
     };
   });
 }
@@ -75,7 +85,10 @@ async function markersPerPdfPage(pdfBytes: Uint8Array): Promise<number[][]> {
     const page = await pdfDocument.getPage(pageNumber);
     const content = await page.getTextContent();
     // The first marker's drop cap is a separate PDF text item, so ignore extraction
-    // whitespace while still requiring every complete, unique marker to survive.
+    // whitespace while still reading every complete marker. Stripping per page rather than
+    // over the whole document is what makes the markers attributable to a page at all;
+    // safe here because a marker is one unhyphenated word at the very start of a paragraph
+    // and so never straddles a page break.
     const text = content.items
       .map((item) => ('str' in item ? item.str : ''))
       .join(' ')
@@ -94,7 +107,8 @@ async function openScreenPage(
 ): Promise<Page> {
   // The `screen` variant references the app's self-hosted polyfill URL, so serve both the
   // HTML and the exact response from that route through a synthetic local origin rather
-  // than replacing Paged.js with a test stub.
+  // than replacing Paged.js with a test stub. (The one exception is the failure case at the
+  // bottom of this file, which has to stand in for a Paged.js that dies mid-run.)
   const page = await browser.newPage();
   // Size the viewport before loading: Paged.js paginates on load, and the fit-to-iframe
   // zoom is driven by the viewport it sees while doing so.
@@ -184,6 +198,9 @@ describe('flowing story text PDF pagination', () => {
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: 'load' });
         pdfBytes = await page.pdf({ printBackground: true, preferCSSPageSize: true });
+        // Closed so each screen page below is the foreground tab: `measurePageFit` waits on
+        // animation frames, which a backgrounded tab throttles.
+        await page.close();
 
         // Exercise the builder's real `screen` path too, at both a roomy viewport and one
         // small enough that the fit-to-iframe zoom kicks in.
@@ -226,6 +243,13 @@ describe('flowing story text PDF pagination', () => {
         await browser.close();
       }
 
+      // The invariant the bug actually broke, and the one assertion that can never drift:
+      // both viewports run the same engine over the same document, so zooming to fit must
+      // not move a single paragraph. The comparison against Chromium's own print
+      // fragmentation below is the looser cross-check on top of it.
+      const [unzoomed, zoomed] = screenRuns;
+      expect(zoomed.visible, `${zoomed.label} vs ${unzoomed.label}`).toEqual(unzoomed.visible);
+
       const pdfMarkers = await markersPerPdfPage(pdfBytes);
       expect(pdfMarkers.length).toBeGreaterThan(7);
       const printedMarkers = pdfMarkers.flat();
@@ -243,11 +267,13 @@ describe('flowing story text PDF pagination', () => {
         expect(run.visible, run.label).toEqual(pdfMarkers);
 
         // A whole sheet still has to fit the viewport, before and after a resize, and
-        // resizing must not re-paginate.
+        // resizing must not re-paginate. Only the small viewport exercises the fitting: at
+        // 1400x1800 a page fits at native size, so its zoom stays 1 either way.
         for (const [when, fit] of [
           ['initial', run.fit],
           ['after resize', run.refit],
         ] as const) {
+          expect(fit.visibility, `${run.label} ${when} visibility`).toBe('visible');
           expect(fit.pageWidth, `${run.label} ${when} width`).toBeGreaterThan(0);
           expect(fit.pageWidth, `${run.label} ${when} width`).toBeLessThanOrEqual(
             fit.availWidth + 1,
@@ -260,5 +286,69 @@ describe('flowing story text PDF pagination', () => {
       }
     },
     120_000,
+  );
+});
+
+describe('builder preview when Paged.js dies mid-run', () => {
+  it(
+    'still reveals and fits whatever was laid out',
+    async () => {
+      // The page stack is hidden until pagination reports done, so a Paged.js that builds
+      // some pages and then throws would otherwise leave the builder staring at an empty
+      // box forever. Paged.js never catches its own bootstrap promise, so the failure
+      // arrives as an unhandled rejection — stood in for here by a stub that appends a page
+      // stack and then rejects, since a real Paged.js failure can't be provoked on demand.
+      const html = renderPhotoBookHtml({
+        variant: 'screen',
+        chronicleName: 'Familie Muster',
+        trim: { w: 210, h: 280 },
+        plan: {
+          kind: 'photo',
+          style: 'classic',
+          cover: { title: 'Geburtstagsbuch' },
+          sections: [{ title: 'Eine Geschichte', storyId: 'story', pages: [] }],
+        },
+        images: new Map(),
+        fontFaceCss: '',
+        createdLabel: 'August 2026',
+        storyParagraphs: new Map([['story', ['Ein Absatz.']]]),
+      });
+      // Deferred to DOM-ready for the same reason the real polyfill is: this script tag
+      // sits in <head>, so there is no <body> to append to when it first runs.
+      const brokenPolyfill = `
+        document.addEventListener('DOMContentLoaded', function () {
+          var pages = document.createElement('div');
+          pages.className = 'pagedjs_pages';
+          var sheet = document.createElement('div');
+          sheet.className = 'pagedjs_page';
+          pages.appendChild(sheet);
+          document.body.appendChild(pages);
+          Promise.reject(new Error('pagination blew up'));
+        });
+      `;
+
+      const browser = await puppeteer.launch({
+        args: ['--no-sandbox', '--disable-dev-shm-usage', '--font-render-hinting=none'],
+      });
+      try {
+        const page = await openScreenPage(browser, html, Buffer.from(brokenPolyfill), {
+          width: 480,
+          height: 660,
+        });
+        const { visibility, zoom } = await page.evaluate(() => {
+          const pages = document.querySelector('.pagedjs_pages') as HTMLElement | null;
+          return {
+            visibility: pages ? getComputedStyle(pages).visibility : 'missing',
+            zoom: pages?.style.zoom ?? '',
+          };
+        });
+        expect(visibility).toBe('visible');
+        expect(Number(zoom)).toBeGreaterThan(0);
+        expect(Number(zoom)).toBeLessThan(1);
+      } finally {
+        await browser.close();
+      }
+    },
+    60_000,
   );
 });
