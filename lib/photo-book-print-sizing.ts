@@ -1,4 +1,5 @@
 import {
+  birthdayCoverPageGeometryMm,
   PHOTO_BOOK_BLEED_MM,
   PHOTO_BOOK_CONTENT_MARGIN_MM,
   rowStackCellSizesMm,
@@ -113,10 +114,24 @@ export function photoAssetPrintTargetSizeMm(
 
   const birthday = photoBookTemplate(plan) === 'birthday';
   if (!birthday && plan.cover.heroAssetId) set(plan.cover.heroAssetId, pageW, pageH);
-  // Birthday collage cells never exceed roughly half the cover in either direction;
-  // the same selection may also appear inside and the max-merge below keeps whichever
-  // role needs more resolution.
-  for (const id of plan.cover.assetIds ?? []) set(id, pageW * 0.55, pageH * 0.55);
+  // Birthday cover tiles: replay the renderer's own square-collage geometry rather than
+  // guess a fraction of the page. A LONE cover photo fills the whole square (that's the
+  // whole point of `[data-count="1"]`), 2-4 photos each get one 2x2 cell — a five-fold
+  // difference in area, so a flat "roughly half the cover" budget would under-embed the
+  // single-photo case. The stored `subtitle` (not the renderer's `createdLabel` fallback)
+  // is enough here: an absent one still reserves a line, so this can only over-state the
+  // square the cover really prints, never under-state it. The same selection may also
+  // appear inside the book, and the max-merge above keeps whichever role needs more
+  // resolution.
+  const coverIds = plan.cover.assetIds ?? [];
+  if (coverIds.length > 0) {
+    const collage = birthdayCoverPageGeometryMm(
+      { w: pageW, h: pageH },
+      { title: plan.cover.title, subtitle: plan.cover.subtitle ?? '' },
+    );
+    const tile = coverIds.length === 1 ? collage.side : collage.cell;
+    for (const id of coverIds) set(id, tile, tile);
+  }
   // Back-cover photos are fixed-size (`.pb-cover-back-photos .ph-frame` in
   // `lib/photo-book-layout.ts`).
   for (const id of plan.cover.backAssetIds ?? []) set(id, 40, 50);

@@ -3,6 +3,7 @@ import {
   photoBookTemplate,
   PHOTO_BOOK_TEMPLATES,
   PHOTO_BOOK_STYLES,
+  BIRTHDAY_COVER_PHOTO_MAX,
   PHOTO_PAGE_TEMPLATES,
   PHOTO_PAGE_TEMPLATE_SLOTS,
   templateRendersCaptions,
@@ -124,7 +125,7 @@ export function coercePhotoBookPlan(
     .map(asString)
     .filter((id): id is string => id != null)
     .filter((id, index, ids) => ids.indexOf(id) === index)
-    .slice(0, 6);
+    .slice(0, BIRTHDAY_COVER_PHOTO_MAX);
   if (coverAssetIds.length > 0) cover.assetIds = coverAssetIds;
   const backIds = asArray(rawCover.backAssetIds)
     .map(asString)
@@ -474,11 +475,21 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
   const cover: PhotoBookPlan['cover'] = { ...plan.cover };
   if (birthday) {
     const requested = cover.assetIds ?? (cover.heroAssetId ? [cover.heroAssetId] : []);
-    const kept = requested
-      .filter((id, index, ids) => byId.has(id) && ids.indexOf(id) === index)
-      .slice(0, 6);
-    if (kept.length !== requested.length) {
-      changes.push(`dropped ${requested.length - kept.length} unusable Birthday cover photo(s)`);
+    // What this branch actually does in production: drop cover photos that are gone from
+    // the book, plus duplicates.
+    const usable = requested.filter((id, index, ids) => byId.has(id) && ids.indexOf(id) === index);
+    if (usable.length !== requested.length) {
+      changes.push(`dropped ${requested.length - usable.length} unusable Birthday cover photo(s)`);
+    }
+    // The cap, on the other hand, is DEFENSIVE only: both callers hand this function a plan
+    // that already came through `validatePhotoBookPlan`, whose `cover.assetIds` field trims
+    // an over-cap selection on the way in, so `usable` is within the cap before we get
+    // here. It stays for a caller that hand-builds a plan object instead.
+    const kept = usable.slice(0, BIRTHDAY_COVER_PHOTO_MAX);
+    if (kept.length !== usable.length) {
+      changes.push(
+        `dropped ${usable.length - kept.length} Birthday cover photo(s) past the ${BIRTHDAY_COVER_PHOTO_MAX}-photo cover limit`,
+      );
     }
     if (kept.length > 0) {
       cover.assetIds = kept;
@@ -622,7 +633,7 @@ export function repairPhotoBookPlan(plan: PhotoBookPlan, input: PhotoBookRepairI
   // every available photo is already spoken for.
   const hasContent = repaired.some((s) => s.pages.some((p) => !isTextItem(p) && p.assetIds.length > 0));
   if (birthday && hasContent && (!cover.assetIds || cover.assetIds.length === 0)) {
-    const picks = input.photos.slice(0, 6).map((photo) => photo.assetId);
+    const picks = input.photos.slice(0, BIRTHDAY_COVER_PHOTO_MAX).map((photo) => photo.assetId);
     cover.assetIds = picks;
     cover.heroAssetId = picks[0];
     changes.push(`picked ${picks.length} Birthday cover photo(s) (the plan had none)`);

@@ -1,4 +1,5 @@
 import {
+  BIRTHDAY_COVER_PHOTO_MAX,
   isTextItem,
   photoBookTemplate,
   PHOTO_PAGE_TEMPLATE_SLOTS,
@@ -294,7 +295,7 @@ export function applyPhotoLayoutOp(
                   assetIds: [
                     op.heroAssetId,
                     ...(plan.cover.assetIds ?? []).filter((id) => id !== op.heroAssetId),
-                  ].slice(0, 6),
+                  ].slice(0, BIRTHDAY_COVER_PHOTO_MAX),
                 }
               : {}),
           },

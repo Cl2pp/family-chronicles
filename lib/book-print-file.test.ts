@@ -244,6 +244,68 @@ describe('renderCoverSpreadHtml', () => {
     expect(html).toContain('class="pb-spread-birthday-collage" data-count="3"');
     expect(html).toContain('<p class="pb-spread-subtitle">März 2026</p>');
     expect(html).not.toContain('class="pb-spread-hero"');
+    // The title sits straight on the cover colour, like the proof cover's own
+    // `.pb-birthday-cover-text`: the panel that used to back it sliced through the drop
+    // shadows of the collage tiles above.
+    expect(html).not.toMatch(/\.pb-spread-birthday-text \{[^}]*background:/);
+  });
+
+  it('gives the printed Birthday cover the same column layout and square grid as the proof', () => {
+    // The front half is a column inside `.pb-spread-front` (which starts at the front
+    // panel's left edge, 245, and runs the full 325 spread height): 8mm inset on the left,
+    // the wrap + inset (28mm) on the right -> 187mm wide; the panel top + inset (28) down
+    // to the title block's own 32mm bottom -> 265mm tall. A one-line title reserves
+    // ~26.87mm of that, so the WIDTH decides the square: 187mm, tiles (187 - 4) / 2 = 91.5.
+    const birthdayCover = (assetIds: string[]) =>
+      renderCoverSpreadHtml({
+        dims: HARDCOVER_DIMS,
+        plan: {
+          kind: 'photo',
+          template: 'birthday',
+          style: 'classic',
+          cover: { title: 'Birthday Book', heroAssetId: assetIds[0], assetIds },
+          sections: [],
+        },
+        chronicleName: 'Chronik Müller',
+        createdLabel: 'März 2026',
+        fontFaceCss: '',
+        images: new Map(),
+      });
+    const html = birthdayCover(['a1', 'a2', 'a3']);
+
+    // Collage band above the title block, both in normal flow — nothing absolutely
+    // positioned, so a long title can only ever shrink the collage, never print over it.
+    expect(html).toMatch(
+      /\.pb-spread-front-birthday \{\s*flex-direction: column;[^}]*padding: 28\.00mm 28\.00mm 32\.00mm 8\.00mm;/,
+    );
+    expect(html).toMatch(/\.pb-spread-birthday-band \{\s*flex: 1 1 auto;\s*min-height: 187\.00mm;/);
+    expect(html).toMatch(
+      /\.pb-spread-birthday-collage \{\s*flex: 0 0 auto;\s*width: 187\.00mm;\s*height: 187\.00mm;/,
+    );
+    expect(html).toContain('grid-template-columns: repeat(2, 91.50mm);');
+    expect(html).toContain('grid-auto-rows: 91.50mm;');
+    expect(html).toMatch(/\.pb-spread-birthday-text \{\s*flex: 0 0 auto;/);
+
+    // The same per-count arrangements the proof cover uses: one photo fills the square,
+    // three centre the odd tile across the bottom row, 2 and 4 need no rule at all.
+    for (const n of [1, 2, 3, 4]) {
+      const counted = birthdayCover(['a1', 'a2', 'a3', 'a4'].slice(0, n));
+      expect(counted).toContain(`class="pb-spread-birthday-collage" data-count="${n}"`);
+      expect(counted).toMatch(
+        /\.pb-spread-birthday-collage\[data-count="1"\] \{\s*grid-template-columns: 187\.00mm;\s*grid-auto-rows: 187\.00mm;\s*\}/,
+      );
+      expect(counted).toMatch(
+        /\.pb-spread-birthday-collage\[data-count="3"\] \.pb-birthday-cover-photo:nth-child\(3\) \{\s*grid-column: 1 \/ span 2;\s*justify-self: center;\s*width: 91\.50mm;\s*\}/,
+      );
+      expect(counted.match(/class="pb-birthday-cover-photo /g) ?? []).toHaveLength(n);
+    }
+    // No tile is restretched by the count any more — the old per-count spans and the
+    // 6-column track are gone. Scoped to the collage's own rules, so an unrelated future
+    // grid elsewhere in the spread's stylesheet can't fail this.
+    const collageRules = html.match(/\.pb-(spread-)?birthday-c\w+[^{]*\{[^}]*\}/g) ?? [];
+    expect(collageRules.length).toBeGreaterThan(0);
+    expect(collageRules.join('\n')).not.toContain('grid-column: span');
+    expect(collageRules.join('\n')).not.toContain('repeat(6, 1fr)');
   });
 });
 

@@ -8,6 +8,7 @@ import {
 } from '@/lib/photo-book-fit';
 import { coverCropRetention, MIN_SAFE_COVER_RETENTION } from '@/lib/photo-book-layout';
 import {
+  BIRTHDAY_COVER_PHOTO_MAX,
   type PhotoBookPlan,
   type PhotoFlowItem,
   type PhotoBookStyle,
@@ -1051,10 +1052,10 @@ export function buildPhotoBookAutoLayout(input: PhotoBookAutoLayoutInput): Photo
   const heroAssetId = protectedHeroId ?? bestOverall?.assetId;
   const birthdayCoverIds = (() => {
     if (template !== 'birthday') return [];
-    if (carriedCoverIds.length > 0) return carriedCoverIds.slice(0, 6);
+    if (carriedCoverIds.length > 0) return carriedCoverIds.slice(0, BIRTHDAY_COVER_PHOTO_MAX);
     const pool = survivorsForCover.slice();
     const picked: string[] = [];
-    while (pool.length > 0 && picked.length < 6) {
+    while (pool.length > 0 && picked.length < BIRTHDAY_COVER_PHOTO_MAX) {
       const best = pickBestPhoto(pool);
       if (!best) break;
       picked.push(best.assetId);

@@ -149,6 +149,21 @@ describe('applyPhotoPlanCarryOver — cover title/subtitle (config wins over the
     expect(result.template).toBe('birthday');
     expect(result.cover.assetIds).toEqual(['a', 'b']);
   });
+
+  it('trims a carried-over cover that predates the 4-photo grid', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const existingPlan: PhotoBookPlan = {
+      kind: 'photo',
+      template: 'birthday',
+      style: 'classic',
+      cover: { title: 'Birthday', heroAssetId: 'a', assetIds: ids },
+      sections: [],
+    };
+    const photos = ids.map((assetId) => photo({ assetId }));
+    const result = applyPhotoPlanCarryOver(aiPlan(), loaded({ layoutPlan: existingPlan }, photos));
+    expect(result.cover.assetIds).toEqual(['a', 'b', 'c', 'd']);
+    expect(result.cover.heroAssetId).toBe('a');
+  });
 });
 
 describe('planChapters — only content-bearing chapters constrain a plan', () => {

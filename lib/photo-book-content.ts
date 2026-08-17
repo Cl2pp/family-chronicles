@@ -4,9 +4,11 @@ import { assets, bookPhotos, books, bookStories, stories } from '@/db/schema';
 import { getObjectBuffer } from '@/lib/s3';
 import { eventLabel, orientedDimensions, paragraphs, TRIM } from '@/lib/book-content';
 import {
+  BIRTHDAY_COVER_PHOTO_MAX,
   checkPhotoBookPlanConsistency,
   isTextItem,
   photoBookTemplate,
+  storedCoverPhotoCount,
   validatePhotoBookPlan,
   type PhotoBookPlan,
   type PhotoPlanContent,
@@ -291,6 +293,13 @@ async function repairAndPersistPhotoPlan(
   // when there is nothing to lay out in either medium.
   if (available.length === 0 && textChapters(loaded).length === 0) return null;
 
+  // `validatePhotoBookPlan` silently trims a Birthday cover stored under the old 6-photo
+  // limit, so `stored.plan` is already within the cap and the repairer below sees nothing
+  // to drop. Without recording it here the trimmed plan would never be written back and
+  // the same row would be re-trimmed on every single read; one change makes it converge.
+  // Only over-cap rows are affected — every plan written since the change reports 0 extra.
+  const overCap = Math.max(0, storedCoverPhotoCount(loaded.row.layoutPlan) - BIRTHDAY_COVER_PHOTO_MAX);
+
   const { plan, changes } = repairPhotoBookPlan(stored.plan, {
     photos: available.map((p) => ({
       assetId: p.assetId,
@@ -306,6 +315,9 @@ async function repairAndPersistPhotoPlan(
     stories: planChapters(loaded),
     trim: TRIM[loaded.row.format] ?? TRIM['hardcover-21x28'],
   });
+  if (overCap > 0) {
+    changes.push(`trimmed ${overCap} Birthday cover photo(s) past the ${BIRTHDAY_COVER_PHOTO_MAX}-photo cover limit`);
+  }
 
   const content: PhotoPlanContent = {
     availableAssetIds: loaded.photos.filter((p) => !p.excluded).map((p) => p.assetId),

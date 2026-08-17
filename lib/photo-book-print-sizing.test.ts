@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { PHOTO_BOOK_BLEED_MM, PHOTO_BOOK_CONTENT_MARGIN_MM } from './photo-book-layout';
+import {
+  PHOTO_BOOK_BLEED_MM,
+  PHOTO_BOOK_CONTENT_MARGIN_MM,
+  birthdayCoverPageGeometryMm,
+} from './photo-book-layout';
 import { countPhotoBookPages, photoAssetPrintTargetSizeMm, photoSlotPrintWidthsMm } from './photo-book-print-sizing';
 import type { PhotoBookPlan } from './photo-book-plan';
 
@@ -115,6 +119,29 @@ describe('photoAssetPrintTargetSizeMm', () => {
   it('sizes the cover hero to the full bleed-inclusive page', () => {
     const sizes = photoAssetPrintTargetSizeMm(basePlan(), TRIM);
     expect(sizes.get('hero')).toEqual({ w: pageW, h: pageH });
+  });
+
+  it('budgets a Birthday cover photo at the square tile it actually prints at', () => {
+    // A LONE cover photo fills the whole square; 2-4 photos each get one 2x2 cell — five
+    // times less area. Budgeting both at one figure would under-embed the single-photo
+    // cover, so replay the renderer's own geometry per count.
+    for (const trim of [TRIM, { w: 200, h: 200 }]) {
+      const page = { w: trim.w + PHOTO_BOOK_BLEED_MM * 2, h: trim.h + PHOTO_BOOK_BLEED_MM * 2 };
+      const { side, cell } = birthdayCoverPageGeometryMm(page, { title: 'B', subtitle: '' });
+      // Cover-only ids (`c*`), so the max-merge with an interior placement can't mask what
+      // the cover itself asked for.
+      const cover = (assetIds: string[]) =>
+        basePlan({ template: 'birthday', cover: { title: 'B', heroAssetId: assetIds[0], assetIds } });
+
+      expect(photoAssetPrintTargetSizeMm(cover(['c1']), trim).get('c1')).toEqual({ w: side, h: side });
+      const four = photoAssetPrintTargetSizeMm(cover(['c1', 'c2', 'c3', 'c4']), trim);
+      for (const id of ['c1', 'c2', 'c3', 'c4']) {
+        expect(four.get(id)).toEqual({ w: cell, h: cell });
+      }
+      // Still well under the whole page, which is what makes the collage cheaper to embed
+      // than a full-bleed hero.
+      expect(cell).toBeLessThan(page.w / 2);
+    }
   });
 
   it('sizes a full-bleed photo to the content box (it renders inside the shared page frame)', () => {

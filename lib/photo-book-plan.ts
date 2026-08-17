@@ -36,6 +36,16 @@ export type PhotoBookStyle = (typeof PHOTO_BOOK_STYLES)[number];
 export const PHOTO_BOOK_TEMPLATES = ['standard', 'birthday'] as const;
 export type PhotoBookTemplate = (typeof PHOTO_BOOK_TEMPLATES)[number];
 
+/** How many photos the Birthday front-cover collage may hold — the 2×2 grid of equal
+ *  squares `lib/photo-book-layout.ts` and `lib/book-print-file.ts` both render, so this is
+ *  a geometric limit, not a taste one. THE single definition: the schema below, the
+ *  `setBirthdayCoverPhotos` guard (`lib/books.ts`), every producer that trims a carried-over
+ *  selection (auto-layouter, AI carry-over, repair) and the builder's picker all read it,
+ *  so the cap can't drift between the thing that stores a selection and the thing that
+ *  prints it. Plans stored under the older 6-photo cover are trimmed on read by
+ *  `coverPlanSchema.assetIds` below rather than rejected. */
+export const BIRTHDAY_COVER_PHOTO_MAX = 4;
+
 /** The fixed layout vocabulary (docs/PHOTO_BOOK_PLAN.md §5 table). Slot counts are
  *  enforced per-template below (mirrors `photoRowBlockSchema`/`photoGridBlockSchema` in
  *  `lib/book-layout-plan.ts`, which do the same thing for the story plan's blocks). */
@@ -203,10 +213,26 @@ const coverPlanSchema = z.object({
   /** Optional, like the story plan's `coverPlanSchema.heroAssetId` — a brand new photo
    *  book with zero uploaded (or all-excluded) photos has no possible hero yet. */
   heroAssetId: z.string().optional(),
-  /** Birthday-template front-cover collage. These references are decorative: unlike a
+  /** Birthday-template front-cover collage — at most `BIRTHDAY_COVER_PHOTO_MAX` photos,
+   * the 2×2 square grid the cover renders. These references are decorative: unlike a
    * standard hero they may also appear in the story's interior photo pages, because the
-   * template promises to append every story photo after its prose. */
-  assetIds: z.array(z.string()).max(6).optional(),
+   * template promises to append every story photo after its prose.
+   *
+   * TRIMMED rather than rejected, because books stored before the cover became a 2×2 grid
+   * carry up to six ids and EVERY read path turns stored jsonb into a plan through
+   * `validatePhotoBookPlan`. Failing those plans would not just lose the cover:
+   * `loadOrBuildPhotoPlan` (`lib/photo-book-content.ts`) rebuilds an unvalidatable plan
+   * with the mechanical auto-layouter, and `buildAndPersistPhotoAutoPlan` reads the book's
+   * template off the VALIDATED plan, so a live Birthday Book would come back as a standard
+   * one. Nothing ever WRITES an over-cap cover — the auto-layouter, the AI carry-over, the
+   * repairer, `setBirthdayCoverPhotos` and the builder's picker all cap their own input —
+   * so this only ever fires on plans written before the change, and
+   * `repairAndPersistPhotoPlan` records it as a change so such a row is rewritten once
+   * instead of being re-trimmed on every read forever. */
+  assetIds: z
+    .array(z.string())
+    .transform((ids) => ids.slice(0, BIRTHDAY_COVER_PHOTO_MAX))
+    .optional(),
   title: z.string().min(1),
   subtitle: z.string().optional(),
   /** 0-3 small photos for the back cover (docs/PHOTO_BOOK_PLAN.md §5). PR2's
@@ -238,6 +264,17 @@ export function photoBookTemplate(plan: Pick<PhotoBookPlan, 'template'>): PhotoB
 export interface PhotoBookPlanValidationError {
   ok: false;
   error: string;
+}
+
+/** How many Birthday cover photos a piece of RAW stored jsonb asks for, before
+ *  `coverPlanSchema.assetIds` trims it. `repairAndPersistPhotoPlan`
+ *  (`lib/photo-book-content.ts`) compares this with the cap to notice that the read-time
+ *  trim fired, so a legacy row converges on one write instead of being trimmed again on
+ *  every read. Returns 0 for anything that isn't a stored cover selection. */
+export function storedCoverPhotoCount(data: unknown): number {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return 0;
+  const assetIds = (data as { cover?: { assetIds?: unknown } }).cover?.assetIds;
+  return Array.isArray(assetIds) ? assetIds.length : 0;
 }
 
 /** Parses + validates a photo-book plan against the schema. Throws nothing; returns a

@@ -2,10 +2,13 @@ import { PDFDocument } from 'pdf-lib';
 import { MAX_PAGES, MIN_PAGES, type GelatoCoverArea, type GelatoCoverDimensions } from '@/lib/gelato';
 import {
   birthdayCoverCollageHtml,
+  birthdayCoverFrontGeometryMm,
   esc,
   img,
   styleVarsCss,
+  COVER_TITLE_METRICS,
   PHOTO_BOOK_COVER_PAGE_COUNT,
+  PHOTO_GAP_MM,
   coverCropRetention,
   MIN_SAFE_COVER_RETENTION,
   type PhotoLayoutImage,
@@ -217,6 +220,29 @@ export function renderCoverSpreadHtml(input: CoverSpreadInput): string {
     bottom: spread.height - (front.top + front.height) + FRONT_TEXT_INSET_MM + 4,
   };
 
+  // The Birthday front, measured inside `.pb-spread-front` (which starts at the front
+  // panel's left edge and runs the full spread height): the safe inset on the left, the
+  // wrap + inset on the right, the panel's top + inset above and the same padding the
+  // title block already sat on below. Laid out as a COLUMN — collage band, then title —
+  // exactly like the proof cover, so a long title shrinks the collage in both instead of
+  // printing over it in either; `birthdayCoverFrontGeometryMm` sizes the same square 2x2
+  // box from that box, so the printed cover and the preview a user approves agree.
+  const birthdaySubtitle = plan.cover.subtitle || input.createdLabel;
+  const collageInset = {
+    left: FRONT_TEXT_INSET_MM,
+    top: front.top + FRONT_TEXT_INSET_MM,
+    right: frontTextPad.right,
+    bottom: frontTextPad.bottom,
+  };
+  const collage = birthdayCoverFrontGeometryMm({
+    inner: {
+      w: frontBleedWidth - collageInset.left - collageInset.right,
+      h: spread.height - collageInset.top - collageInset.bottom,
+    },
+    title: plan.cover.title,
+    subtitle: birthdaySubtitle,
+  });
+
   return `<!doctype html>
 <html lang="${esc(input.language ?? 'de')}">
 <head>
@@ -283,19 +309,38 @@ ${styleVarsCss(style)}
   .pb-spread-hero { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .pb-spread-hero-blur { filter: blur(5mm); transform: scale(1.08); opacity: 0.72; }
   .pb-spread-hero-contain { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  /* Birthday front: a column of collage band + title block, the same arrangement (and the
+     same shared geometry) as the proof cover's .pb-birthday-cover. */
+  .pb-spread-front-birthday {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: ${mm(collageInset.top)} ${mm(collageInset.right)} ${mm(collageInset.bottom)} ${mm(collageInset.left)};
+  }
+  /* Never shrinks below the collage, so a title that wrapped further than the estimate
+     allowed for pushes itself down rather than over the photos. */
+  .pb-spread-birthday-band {
+    flex: 1 1 auto;
+    min-height: ${mm(collage.side)};
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* One square ${mm(collage.side)} box of 2x2 equal ${mm(collage.cell)} tiles, centred in
+     the band above the title block. Same tile at 2, 3 and 4 photos (a lone photo takes the
+     whole square); object-fit: cover on the image crops each photo into its square. */
   .pb-spread-birthday-collage {
-    position: absolute;
-    left: ${mm(FRONT_TEXT_INSET_MM)};
-    right: ${mm(frontTextPad.right)};
-    top: ${mm(front.top + FRONT_TEXT_INSET_MM)};
-    bottom: 45mm;
+    flex: 0 0 auto;
+    width: ${mm(collage.side)};
+    height: ${mm(collage.side)};
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    grid-auto-rows: minmax(0, 1fr);
-    gap: 4mm;
+    grid-template-columns: repeat(2, ${mm(collage.cell)});
+    grid-auto-rows: ${mm(collage.cell)};
+    gap: ${mm(PHOTO_GAP_MM)};
+    justify-content: center;
+    align-content: center;
   }
   .pb-birthday-cover-photo {
-    grid-column: span 2;
     min-width: 0;
     min-height: 0;
     padding: 2.2mm;
@@ -304,10 +349,18 @@ ${styleVarsCss(style)}
     box-shadow: 0 2mm 5mm rgba(20, 20, 20, 0.18);
     overflow: hidden;
   }
-  .pb-spread-birthday-collage[data-count="1"] .pb-birthday-cover-photo { grid-column: span 6; }
-  .pb-spread-birthday-collage[data-count="2"] .pb-birthday-cover-photo { grid-column: span 3; }
-  .pb-spread-birthday-collage[data-count="4"] .pb-birthday-cover-photo { grid-column: span 3; }
-  .pb-spread-birthday-collage[data-count="5"] .pb-birthday-cover-photo:nth-child(-n + 2) { grid-column: span 3; }
+  /* The two counts that don't fill the grid on their own — one photo takes the whole
+     square, the third of three is centred across the bottom row. Mirrors
+     .pb-birthday-cover-collage (lib/photo-book-layout.ts). */
+  .pb-spread-birthday-collage[data-count="1"] {
+    grid-template-columns: ${mm(collage.side)};
+    grid-auto-rows: ${mm(collage.side)};
+  }
+  .pb-spread-birthday-collage[data-count="3"] .pb-birthday-cover-photo:nth-child(3) {
+    grid-column: 1 / span 2;
+    justify-self: center;
+    width: ${mm(collage.cell)};
+  }
   .pb-birthday-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .pb-spread-front-text {
     position: relative;
@@ -319,19 +372,20 @@ ${styleVarsCss(style)}
     color: ${hero ? '#fff' : 'var(--pb-cover-heading-color)'};
     background: ${hero ? 'linear-gradient(transparent, rgba(0,0,0,0.55) 55%)' : 'none'};
   }
-  .pb-spread-front-text h1 { font-family: var(--pb-font-heading); font-size: 26pt; margin: 0 0 3mm; font-weight: 700; }
-  .pb-spread-subtitle { font-size: 12.5pt; margin: 0 0 3mm; opacity: 0.85; }
+  .pb-spread-front-text h1 { font-family: var(--pb-font-heading); font-size: ${COVER_TITLE_METRICS.titlePt}pt; margin: 0 0 3mm; font-weight: 700; }
+  .pb-spread-subtitle { font-size: ${COVER_TITLE_METRICS.subtitlePt}pt; margin: 0 0 3mm; opacity: 0.85; }
   .pb-spread-chronicle { font-size: 9.5pt; letter-spacing: 0.1em; font-variant: small-caps; margin: 0; opacity: 0.75; }
+  /* No background panel behind the title — same reason as .pb-birthday-cover-text
+     (lib/photo-book-layout.ts): it painted the cover colour over the tile shadows above
+     it. In flow under the band, with the same padding and the same line-height the proof
+     cover's body rule gives it, so both covers wrap the title identically. */
   .pb-spread-birthday-text {
-    position: absolute;
-    left: ${mm(FRONT_TEXT_INSET_MM)};
-    right: ${mm(frontTextPad.right)};
-    bottom: ${mm(frontTextPad.bottom)};
-    width: auto;
-    padding: 5mm 8mm;
+    flex: 0 0 auto;
+    width: 100%;
+    padding: ${mm(COVER_TITLE_METRICS.padTopMm)} ${mm(COVER_TITLE_METRICS.padSideMm)} 0;
+    line-height: ${COVER_TITLE_METRICS.lineHeight};
     text-align: center;
     color: var(--pb-cover-heading-color);
-    background: color-mix(in srgb, var(--pb-cover-bg) 92%, transparent);
   }
   .pb-spread-birthday-text .pb-spread-subtitle { margin-bottom: 0; color: var(--pb-cover-muted-color); }
 
@@ -361,7 +415,7 @@ ${styleVarsCss(style)}
 <body>
 <div class="pb-spread">
   <div class="pb-spread-layer pb-spread-back-bleed"></div>
-  <div class="pb-spread-layer pb-spread-front">
+  <div class="pb-spread-layer pb-spread-front${birthday ? ' pb-spread-front-birthday' : ''}">
     ${
       hero
         ? heroNeedsContain
@@ -369,12 +423,20 @@ ${styleVarsCss(style)}
           : img(hero, 'pb-spread-hero')
         : ''
     }
-    ${birthday ? birthdayCoverCollageHtml(birthdayCoverIds, input.images, 'pb-spread-birthday-collage') : ''}
+    ${
+      birthday
+        ? `<div class="pb-spread-birthday-band">${birthdayCoverCollageHtml(
+            birthdayCoverIds,
+            input.images,
+            'pb-spread-birthday-collage',
+          )}</div>`
+        : ''
+    }
     <div class="pb-spread-front-text${birthday ? ' pb-spread-birthday-text' : ''}">
       <h1>${esc(plan.cover.title)}</h1>
       ${
         birthday
-          ? `<p class="pb-spread-subtitle">${esc(plan.cover.subtitle || input.createdLabel)}</p>`
+          ? `<p class="pb-spread-subtitle">${esc(birthdaySubtitle)}</p>`
           : `${plan.cover.subtitle ? `<p class="pb-spread-subtitle">${esc(plan.cover.subtitle)}</p>` : ''}
       <p class="pb-spread-chronicle">${esc(input.chronicleName)}</p>`
       }

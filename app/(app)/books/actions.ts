@@ -202,7 +202,7 @@ export async function setPhotoBookStyleAction(input: {
   return result.ok ? {} : { error: result.error };
 }
 
-/** Replace the Birthday Book cover collage selection (1-6 included photos). */
+/** Replace the Birthday Book cover collage selection (1-4 included photos). */
 export async function setBirthdayCoverPhotosAction(input: {
   bookId: string;
   assetIds: string[];
