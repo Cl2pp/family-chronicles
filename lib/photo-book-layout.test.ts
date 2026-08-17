@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  birthdayCoverFrontGeometryMm,
+  estimateBirthdayCoverTitleMm,
+  estimateTextFlowHeightMm,
   PHOTO_BOOK_BLEED_MM,
   PHOTO_CAPTION_RESERVE_MM,
   PHOTO_BOOK_CONTENT_MARGIN_MM,
+  PHOTO_GAP_MM,
   renderPhotoBookHtml,
   rowStackGeometryMm,
   type PhotoLayoutImage,
   type PhotoLayoutInput,
 } from './photo-book-layout';
 import { PHOTO_BOOK_STYLES, type PhotoBookPlan } from './photo-book-plan';
+import { PHOTO_STYLE_TOKENS } from './photo-book-styles';
 import { screenFontFaceCss } from './photo-book-fonts';
 
 /** Pure HTML/CSS-generation tests (no Chromium) — the same split the module's own header
@@ -101,13 +106,17 @@ describe('renderPhotoBookHtml', () => {
     );
 
     expect(html).toContain('class="pb-birthday-cover-collage" data-count="4"');
-    expect(html).toContain('<h2>Omas Geburtstag</h2>');
-    expect(html).toContain('12. Mai 2025');
+    // Title only under the chapter heading: a Birthday chapter prints no date, even though
+    // the section still carries its `dateLabel` for the standard recipe's divider/contents.
+    expect(html).toContain('<header class="pb-story-heading"><h2>Omas Geburtstag</h2></header>');
+    expect(html).not.toContain('12. Mai 2025');
     expect(html).toContain('break-before: left');
     expect(html).toContain('<p class="pb-cover-subtitle">July 2026</p>');
     expect(html).not.toContain('<section class="page pb-toc">');
     expect(html).not.toContain('<section class="page pb-divider">');
-    expect(html.indexOf('Der erste Absatz.')).toBeLessThan(html.indexOf('class="page photo-page pb-rows-page"'));
+    // Two paragraphs are far short of a page, so the collage joins them inside the text
+    // flow instead of taking a sheet of its own (see the shared-photos suite below).
+    expect(html.indexOf('Der erste Absatz.')).toBeLessThan(html.indexOf('class="pb-shared-photos"'));
   });
 
   it('puts the Birthday parity opener around photo-only story sections too', () => {
@@ -122,6 +131,150 @@ describe('renderPhotoBookHtml', () => {
     const html = renderPhotoBookHtml(baseInput({ plan, storyParagraphs: new Map() }));
     expect(html.match(/class="pb-birthday-story-start"/g)).toHaveLength(2);
     expect(html).toContain('.pb-birthday-story-start { break-before: left;');
+  });
+
+  it('lays the Birthday cover collage out as one square grid of equal tiles', () => {
+    // The cover front is a COLUMN inside a 10mm/10mm/18mm inset: the collage band on top,
+    // the title block under it in normal flow. So the collage is the largest square that
+    // fits once the title's own estimated height (and a 4mm gap) is reserved. Asserted in
+    // mm rather than by class name because "the tiles are square" is a NUMBER, and
+    // Chromium and Paged.js only agree when the tracks are fixed lengths.
+    const birthday = basePlan({
+      template: 'birthday',
+      cover: { heroAssetId: 'a1', assetIds: ['a1', 'a2', 'a3'], title: 'Birthday Book' },
+      sections: [{ title: 'S', storyId: 's1', pages: [{ template: 'full-framed', assetIds: ['a4'] }] }],
+    });
+
+    // screen/preview: 210x280 sheet, no bleed -> inner 190 x 252, and a one-line title
+    // reserves ~26.87mm, so the WIDTH decides: side 190, cell 93.
+    const screenHtml = renderPhotoBookHtml(baseInput({ plan: birthday, variant: 'screen' }));
+    expect(screenHtml).toMatch(
+      /\.pb-birthday-cover-collage \{\s*flex: 0 0 auto;\s*width: 190\.00mm;\s*height: 190\.00mm;/,
+    );
+    expect(screenHtml).toContain('grid-template-columns: repeat(2, 93.00mm);');
+    expect(screenHtml).toContain('grid-auto-rows: 93.00mm;');
+    // The band can never be squeezed below the collage, whatever the title does.
+    expect(screenHtml).toMatch(/\.pb-birthday-cover-band \{[^}]*min-height: 190\.00mm;/);
+
+    // print: the same sheet plus 3mm bleed all round -> inner 196 x 258 -> side 196, cell 96.
+    const printHtml = renderPhotoBookHtml(baseInput({ plan: birthday, variant: 'print' }));
+    expect(printHtml).toMatch(/\.pb-birthday-cover-collage \{[^}]*width: 196\.00mm;\s*height: 196\.00mm;/);
+    expect(printHtml).toContain('grid-template-columns: repeat(2, 96.00mm);');
+
+    // A square 20x20 book is the height-constrained case: what the title block leaves of
+    // the 178mm-tall inner box, not the page width, decides the collage size.
+    const squareHtml = renderPhotoBookHtml(
+      baseInput({ plan: birthday, variant: 'print', trim: { w: 200, h: 200 } }),
+    );
+    expect(squareHtml).toMatch(
+      /\.pb-birthday-cover-collage \{\s*flex: 0 0 auto;\s*width: 147\.13mm;\s*height: 147\.13mm;/,
+    );
+    expect(squareHtml).toContain('grid-template-columns: repeat(2, 71.56mm);');
+
+    // Nothing restretches a tile with the count, and no jaunty per-tile rotation survives
+    // (the remaining `rotate()` rules in the sheet belong to the tape ornament and
+    // watermark). Scoped to the collage's own rules: an unrelated future grid elsewhere in
+    // the stylesheet is none of this test's business.
+    for (const html of [screenHtml, printHtml, squareHtml]) {
+      const collageRules = html.match(/\.pb-birthday-cover-(photo|collage)[^{]*\{[^}]*\}/g) ?? [];
+      expect(collageRules.length).toBeGreaterThan(0);
+      expect(collageRules.join('\n')).not.toMatch(/grid-column: span|transform/);
+    }
+  });
+
+  it('sizes every Birthday cover count off the same square: 1 fills it, 3 centre the odd tile', () => {
+    // 21x28 print: a 196mm square of 96mm tiles. One photo takes the whole 196mm square
+    // (a lone 96mm tile was a quarter-size stamp marooned in cover colour); three keep the
+    // 96mm tile and centre the third across the bottom row, so no quadrant sits empty.
+    const cover = (n: number) =>
+      renderPhotoBookHtml(
+        baseInput({
+          variant: 'print',
+          plan: basePlan({
+            template: 'birthday',
+            cover: {
+              heroAssetId: 'a1',
+              assetIds: ['a1', 'a2', 'a3', 'a4'].slice(0, n),
+              title: 'Birthday Book',
+            },
+            sections: [
+              { title: 'S', storyId: 's1', pages: [{ template: 'full-framed', assetIds: ['a4'] }] },
+            ],
+          }),
+        }),
+      );
+
+    for (const n of [1, 2, 3, 4]) {
+      const html = cover(n);
+      expect(html).toContain(`class="pb-birthday-cover-collage" data-count="${n}"`);
+      // The 2x2 track is what 2, 3 and 4 photos all lay out on.
+      expect(html).toContain('grid-template-columns: repeat(2, 96.00mm);');
+      expect(html).toContain('grid-auto-rows: 96.00mm;');
+      // One photo overrides both tracks to the full square.
+      expect(html).toMatch(
+        /\.pb-birthday-cover-collage\[data-count="1"\] \{\s*grid-template-columns: 196\.00mm;\s*grid-auto-rows: 196\.00mm;\s*\}/,
+      );
+      // Three centre the third tile across the bottom row, at the same 96mm square.
+      expect(html).toMatch(
+        /\.pb-birthday-cover-collage\[data-count="3"\] \.pb-birthday-cover-photo:nth-child\(3\) \{\s*grid-column: 1 \/ span 2;\s*justify-self: center;\s*width: 96\.00mm;\s*\}/,
+      );
+      expect(html.match(/class="pb-birthday-cover-photo /g) ?? []).toHaveLength(n);
+    }
+  });
+
+  it('puts the Birthday title straight on the cover colour, with no panel or scrim behind it', () => {
+    // The panel used to cut a visible straight edge through the drop shadows of the tiles
+    // above it, and .pb-cover-text's photo scrim (a Birthday heroAssetId is just the first
+    // collage tile, not a backdrop) would darken the same strip.
+    const birthday = renderPhotoBookHtml(
+      baseInput({
+        plan: basePlan({
+          template: 'birthday',
+          cover: { heroAssetId: 'a1', assetIds: ['a1', 'a2'], title: 'Birthday Book' },
+          sections: [{ title: 'S', storyId: 's1', pages: [{ template: 'full-framed', assetIds: ['a4'] }] }],
+        }),
+      }),
+    );
+    expect(birthday).not.toMatch(/\.pb-birthday-cover-text \{[^}]*background:/);
+    expect(birthday).toMatch(/\.pb-cover-text \{[^}]*background: none;/);
+    expect(birthday).not.toMatch(/\.pb-cover-text \{[^}]*color: #fff;/);
+
+    // A standard cover over a real backdrop photo keeps its scrim and white type.
+    const standard = renderPhotoBookHtml(baseInput());
+    expect(standard).toMatch(/\.pb-cover-text \{[^}]*background: linear-gradient\(transparent, rgba\(0,0,0,0\.55\) 55%\);/);
+    expect(standard).toMatch(/\.pb-cover-text \{[^}]*color: #fff;/);
+  });
+
+  it('lets the cover title break a single unbreakable word instead of running off the sheet', () => {
+    // `books.title` is user-typed: one 200-character "word" has no break opportunity, so
+    // without this it lays out as one line straight past the trim edge. Nothing a real
+    // title does changes — the rule only ever fires on a word that cannot wrap at all.
+    expect(renderPhotoBookHtml(baseInput())).toMatch(
+      /\.pb-cover-text h1 \{[^}]*overflow-wrap: anywhere;/,
+    );
+  });
+
+  it('keeps the section date on a standard divider, and off a Birthday chapter heading', () => {
+    const standard = renderPhotoBookHtml(baseInput());
+    expect(standard).toContain('<p class="pb-divider-date">June 2025</p>');
+
+    const birthday = basePlan({
+      template: 'birthday',
+      cover: { heroAssetId: 'a1', assetIds: ['a1'], title: 'Birthday Book' },
+      sections: [
+        {
+          title: 'Omas Geburtstag',
+          dateLabel: 'June 2025',
+          storyId: 's1',
+          pages: [{ template: 'text', from: 0, to: 0 }],
+        },
+      ],
+    });
+    const html = renderPhotoBookHtml(
+      baseInput({ plan: birthday, storyParagraphs: new Map([['s1', ['Ein Absatz.']]]) }),
+    );
+    expect(html).toContain('<header class="pb-story-heading"><h2>Omas Geburtstag</h2></header>');
+    expect(html).not.toContain('June 2025');
   });
 
   it('gives the divider-page template an explicit full-sheet size so it never collapses to a blank page', () => {
@@ -546,6 +699,195 @@ describe('flowing story text (unified-book plan)', () => {
       }),
     );
     expect(gallery).not.toContain('@bottom-center');
+  });
+});
+
+describe('Birthday chapter: photos shared with the story page', () => {
+  /** One Birthday chapter: `paragraphs` of prose, then a four-photo group, then a
+   *  single-photo page — the shape `paceChapter` emits (lib/photo-book-autolayout.ts). */
+  const birthdayPlan = (paragraphCount: number): PhotoBookPlan =>
+    basePlan({
+      template: 'birthday',
+      cover: { heroAssetId: 'a1', assetIds: ['a1', 'a2'], title: 'Geburtstagsbuch' },
+      sections: [
+        {
+          title: 'Omas Geburtstag',
+          storyId: 's1',
+          pages: [
+            { template: 'text', from: 0, to: paragraphCount - 1 },
+            { template: 'four-mixed', assetIds: ['a1', 'a2', 'a3', 'a4'] },
+            { template: 'full-framed', assetIds: ['hero'] },
+          ],
+        },
+      ],
+    });
+  const short = ['Liebe Oma, danke für jeden Sonntagnachmittag in deiner Küche. Alles Gute!'];
+  const long = Array.from({ length: 40 }, (_, i) => `Absatz ${i + 1}. ${'Eine lange Erinnerung. '.repeat(14)}`);
+
+  it('moves a short chapter’s first photo group into its own text flow', () => {
+    const html = renderPhotoBookHtml(
+      baseInput({ plan: birthdayPlan(short.length), storyParagraphs: new Map([['s1', short]]) }),
+    );
+    // The group renders inside the flow, after the prose — not as a sheet of its own …
+    expect(html).toMatch(/<p>Liebe Oma[^<]*<\/p>\s*<div class="pb-shared-photos" style="height: [\d.]+mm">/);
+    // … and the chapter's OTHER photo page is untouched.
+    expect(html.match(/class="page photo-page/g) ?? []).toHaveLength(1);
+    expect(html).toContain('class="page photo-page pb-framed"');
+    expect(html).toMatch(/\.pb-shared-photos \{[\s\S]*?break-inside: avoid;/);
+  });
+
+  it('leaves a long chapter’s photos on their own pages', () => {
+    const html = renderPhotoBookHtml(
+      baseInput({ plan: birthdayPlan(long.length), storyParagraphs: new Map([['s1', long]]) }),
+    );
+    expect(html).not.toContain('class="pb-shared-photos"');
+    expect(html.match(/class="page photo-page/g) ?? []).toHaveLength(2);
+  });
+
+  it('never shares a page in the standard recipe, however short the story', () => {
+    const plan = birthdayPlan(short.length);
+    const html = renderPhotoBookHtml(
+      baseInput({
+        plan: { ...plan, template: 'standard' },
+        storyParagraphs: new Map([['s1', short]]),
+      }),
+    );
+    // The rule ships with every chaptered book (like .pb-birthday-story-start); what must
+    // never appear in a standard book is the markup that uses it.
+    expect(html).not.toContain('<div class="pb-shared-photos"');
+    expect(html.match(/class="page photo-page/g) ?? []).toHaveLength(2);
+  });
+
+  it('decides and sizes the shared block identically in screen, preview and print', () => {
+    // The named text page's content box is the same physical box in all three variants
+    // (bleed grows the sheet and the margins add it back), so the block the reader
+    // approves in the preview is the block the print file carries.
+    const blocks = (['screen', 'preview', 'print'] as const).map((variant) => {
+      const html = renderPhotoBookHtml(
+        baseInput({
+          variant,
+          plan: birthdayPlan(short.length),
+          storyParagraphs: new Map([['s1', short]]),
+        }),
+      );
+      return /<div class="pb-shared-photos"[\s\S]*?<\/div>\s*<\/div>/.exec(html)![0];
+    });
+    expect(blocks[1]).toBe(blocks[0]);
+    expect(blocks[2]).toBe(blocks[0]);
+  });
+});
+
+describe('estimateTextFlowHeightMm', () => {
+  const style = PHOTO_STYLE_TOKENS.classic;
+
+  it('grows with the amount of prose and shrinks as the column widens', () => {
+    const one = estimateTextFlowHeightMm({ paragraphs: ['Ein kurzer Satz.'], widthMm: 178, style });
+    const three = estimateTextFlowHeightMm({
+      paragraphs: ['Ein kurzer Satz.', 'Ein kurzer Satz.', 'Ein kurzer Satz.'],
+      widthMm: 178,
+      style,
+    });
+    expect(three).toBeGreaterThan(one);
+
+    const paragraphs = ['Ein deutlich längerer Absatz, der über mehrere Zeilen läuft. '.repeat(6)];
+    expect(estimateTextFlowHeightMm({ paragraphs, widthMm: 90, style })).toBeGreaterThan(
+      estimateTextFlowHeightMm({ paragraphs, widthMm: 178, style }),
+    );
+  });
+
+  it('counts the chapter heading and the opening drop cap', () => {
+    const bare = estimateTextFlowHeightMm({ paragraphs: ['Kurz.'], widthMm: 178, style });
+    const withHeading = estimateTextFlowHeightMm({
+      paragraphs: ['Kurz.'],
+      heading: 'Omas Geburtstag',
+      widthMm: 178,
+      style,
+    });
+    // Heading line (21pt × 1.15 ≈ 8.5mm) plus its 10mm gap.
+    expect(withHeading - bare).toBeGreaterThan(15);
+    // `modern` has no drop cap, `classic` scales the first letter 1.6× — so the same text
+    // is estimated taller under classic.
+    expect(bare).toBeGreaterThan(
+      estimateTextFlowHeightMm({ paragraphs: ['Kurz.'], widthMm: 178, style: PHOTO_STYLE_TOKENS.modern }),
+    );
+  });
+
+  it('errs high: a real column fits more text than the estimate assumes', () => {
+    // 178mm at 10.5pt is ~90 characters of Playfair per line in practice; the estimate
+    // deliberately assumes a wider glyph, so a 90-character paragraph must never come out
+    // as a single line.
+    const height = estimateTextFlowHeightMm({ paragraphs: ['x'.repeat(90)], widthMm: 178, style });
+    const oneLine = 10.5 * (25.4 / 72) * 1.55;
+    expect(height).toBeGreaterThan(oneLine * 1.5);
+  });
+});
+
+describe('birthdayCoverFrontGeometryMm', () => {
+  /** Deliberately squarish, so the HEIGHT binds and the title's reserve is what decides the
+   *  square. On a tall 21×28 sheet the width binds instead and the title is free. */
+  const inner = { w: 190, h: 160 };
+  const short = { title: 'Omas Geburtstag', subtitle: 'August 2026' };
+
+  it('is capped by the width when the sheet is tall enough for any title', () => {
+    const tall = birthdayCoverFrontGeometryMm({ inner: { w: 190, h: 252 }, ...short });
+    expect(tall.side).toBe(190);
+  });
+
+  it('takes the title block out of the collage, not out of thin air', () => {
+    const one = birthdayCoverFrontGeometryMm({ inner, ...short });
+    const many = birthdayCoverFrontGeometryMm({
+      inner,
+      title: 'Zum achtzigsten Geburtstag unserer lieben Oma Margarete Wilhelmine Auguste',
+      subtitle: short.subtitle,
+    });
+    // A wrapping title reserves more, so the square it leaves is smaller — and both squares
+    // plus their own title reserve still fit inside the box.
+    expect(many.titleMm).toBeGreaterThan(one.titleMm);
+    expect(many.side).toBeLessThan(one.side);
+    for (const geometry of [one, many]) {
+      expect(geometry.side + geometry.titleMm).toBeLessThanOrEqual(inner.h);
+      expect(geometry.side).toBeLessThanOrEqual(inner.w);
+      // The 2×2 tiles are the square, minus the one gap between them.
+      expect(geometry.cell * 2 + PHOTO_GAP_MM).toBeCloseTo(geometry.side, 6);
+    }
+  });
+
+  it('never returns a negative square, however absurd the title', () => {
+    const squeezed = birthdayCoverFrontGeometryMm({
+      inner: { w: 190, h: 60 },
+      title: 'Ein wirklich unfassbar langer Geburtstagsbuchtitel '.repeat(8),
+      subtitle: short.subtitle,
+    });
+    expect(squeezed.side).toBeGreaterThan(0);
+    expect(squeezed.cell).toBeGreaterThanOrEqual(0);
+  });
+
+  it('caps what the title may take, so the photographs keep a usable floor', () => {
+    // The 20×20 print sheet's cover box, with a title far past anything a real book would
+    // have: uncapped, the estimate wanted 164mm of 178 and left a 9.5mm collage — four
+    // ~2.8mm stamps. The cap holds the reserve at 45% of the box, and the title simply
+    // wraps on past its own room (the cover's overflow: hidden clips it).
+    const inner = { w: 186, h: 178 };
+    const absurd = birthdayCoverFrontGeometryMm({
+      inner,
+      title: 'Ein wirklich unfassbar langer Geburtstagsbuchtitel '.repeat(6),
+      subtitle: 'August 2026',
+    });
+    expect(absurd.titleMm).toBeCloseTo(inner.h * 0.45, 6);
+    expect(absurd.side).toBeGreaterThan(90);
+    // A title short enough to fit inside the cap is untouched by it.
+    const normal = birthdayCoverFrontGeometryMm({ inner, ...short });
+    expect(normal.titleMm).toBeLessThan(inner.h * 0.45);
+  });
+
+  it('errs high on the title, so the reserve can only ever be too generous', () => {
+    // 174mm at 26pt is ~34 characters of Playfair per line in practice; like
+    // `estimateTextFlowHeightMm`, this assumes a wider glyph, so a 34-character title must
+    // never be estimated as fitting on one line.
+    const oneLineMm = 26 * (25.4 / 72) * 1.5;
+    const twoLines = estimateBirthdayCoverTitleMm({ title: 'x'.repeat(34), subtitle: 'x', widthMm: 174 });
+    const oneLine = estimateBirthdayCoverTitleMm({ title: 'x'.repeat(10), subtitle: 'x', widthMm: 174 });
+    expect(twoLines - oneLine).toBeCloseTo(oneLineMm, 6);
   });
 });
 

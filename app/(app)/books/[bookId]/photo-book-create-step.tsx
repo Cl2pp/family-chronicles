@@ -40,7 +40,7 @@ import {
   IconSparkles,
 } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
-import { PHOTO_BOOK_STYLES, type PhotoBookStyle } from '@/lib/photo-book-plan';
+import { BIRTHDAY_COVER_PHOTO_MAX, PHOTO_BOOK_STYLES, type PhotoBookStyle } from '@/lib/photo-book-plan';
 import {
   designStageIndex,
   PHOTO_BOOK_DESIGN_STAGES,
@@ -192,7 +192,7 @@ function PhotoBookConfigPanel({
               .filter((photo) => !photo.excluded)
               .map((photo) => {
                 const selected = book.coverAssetIds.includes(photo.assetId);
-                const selectionFull = !selected && book.coverAssetIds.length >= 6;
+                const selectionFull = !selected && book.coverAssetIds.length >= BIRTHDAY_COVER_PHOTO_MAX;
                 return (
                   <UnstyledButton
                     key={photo.assetId}

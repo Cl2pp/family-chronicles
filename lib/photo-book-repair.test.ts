@@ -396,6 +396,41 @@ describe('repairTextCoverage (unified-book plan)', () => {
     expect(repaired).toEqual(plan);
   });
 
+  it('trims a Birthday cover stored under the old 6-photo limit down to the 2x2 grid', () => {
+    // Books built before the cover became a 2x2 square grid still carry up to six ids.
+    // Reading one through `validatePhotoBookPlan` already trims it, so in production this
+    // branch never sees an over-cap selection — it is the defence for a caller that builds
+    // a plan object by hand, which is exactly what this test does.
+    const photos = Array.from({ length: 6 }, (_, i) => ({ ...portrait(`c${i}`), storyId: 's1' }));
+    const legacy: PhotoBookPlan = {
+      kind: 'photo',
+      template: 'birthday',
+      style: 'classic',
+      cover: { title: 'Birthday', heroAssetId: 'c0', assetIds: photos.map((p) => p.assetId) },
+      sections: [
+        {
+          title: 'Omas Sommer',
+          storyId: 's1',
+          pages: [
+            { template: 'text', from: 0, to: 5 },
+            { template: 'collage-6', assetIds: photos.map((p) => p.assetId) },
+          ],
+        },
+      ],
+    };
+    const { plan: repaired, changes } = repairPhotoBookPlan(legacy, { photos, stories });
+    expect(repaired.cover.assetIds).toEqual(['c0', 'c1', 'c2', 'c3']);
+    expect(repaired.cover.heroAssetId).toBe('c0');
+    expect(changes.some((c) => c.includes('4-photo cover limit'))).toBe(true);
+    // Trimmed, valid, and still consistent — and the two dropped ids keep their interior
+    // pages, because a Birthday cover reference is decorative, not a placement.
+    expect(validatePhotoBookPlan(repaired).ok).toBe(true);
+    expect(checkPhotoBookPlanConsistency(repaired, { ...contentOf(photos), stories })).toEqual([]);
+    expect(
+      repaired.sections[0].pages.flatMap((page) => (isTextItem(page) ? [] : page.assetIds)),
+    ).toEqual(photos.map((p) => p.assetId));
+  });
+
   it('normalizes Birthday stories to one complete text run followed by every story photo', () => {
     const photos = [
       { ...portrait('a'), storyId: 's1' },

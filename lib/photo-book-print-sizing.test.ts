@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { PHOTO_BOOK_BLEED_MM, PHOTO_BOOK_CONTENT_MARGIN_MM } from './photo-book-layout';
+import {
+  PHOTO_BOOK_BLEED_MM,
+  PHOTO_BOOK_CONTENT_MARGIN_MM,
+  birthdayCoverPageGeometryMm,
+} from './photo-book-layout';
 import { countPhotoBookPages, photoAssetPrintTargetSizeMm, photoSlotPrintWidthsMm } from './photo-book-print-sizing';
 import type { PhotoBookPlan } from './photo-book-plan';
 
@@ -115,6 +119,74 @@ describe('photoAssetPrintTargetSizeMm', () => {
   it('sizes the cover hero to the full bleed-inclusive page', () => {
     const sizes = photoAssetPrintTargetSizeMm(basePlan(), TRIM);
     expect(sizes.get('hero')).toEqual({ w: pageW, h: pageH });
+  });
+
+  it('budgets a Birthday cover photo at the square tile it actually prints at', () => {
+    // A LONE cover photo fills the whole square; 2-4 photos each get one 2x2 cell — five
+    // times less area. Budgeting both at one figure would under-embed the single-photo
+    // cover, so replay the renderer's own geometry per count.
+    for (const trim of [TRIM, { w: 200, h: 200 }]) {
+      const page = { w: trim.w + PHOTO_BOOK_BLEED_MM * 2, h: trim.h + PHOTO_BOOK_BLEED_MM * 2 };
+      const { side, cell } = birthdayCoverPageGeometryMm(page, { title: 'B', subtitle: '' });
+      // Cover-only ids (`c*`), so the max-merge with an interior placement can't mask what
+      // the cover itself asked for.
+      const cover = (assetIds: string[]) =>
+        basePlan({ template: 'birthday', cover: { title: 'B', heroAssetId: assetIds[0], assetIds } });
+
+      expect(photoAssetPrintTargetSizeMm(cover(['c1']), trim).get('c1')).toEqual({ w: side, h: side });
+      const four = photoAssetPrintTargetSizeMm(cover(['c1', 'c2', 'c3', 'c4']), trim);
+      for (const id of ['c1', 'c2', 'c3', 'c4']) {
+        expect(four.get(id)).toEqual({ w: cell, h: cell });
+      }
+      // Still well under the whole page, which is what makes the collage cheaper to embed
+      // than a full-bleed hero.
+      expect(cell).toBeLessThan(page.w / 2);
+    }
+  });
+
+  it('embeds a Birthday cover tile at 300 dpi ACROSS THE CROP, not across the fit box', () => {
+    // The tile is square and `object-fit: cover` CROPS the photo into it, so a budget of
+    // `tile × tile` is the wrong box: `lib/book-render.ts` resizes `fit: 'inside'`, which
+    // fits the whole 3:2 photo into that square and hands the cover 1134 × 756 px for a
+    // 96mm tile that needs 1134 on both axes — 200 dpi on paper. Replay both steps here.
+    const mmToPx = (v: number) => Math.max(1, Math.round((v / 25.4) * 300));
+    /** Pixels left on the tile's square after fit-inside then crop-to-cover. */
+    const croppedSquarePx = (budget: { w: number; h: number }, aspect: number) => {
+      const boxW = mmToPx(budget.w);
+      const boxH = mmToPx(budget.h);
+      const fitted = boxW / boxH <= aspect ? { w: boxW, h: boxW / aspect } : { w: boxH * aspect, h: boxH };
+      return Math.min(fitted.w, fitted.h);
+    };
+    const cover = (assetIds: string[]) =>
+      basePlan({ template: 'birthday', cover: { title: 'B', heroAssetId: assetIds[0], assetIds } });
+
+    for (const trim of [TRIM, { w: 200, h: 200 }]) {
+      const page = { w: trim.w + PHOTO_BOOK_BLEED_MM * 2, h: trim.h + PHOTO_BOOK_BLEED_MM * 2 };
+      const { side, cell } = birthdayCoverPageGeometryMm(page, { title: 'B', subtitle: '' });
+      for (const [shape, aspect] of [['landscape', 3 / 2], ['portrait', 2 / 3], ['square', 1]] as const) {
+        // A lone photo fills the square; four share the 2×2 grid.
+        for (const count of [1, 4]) {
+          const ids = ['c1', 'c2', 'c3', 'c4'].slice(0, count);
+          const dims = new Map(
+            ids.map((id) => [id, { width: Math.round(6000 * aspect), height: 6000 }]),
+          );
+          const sizes = photoAssetPrintTargetSizeMm(cover(ids), trim, dims);
+          const tile = count === 1 ? side : cell;
+          const where = `${trim.w}x${trim.h} ${count}-photo ${shape}`;
+          for (const id of ids) {
+            const budget = sizes.get(id)!;
+            const dpi = croppedSquarePx(budget, aspect) / (tile / 25.4);
+            // 1px of rounding slack in mmToPx is worth ~0.3 dpi here.
+            expect(dpi, `${where}: effective dpi`).toBeGreaterThan(299);
+            // The budget grows only on the axis the crop eats, never below the tile.
+            expect(budget.w, `${where}: budget width`).toBeGreaterThanOrEqual(tile);
+            expect(budget.h, `${where}: budget height`).toBeGreaterThanOrEqual(tile);
+          }
+          // A square source needs no correction at all — the tile IS its box.
+          if (shape === 'square') expect(sizes.get('c1')).toEqual({ w: tile, h: tile });
+        }
+      }
+    }
   });
 
   it('sizes a full-bleed photo to the content box (it renders inside the shared page frame)', () => {

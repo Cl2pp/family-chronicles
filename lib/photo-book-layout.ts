@@ -1,9 +1,11 @@
 import {
   isTextItem,
   photoBookTemplate,
+  templateRendersCaptions,
   type PhotoBookPlan,
   type PhotoPagePlan,
   type PhotoPageTemplate,
+  type PhotoSectionPlan,
   type TextBlockPlan,
 } from '@/lib/photo-book-plan';
 import { PHOTO_STYLE_TOKENS, type PhotoStyleTokens } from '@/lib/photo-book-styles';
@@ -210,6 +212,62 @@ function framedFigure(
   return `<div class="pb-framed-figure" style="width: ${frameW.toFixed(2)}mm; height: ${(frameH + captionMm).toFixed(2)}mm">${withCaptionSlot(frame, caption, !!caption)}</div>`;
 }
 
+/** Millimetres per CSS point — every suite states its type sizes in pt, the height
+ *  estimate below works in mm like the rest of this file. */
+const MM_PER_PT = 25.4 / 72;
+
+/** Chapter-heading metrics. Defined here rather than only in the `.pb-story-heading` CSS
+ *  below because `estimateTextFlowHeightMm` has to measure the very heading the sheet
+ *  prints — two copies of "21pt" would let the estimate describe a heading that no longer
+ *  exists. */
+const STORY_HEADING_PT = 21;
+const STORY_HEADING_LINE_HEIGHT = 1.15;
+const STORY_HEADING_GAP_MM = 10;
+
+/** Deliberately WIDE average glyph advance (in ems) for the line-count estimate below.
+ *  The widest body face any suite uses is Courier Prime at exactly 0.6em; the serif and
+ *  sans suites average nearer 0.5em. Erring wide means erring towards "this story is
+ *  taller than it really is", which only ever costs a shared page — never an overflow. */
+const AVG_GLYPH_EM = 0.6;
+
+/**
+ * Conservative estimate, in millimetres, of the height a run of flowed paragraphs (plus
+ * the Birthday chapter heading above it) occupies at `widthMm`.
+ *
+ * Deliberately crude — character counts over one average glyph width, no font metrics —
+ * because the only decision it feeds is "is this story short enough that its photos can
+ * join it on its own page" (`birthdaySharedPhotos`), and the renderer's
+ * `break-inside: avoid` makes a wrong answer cost a page break rather than a clipped or
+ * overflowing page. Exported so the estimate can be unit-tested on its own.
+ */
+export function estimateTextFlowHeightMm(input: {
+  paragraphs: readonly string[];
+  heading?: string | null;
+  widthMm: number;
+  style: PhotoStyleTokens;
+}): number {
+  const linesOf = (text: string, fontMm: number) => {
+    const perLine = Math.max(1, Math.floor(input.widthMm / (fontMm * AVG_GLYPH_EM)));
+    return Math.max(1, Math.ceil(text.length / perLine));
+  };
+  const bodyMm = parseFloat(input.style.bodySize) * MM_PER_PT;
+  const bodyLineMm = bodyMm * (parseFloat(input.style.bodyLineHeight) || 1.5);
+  const paragraphGapMm = parseFloat(input.style.paragraphGap) || 0;
+
+  let total = 0;
+  if (input.heading) {
+    const headingMm = STORY_HEADING_PT * MM_PER_PT;
+    total += linesOf(input.heading, headingMm) * headingMm * STORY_HEADING_LINE_HEIGHT + STORY_HEADING_GAP_MM;
+  }
+  input.paragraphs.forEach((paragraph, index) => {
+    // Every paragraph carries its own bottom margin, the last one included.
+    total += linesOf(paragraph, bodyMm) * bodyLineMm + paragraphGapMm;
+    // The opening paragraph's drop cap makes its first line taller than the others.
+    if (index === 0) total += bodyLineMm * Math.max(0, input.style.dropCapScale - 1);
+  });
+  return total;
+}
+
 /**
  * A flowing story-text run (unified-book plan): NOT a fixed sheet — the `.text-flow` div
  * lives on the named `@page text-flow` (real page margins + the folio margin box) and
@@ -217,27 +275,27 @@ function framedFigure(
  * page and the default margin-0 page forces a page break in both Chromium and Paged.js,
  * so text ↔ photo-page sequences break correctly with no extra rules (validated by the
  * unified-book spike). `first-of-section` drives the suite's drop cap.
+ *
+ * `sharedPhotos` (Birthday only) is the chapter's first photo group rendered as a block at
+ * the END of the flow instead of on a sheet of its own — see `sharedPhotoBlockHtml`.
  */
 function textFlowHtml(
   item: TextBlockPlan,
   paragraphs: string[],
   isFirstOfSection: boolean,
-  birthdayHeading?: { title: string; dateLabel?: string },
+  birthdayHeading?: { title: string },
+  sharedPhotos: string = '',
 ): string {
   const slice = paragraphs.slice(item.from, item.to + 1);
   if (slice.length === 0) return '';
   return `
       <div class="text-flow${isFirstOfSection ? ' first-of-section' : ''}">
         ${
-          birthdayHeading
-            ? `<header class="pb-story-heading"><h2>${esc(birthdayHeading.title)}</h2>${
-                birthdayHeading.dateLabel
-                  ? `<p>${esc(birthdayHeading.dateLabel)}</p>`
-                  : ''
-              }</header>`
-            : ''
+          // Title only: a Birthday chapter is a story, not a dated entry, and the section's
+          // `dateLabel` stays in the plan for the standard recipe's divider/contents pages.
+          birthdayHeading ? `<header class="pb-story-heading"><h2>${esc(birthdayHeading.title)}</h2></header>` : ''
         }
-        ${slice.map((p) => `<p>${esc(p)}</p>`).join('\n')}
+        ${slice.map((p) => `<p>${esc(p)}</p>`).join('\n')}${sharedPhotos}
       </div>`;
 }
 
@@ -271,6 +329,143 @@ export interface ContentBox {
  *  Exported for `lib/photo-book-print-sizing.ts`, whose per-slot pixel budgets replay
  *  this exact geometry. */
 export const PHOTO_GAP_MM = 4;
+
+/** How the Birthday proof cover is inset from the physical sheet. The whole front lives
+ *  inside this box as a COLUMN — collage band on top, title block under it — so `bottom`
+ *  is only the sheet margin under the title, not a strip reserved for it. */
+const BIRTHDAY_COVER_INSET_MM = { top: 10, side: 10, bottom: 18 } as const;
+
+/** Breathing room reserved between the collage's bottom edge and the title block, on top
+ *  of that block's own top padding. */
+const BIRTHDAY_COVER_TITLE_GAP_MM = 4;
+
+/** Most of the cover's inner box the title block may ever take from the collage. `title` is
+ *  user-typed, so its estimated height is unbounded — without this cap a pathological one
+ *  reserved nearly the whole box and left the photographs as ~3mm stamps, which is not a
+ *  cover at all. Past the cap the title simply keeps wrapping past the bottom of its own
+ *  room (the sheet clips it) while the collage keeps a usable floor: at 20×20 that floor is
+ *  ~94mm, at 21×28 ~138mm. */
+const BIRTHDAY_COVER_TITLE_MAX_FRACTION = 0.45;
+
+/** `body { line-height }` — unitless, so every block inherits it, the cover's title and
+ *  subtitle included. */
+const BODY_LINE_HEIGHT = 1.5;
+
+/** The cover title block as NUMBERS, not only as the CSS below: `renderCoverSpreadHtml`
+ *  (`lib/book-print-file.ts`) prints the same block on the Gelato spread and
+ *  `estimateBirthdayCoverTitleMm` reserves room for it, so a second copy of "26pt"
+ *  somewhere else would let the reserve — or the printed cover — describe a title that no
+ *  longer exists. Sizes in pt (what the CSS states), spacings in mm. */
+export const COVER_TITLE_METRICS = {
+  /** `.pb-cover-text h1`. */
+  titlePt: 26,
+  /** `.pb-cover-subtitle`. */
+  subtitlePt: 12.5,
+  /** The margin-bottom under the Birthday cover title, in BOTH renderers:
+   *  `.pb-birthday-cover-text h1` here and `.pb-spread-birthday-text h1` on the Gelato
+   *  spread (`lib/book-print-file.ts`). The proof a user approves and the sheet that gets
+   *  printed have to space title and subtitle identically. */
+  gapMm: 1.5,
+  /** `.pb-birthday-cover-text` padding. */
+  padTopMm: 5,
+  padSideMm: 8,
+  /** Inherited from `body` on the proof cover; set explicitly on the spread, whose
+   *  document has no body line-height of its own. */
+  lineHeight: BODY_LINE_HEIGHT,
+} as const;
+/** Deliberately WIDE average glyph advance (ems) for the cover heading, same reasoning as
+ *  `AVG_GLYPH_EM` above: over-counting the title's lines only ever costs the collage a few
+ *  millimetres, while under-counting would crowd the title against the sheet edge. */
+const COVER_GLYPH_EM = 0.62;
+
+/**
+ * Conservative estimate, in millimetres, of how tall the Birthday cover's title block
+ * renders: its top padding, the wrapped title, and the subtitle under it. `widthMm` is the
+ * block's own CONTENT width (inside `COVER_TITLE_METRICS.padSideMm`).
+ *
+ * Same crude character-count method as `estimateTextFlowHeightMm`, and for the same
+ * reason: it only decides how much of the cover the collage may claim, and the column
+ * layout below — not this number — is what keeps the title off the photos. Exported so it
+ * can be unit-tested on its own.
+ */
+export function estimateBirthdayCoverTitleMm(input: {
+  title: string;
+  subtitle: string;
+  widthMm: number;
+}): number {
+  const { titlePt, subtitlePt, gapMm, padTopMm, lineHeight } = COVER_TITLE_METRICS;
+  const lines = (text: string, fontMm: number) => {
+    const perLine = Math.max(1, Math.floor(input.widthMm / (fontMm * COVER_GLYPH_EM)));
+    return Math.max(1, Math.ceil(text.trim().length / perLine));
+  };
+  const titleMm = titlePt * MM_PER_PT;
+  const subtitleMm = subtitlePt * MM_PER_PT;
+  return (
+    padTopMm +
+    lines(input.title, titleMm) * titleMm * lineHeight +
+    gapMm +
+    lines(input.subtitle, subtitleMm) * subtitleMm * lineHeight
+  );
+}
+
+/**
+ * The Birthday front cover's geometry, in mm. `inner` is the whole box the cover front has
+ * to itself — the proof page insets it from the sheet edges, the Gelato spread from the
+ * front panel — and both renderers lay that box out as a COLUMN: a square collage band on
+ * top, the title block under it in normal flow. So a title that wraps takes its room from
+ * the collage instead of growing upwards across it; `side` is what the collage keeps.
+ *
+ * The square is `side` on each edge and holds a 2×2 grid of `cell`-square tiles with
+ * `PHOTO_GAP_MM` between them, so 1, 2, 3 or 4 photos all print at ONE tile size instead of
+ * the tile shape changing with the count (the 1- and 3-photo arrangements are the two CSS
+ * exceptions — see `.pb-birthday-cover-collage[data-count=...]`).
+ *
+ * Millimetres, computed here, rather than `aspect-ratio` + `1fr` tracks in CSS: the two
+ * renderers must agree to the millimetre, and Chromium's print engine and the `screen`
+ * variant's Paged.js polyfill do not resolve percentage tracks identically. Shared by
+ * `renderPhotoBookHtml` below and `renderCoverSpreadHtml` (`lib/book-print-file.ts`).
+ */
+export function birthdayCoverFrontGeometryMm(input: {
+  inner: ContentBox;
+  title: string;
+  subtitle: string;
+}): { side: number; cell: number; titleMm: number } {
+  // Capped at BIRTHDAY_COVER_TITLE_MAX_FRACTION of the box: past that the collage would be
+  // stamps, so a runaway title wraps on past its room (and is clipped by the sheet) instead
+  // of eating the cover.
+  const titleMm = Math.min(
+    estimateBirthdayCoverTitleMm({
+      title: input.title,
+      subtitle: input.subtitle,
+      widthMm: Math.max(1, input.inner.w - COVER_TITLE_METRICS.padSideMm * 2),
+    }),
+    input.inner.h * BIRTHDAY_COVER_TITLE_MAX_FRACTION,
+  );
+  const side = Math.max(
+    PHOTO_GAP_MM,
+    Math.min(input.inner.w, input.inner.h - titleMm - BIRTHDAY_COVER_TITLE_GAP_MM),
+  );
+  return { side, cell: (side - PHOTO_GAP_MM) / 2, titleMm };
+}
+
+/** The same geometry for the PROOF cover specifically: `page` is the physical sheet (trim,
+ *  plus bleed on the `print` variant), which `BIRTHDAY_COVER_INSET_MM` insets. Shared by
+ *  `renderPhotoBookHtml` below and `photoAssetPrintTargetSizeMm`
+ *  (`lib/photo-book-print-sizing.ts`), whose per-photo pixel budget has to replay the size
+ *  a cover tile really prints at. */
+export function birthdayCoverPageGeometryMm(
+  page: ContentBox,
+  cover: { title: string; subtitle: string },
+): { side: number; cell: number; titleMm: number } {
+  return birthdayCoverFrontGeometryMm({
+    inner: {
+      w: page.w - BIRTHDAY_COVER_INSET_MM.side * 2,
+      h: page.h - BIRTHDAY_COVER_INSET_MM.top - BIRTHDAY_COVER_INSET_MM.bottom,
+    },
+    title: cover.title,
+    subtitle: cover.subtitle,
+  });
+}
 
 /** How each multi-photo template splits its photos into justified rows (in `assetIds`
  *  order), or `null` for templates that aren't row stacks (single-photo pages and
@@ -405,14 +600,15 @@ function rowStackHtml(rows: RowPhoto[][], box: ContentBox): string {
   return `<div class="ph-rows">${rowsHtml}</div>`;
 }
 
-/** Renders a multi-photo template as its row arrangement (see `rowStackHtml`). */
-function rowStackPage(
+/** Splits a page's photos into `rowSizes` rows, in `assetIds` order — the input
+ *  `rowStackHtml` lays out, shared by the full-sheet page below and the shared photo
+ *  block a short Birthday chapter appends to its own text flow. */
+function photoRows(
   page: PhotoPagePlan,
   images: Map<string, PhotoLayoutImage>,
   rowSizes: number[],
-  box: ContentBox,
   withCaptions: boolean,
-): string {
+): RowPhoto[][] {
   const rows: RowPhoto[][] = [];
   let offset = 0;
   for (const size of rowSizes) {
@@ -424,10 +620,110 @@ function rowStackPage(
     );
     offset += size;
   }
+  return rows.filter((r) => r.length > 0);
+}
+
+/** Renders a multi-photo template as its row arrangement (see `rowStackHtml`). */
+function rowStackPage(
+  page: PhotoPagePlan,
+  images: Map<string, PhotoLayoutImage>,
+  rowSizes: number[],
+  box: ContentBox,
+  withCaptions: boolean,
+): string {
   return `
       <section class="page photo-page pb-rows-page">
-        ${rowStackHtml(rows.filter((r) => r.length > 0), box)}
+        ${rowStackHtml(photoRows(page, images, rowSizes, withCaptions), box)}
       </section>`;
+}
+
+/** How much of a TEXT page's content height the shared photo block may claim at most, and
+ *  the gap above it. Well under a whole page on purpose: a block sized for the full
+ *  content box could never share a page with anything, so the remainder — a little under
+ *  half the sheet — is the budget a story's prose has to fit into for its photos to join
+ *  it (`birthdaySharedPhotos`). */
+const SHARED_PHOTO_HEIGHT_FRACTION = 0.58;
+const SHARED_PHOTO_GAP_MM = 8;
+
+/** The height a row stack actually uses inside `box`: `box.h` when the photos fill it,
+ *  less when they don't (`rowStackGeometryMm` only ever shrinks rows, never stretches
+ *  them). Lets the shared block below be exactly as tall as its photos instead of always
+ *  reserving its full allowance and centring a short row in the leftover space. */
+function rowStackUsedHeightMm(rows: RowPhoto[][], box: ContentBox): number {
+  const geometry = rowStackGeometryMm(
+    rows.map((row) => row.map(aspectOf)),
+    box,
+    rows.map((row) => row.some((p) => !!p.caption)),
+  );
+  return (
+    geometry.rowHeights.reduce((sum, h) => sum + h, 0) + Math.max(0, rows.length - 1) * PHOTO_GAP_MM
+  );
+}
+
+/**
+ * A Birthday chapter's first photo group rendered as a BLOCK INSIDE its text flow, under
+ * the prose, instead of on a sheet of its own — see `.pb-shared-photos` for why the print
+ * engine, not this function, decides which page it ends up on.
+ *
+ * Same justified-row geometry as a full photo page (`rowStackHtml`), just measured against
+ * a shorter box; single-photo templates (`full-bleed`/`full-framed`, no row arrangement of
+ * their own) become a one-photo row, which contains rather than crops them.
+ */
+function sharedPhotoBlockHtml(
+  page: PhotoPagePlan,
+  images: Map<string, PhotoLayoutImage>,
+  box: ContentBox,
+): string {
+  const rows = photoRows(
+    page,
+    images,
+    TEMPLATE_ROW_ARRANGEMENT[page.template] ?? [page.assetIds.length],
+    templateRendersCaptions(page.template),
+  );
+  const blockBox: ContentBox = { w: box.w, h: Math.min(box.h, rowStackUsedHeightMm(rows, box)) };
+  return `
+        <div class="pb-shared-photos" style="height: ${blockBox.h.toFixed(2)}mm">${rowStackHtml(rows, blockBox)}</div>`;
+}
+
+/**
+ * Which of a Birthday chapter's photo groups (if any) may ride along at the end of its own
+ * text flow rather than opening a new sheet. Without this, a three-line birthday message
+ * leaves ~90% of its page empty and its photos start on the next one.
+ *
+ * Only the shape the Birthday pacer actually produces qualifies — ONE text run at the top
+ * of the chapter, then its photo pages (`paceChapter`, `lib/photo-book-autolayout.ts`) —
+ * because that is the only arrangement where "the page the prose ends on" is knowable
+ * without simulating the whole flow. Anything else keeps today's separate-page layout.
+ *
+ * The budget is measured against the block's MAXIMUM allowance, not the height its photos
+ * happen to need, so the answer doesn't change with the photos' shapes; and it is a
+ * conservative gate on top of a self-correcting mechanism, not a promise — if the prose
+ * turns out taller than estimated, `break-inside: avoid` moves the whole block to the next
+ * page instead of overflowing this one.
+ */
+function birthdaySharedPhotos(
+  section: PhotoSectionPlan,
+  paragraphs: string[],
+  style: PhotoStyleTokens,
+  textBox: ContentBox,
+): { index: number; page: PhotoPagePlan } | null {
+  const first = section.pages[0];
+  if (!first || !isTextItem(first) || section.pages.filter(isTextItem).length !== 1) return null;
+  const index = section.pages.findIndex((item) => !isTextItem(item));
+  if (index < 0) return null;
+  const page = section.pages[index];
+  if (isTextItem(page) || page.assetIds.length === 0) return null;
+  const slice = paragraphs.slice(first.from, first.to + 1);
+  if (slice.length === 0) return null;
+
+  const budgetMm = textBox.h * (1 - SHARED_PHOTO_HEIGHT_FRACTION) - SHARED_PHOTO_GAP_MM;
+  const proseMm = estimateTextFlowHeightMm({
+    paragraphs: slice,
+    heading: section.title,
+    widthMm: textBox.w,
+    style,
+  });
+  return proseMm <= budgetMm ? { index, page } : null;
 }
 
 /** Fraction of the source's cropped axis that remains after `object-fit: cover`. */
@@ -617,13 +913,23 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
     coverHero != null &&
     coverCropRetention(coverHero.width / coverHero.height, pageW / pageH) < MIN_SAFE_COVER_RETENTION;
   const birthdayCoverIds = input.plan.cover.assetIds ?? (input.plan.cover.heroAssetId ? [input.plan.cover.heroAssetId] : []);
+  const birthdaySubtitle = input.plan.cover.subtitle || input.createdLabel;
+  // The square collage, sized to what is left of the cover's inner box once the title
+  // block's own (estimated) height is reserved — see `birthdayCoverFrontGeometryMm`. The
+  // box grows with the `print` variant's bleed, exactly like every other page element
+  // here. Fixed mm, so the tiles are the same squares under Chromium's print engine and
+  // under the screen variant's Paged.js polyfill.
+  const birthdayCollage = birthdayCoverPageGeometryMm(
+    { w: pageW, h: pageH },
+    { title: input.plan.cover.title, subtitle: birthdaySubtitle },
+  );
   const coverFront = birthday
     ? `
     <section class="page pb-cover-front pb-birthday-cover">
-      ${birthdayCoverCollageHtml(birthdayCoverIds, input.images)}
+      <div class="pb-birthday-cover-band">${birthdayCoverCollageHtml(birthdayCoverIds, input.images)}</div>
       <div class="pb-cover-text pb-birthday-cover-text">
         <h1>${esc(input.plan.cover.title)}</h1>
-        <p class="pb-cover-subtitle">${esc(input.plan.cover.subtitle || input.createdLabel)}</p>
+        <p class="pb-cover-subtitle">${esc(birthdaySubtitle)}</p>
       </div>
     </section>`
     : `
@@ -666,6 +972,16 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
     h: pageH - m.top - (m.bottom + 1),
   };
 
+  // The named TEXT page's own content box — what the `@page text-flow` margins below leave
+  // free (the `+ 2` on the bottom is that rule's folio strip). Bleed cancels out on both
+  // axes (the sheet grows by it, the margins add it back), so this box — and every
+  // shared-photo decision made from it — is IDENTICAL in `screen`, `preview` and `print`.
+  const textBox: ContentBox = {
+    w: pageW - (TEXT_SIDE_MARGIN_MM + bleed) * 2,
+    h: pageH - m.top - (m.bottom + 2),
+  };
+  const sharedPhotoBox: ContentBox = { w: textBox.w, h: textBox.h * SHARED_PHOTO_HEIGHT_FRACTION };
+
   const sectionsHtml = input.plan.sections
     .map((section) => {
       const divider = birthday && section.storyId ? '' : `
@@ -676,9 +992,15 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
       </section>`;
 
       const sectionParagraphs = section.storyId ? input.storyParagraphs?.get(section.storyId) ?? null : null;
+      // Birthday only: a short chapter's first photo group joins its prose instead of
+      // taking a sheet of its own (see `birthdaySharedPhotos`).
+      const shared =
+        birthday && section.storyId && sectionParagraphs
+          ? birthdaySharedPhotos(section, sectionParagraphs, style, textBox)
+          : null;
       let firstTextSeen = false;
       const pages = section.pages
-        .map((page) => {
+        .map((page, index) => {
           if (isTextItem(page)) {
             // No paragraphs available (pre-unification caller, or a stale storyId):
             // render nothing rather than an empty flow that would occupy a blank page.
@@ -689,9 +1011,16 @@ export function renderPhotoBookHtml(input: PhotoLayoutInput): string {
               page,
               sectionParagraphs,
               isFirst,
-              birthday && isFirst ? { title: section.title, dateLabel: section.dateLabel } : undefined,
+              birthday && isFirst ? { title: section.title } : undefined,
+              // `isFirst` as well as `shared`: the gate only ever fires on a section with
+              // exactly ONE text run today, so the two are equivalent — but if it is ever
+              // loosened, the block belongs to the FIRST run, and without this it would be
+              // emitted once per run (i.e. the same photos printed several times).
+              shared && isFirst ? sharedPhotoBlockHtml(shared.page, input.images, sharedPhotoBox) : '',
             );
           }
+          // Already rendered inside the text flow above.
+          if (index === shared?.index) return '';
           return renderPage(page, input.images, contentBox, style);
         })
         .join('\n');
@@ -797,7 +1126,9 @@ ${
   body {
     font-family: var(--pb-font-body);
     font-size: 10.5pt;
-    line-height: 1.5;
+    /* The cover's h1/subtitle inherit this, and birthdayCoverFrontGeometryMm reserves
+       their room from it — one constant, so the reserve can't describe another leading. */
+    line-height: ${BODY_LINE_HEIGHT};
     color: var(--pb-color-text);${
       !hasChapters
         ? ''
@@ -844,14 +1175,31 @@ ${
   /* A Birthday story always opens on the verso (left-hand/even) page. Browsers and
      Paged.js insert one blank page when parity requires it. */
   .pb-birthday-story-start { break-before: left; page-break-before: left; }
-  .pb-story-heading { margin: 0 0 10mm; break-after: avoid; }
+  .pb-story-heading { margin: 0 0 ${STORY_HEADING_GAP_MM}mm; break-after: avoid; }
+  /* The title is the whole heading — a Birthday chapter prints no date under it. */
   .pb-story-heading h2 {
-    margin: 0 0 2mm;
+    margin: 0;
     font-family: var(--pb-font-heading);
-    font-size: 21pt;
-    line-height: 1.15;
+    font-size: ${STORY_HEADING_PT}pt;
+    line-height: ${STORY_HEADING_LINE_HEIGHT};
   }
-  .pb-story-heading p { margin: 0; color: var(--pb-color-muted); font-size: 9.5pt; }
+  /* A short Birthday chapter's first photo group rides along at the END of its own text
+     flow instead of opening a new sheet — otherwise a three-line birthday message leaves
+     ~90% of a page empty and its photos start on the next one.
+
+     Deliberately a fixed, SUB-PAGE height (at most SHARED_PHOTO_HEIGHT_FRACTION of the
+     text content box, less when the photos need less) plus break-inside: avoid: the print
+     engine itself decides whether the block still fits under the last line of prose and
+     moves it whole to the next page when it doesn't. So the estimate that gates this
+     (birthdaySharedPhotos, above) can only ever cost a page break — never an overflow, a
+     clip, or a collision with the folio. A block sized for the WHOLE content box, by
+     contrast, could never share a page with anything. */
+  .pb-shared-photos {
+    width: 100%;
+    margin-top: ${SHARED_PHOTO_GAP_MM}mm;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 
   /* ---- Table of contents (only emitted for books with story chapters) ---- */
   .pb-toc {
@@ -903,31 +1251,67 @@ ${
      at either side. The focal point still guides the background crop. */
   .ph-cover-bg-blur { filter: blur(5mm); transform: scale(1.08); opacity: 0.72; }
   .ph-cover-contain-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  /* The dark scrim (and the white type on it) exists so a title stays readable over an
+     edge-to-edge cover PHOTO. A Birthday cover has no backdrop photo — its heroAssetId is
+     just the first collage tile — so it keeps the suite's own cover colour and heading
+     colour. renderCoverSpreadHtml (lib/book-print-file.ts) already resolves its own hero
+     the same way, with the same !birthday guard. */
   .pb-cover-text {
     position: relative;
     padding: 14mm 16mm 18mm;
     color: var(--pb-cover-heading-color);
-    background: ${input.plan.cover.heroAssetId ? 'linear-gradient(transparent, rgba(0,0,0,0.55) 55%)' : 'none'};
-    ${input.plan.cover.heroAssetId ? 'color: #fff;' : ''}
+    background: ${!birthday && input.plan.cover.heroAssetId ? 'linear-gradient(transparent, rgba(0,0,0,0.55) 55%)' : 'none'};
+    ${!birthday && input.plan.cover.heroAssetId ? 'color: #fff;' : ''}
     width: 100%;
   }
-  .pb-cover-text h1 { font-family: var(--pb-font-heading); font-size: 26pt; margin: 0 0 3mm; font-weight: 700; }
-  .pb-cover-subtitle { font-size: 12.5pt; margin: 0 0 3mm; opacity: 0.85; }
+  /* overflow-wrap: a title is user-typed, and one unbreakable 200-character "word" would
+     otherwise run straight off the sheet edge instead of wrapping. Nothing a real title
+     does changes: it only ever breaks a word that has no break opportunity at all. */
+  .pb-cover-text h1 { font-family: var(--pb-font-heading); font-size: ${COVER_TITLE_METRICS.titlePt}pt; margin: 0 0 3mm; font-weight: 700; overflow-wrap: anywhere; }
+  .pb-cover-subtitle { font-size: ${COVER_TITLE_METRICS.subtitlePt}pt; margin: 0 0 3mm; opacity: 0.85; }
   .pb-cover-chronicle { font-size: 9.5pt; letter-spacing: 0.1em; font-variant: small-caps; margin: 0; opacity: 0.75; }
 
-  /* ---- Birthday Book cover: a framed, user-selected 1-6 photo collage ---- */
-  .pb-birthday-cover { background: var(--pb-cover-bg); align-items: stretch; }
-  .pb-birthday-cover-collage {
-    position: absolute;
-    inset: 10mm 10mm 45mm;
-    display: grid;
-    grid-template-columns: repeat(6, 1fr);
-    grid-auto-rows: minmax(0, 1fr);
-    gap: 4mm;
+  /* ---- Birthday Book cover: a framed, user-selected 1-4 photo collage ----
+     The front is a COLUMN, not a stack of absolutely positioned boxes: the collage band
+     on top, the title block under it in normal flow. That is what makes a long title
+     impossible to print over the photos — it takes its room out of the band rather than
+     growing upwards across a box that was placed independently of it.
+
+     One square box (${birthdayCollage.side.toFixed(2)}mm) of 2x2 equal
+     ${birthdayCollage.cell.toFixed(2)}mm tiles -- the photos are cropped to them by
+     object-fit: cover on the image. 2, 3 and 4 photos all use that same tile, so 3 read as
+     the same grid as 4 instead of restretching the whole cover; a lone photo is the only
+     exception, and it takes the whole square. */
+  .pb-birthday-cover {
+    background: var(--pb-cover-bg);
+    flex-direction: column;
     align-items: stretch;
+    justify-content: flex-start;
+    padding: ${BIRTHDAY_COVER_INSET_MM.top}mm ${BIRTHDAY_COVER_INSET_MM.side}mm ${BIRTHDAY_COVER_INSET_MM.bottom}mm;
+  }
+  /* Takes whatever the title block leaves, and never less than the collage itself
+     (min-height): a title that wrapped further than birthdayCoverFrontGeometryMm's
+     estimate allowed for pushes ITSELF towards the sheet edge instead of squeezing (and
+     so overlapping) the photos above it. */
+  .pb-birthday-cover-band {
+    flex: 1 1 auto;
+    min-height: ${birthdayCollage.side.toFixed(2)}mm;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pb-birthday-cover-collage {
+    flex: 0 0 auto;
+    width: ${birthdayCollage.side.toFixed(2)}mm;
+    height: ${birthdayCollage.side.toFixed(2)}mm;
+    display: grid;
+    grid-template-columns: repeat(2, ${birthdayCollage.cell.toFixed(2)}mm);
+    grid-auto-rows: ${birthdayCollage.cell.toFixed(2)}mm;
+    gap: ${PHOTO_GAP_MM}mm;
+    justify-content: center;
+    align-content: center;
   }
   .pb-birthday-cover-photo {
-    grid-column: span 2;
     min-width: 0;
     min-height: 0;
     padding: 2.2mm;
@@ -936,25 +1320,33 @@ ${
     box-shadow: 0 2mm 5mm rgba(20, 20, 20, 0.18);
     overflow: hidden;
   }
-  .pb-birthday-cover-collage[data-count="1"] .pb-birthday-cover-photo { grid-column: span 6; }
-  .pb-birthday-cover-collage[data-count="2"] .pb-birthday-cover-photo { grid-column: span 3; }
-  .pb-birthday-cover-collage[data-count="4"] .pb-birthday-cover-photo { grid-column: span 3; }
-  .pb-birthday-cover-collage[data-count="5"] .pb-birthday-cover-photo:nth-child(-n + 2) { grid-column: span 3; }
-  .pb-birthday-cover-photo:nth-child(3n + 1) { transform: rotate(-0.7deg); }
-  .pb-birthday-cover-photo:nth-child(3n + 2) { transform: rotate(0.6deg); }
+  /* The two counts that don't fill the grid on their own: one photo takes the whole
+     square (a single tile in a 2-column box was a quarter-size stamp marooned in cover
+     colour), and the third of three is centred across the bottom row so the arrangement
+     reads symmetrically instead of leaving the bottom-right quadrant empty. Two photos
+     are one centred row, four are the plain 2x2 -- both already symmetric. */
+  .pb-birthday-cover-collage[data-count="1"] {
+    grid-template-columns: ${birthdayCollage.side.toFixed(2)}mm;
+    grid-auto-rows: ${birthdayCollage.side.toFixed(2)}mm;
+  }
+  .pb-birthday-cover-collage[data-count="3"] .pb-birthday-cover-photo:nth-child(3) {
+    grid-column: 1 / span 2;
+    justify-self: center;
+    width: ${birthdayCollage.cell.toFixed(2)}mm;
+  }
   .pb-birthday-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  /* No background panel behind the title: it was the cover colour anyway, and its edge cut
+     visibly through the drop shadows of the tiles above it. Mirrored by
+     .pb-spread-birthday-text (lib/book-print-file.ts), which must show the identical
+     cover. The bottom padding is the sheet inset above, not this block's own. */
   .pb-birthday-cover-text {
-    position: absolute;
-    left: 16mm;
-    right: 16mm;
-    bottom: 13mm;
-    width: auto;
-    padding: 5mm 8mm;
+    flex: 0 0 auto;
+    width: 100%;
+    padding: ${COVER_TITLE_METRICS.padTopMm}mm ${COVER_TITLE_METRICS.padSideMm}mm 0;
     text-align: center;
     color: var(--pb-cover-heading-color);
-    background: color-mix(in srgb, var(--pb-cover-bg) 92%, transparent);
   }
-  .pb-birthday-cover-text h1 { margin-bottom: 1.5mm; }
+  .pb-birthday-cover-text h1 { margin-bottom: ${COVER_TITLE_METRICS.gapMm}mm; }
   .pb-birthday-cover-text .pb-cover-subtitle { margin: 0; color: var(--pb-cover-muted-color); }
 
   .pb-cover-back {

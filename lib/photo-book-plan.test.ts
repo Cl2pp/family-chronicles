@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BIRTHDAY_COVER_PHOTO_MAX,
   checkPhotoBookPlanConsistency,
+  storedCoverPhotoCount,
   validatePhotoBookPlan,
   type PhotoBookPlan,
   type PhotoPlanContent,
@@ -81,6 +83,34 @@ describe('validatePhotoBookPlan', () => {
   it('accepts a plan with no cover hero (empty book)', () => {
     const plan = basePlan({ cover: { title: 'Empty Book' }, sections: [] });
     expect(validatePhotoBookPlan(plan).ok).toBe(true);
+  });
+
+  it('caps the Birthday cover collage at the 2x2 grid it prints into', () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `c${i}`);
+    const withCover = (n: number) =>
+      basePlan({ template: 'birthday', cover: { heroAssetId: 'c0', assetIds: ids(n), title: 'B' } });
+
+    const atCap = validatePhotoBookPlan(withCover(BIRTHDAY_COVER_PHOTO_MAX));
+    expect(atCap.ok).toBe(true);
+    expect(atCap.ok && atCap.plan.cover.assetIds).toEqual(ids(BIRTHDAY_COVER_PHOTO_MAX));
+
+    // A plan stored under the old six-photo cover is TRIMMED, not failed: every read path
+    // goes through here, and rejecting it would rebuild the whole book (and lose its
+    // Birthday template) — see `coverPlanSchema.assetIds`.
+    const legacy = validatePhotoBookPlan(withCover(6));
+    expect(legacy.ok).toBe(true);
+    expect(legacy.ok && legacy.plan.cover.assetIds).toEqual(ids(BIRTHDAY_COVER_PHOTO_MAX));
+
+    // …and the raw row still says six, which is how `repairAndPersistPhotoPlan`
+    // (`lib/photo-book-content.ts`) knows to write the trimmed plan back once instead of
+    // re-trimming the same row on every read forever.
+    expect(storedCoverPhotoCount(withCover(6))).toBe(6);
+    expect(storedCoverPhotoCount(withCover(BIRTHDAY_COVER_PHOTO_MAX))).toBe(BIRTHDAY_COVER_PHOTO_MAX);
+    // Anything that isn't a stored cover selection reports nothing to trim, so an ordinary
+    // book never gets a spurious change (and so never writes on read).
+    for (const notACover of [null, undefined, 'nonsense', [], {}, { cover: {} }, basePlan()]) {
+      expect(storedCoverPhotoCount(notACover)).toBe(0);
+    }
   });
 
   it('rejects a mismatched captions array length', () => {

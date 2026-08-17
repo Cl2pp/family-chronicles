@@ -844,8 +844,8 @@ export const de: Dictionary = {
           bookTitle: 'Titel',
           subtitle: 'Untertitel',
           coverPhotos: 'Titelfotos',
-          coverPhotosHint: 'Wähle 1-6 Fotos für die gerahmte Titel-Collage. Sie bleiben zusätzlich in ihren Geschichten.',
-          coverPhotosSelected: (selected: number) => `${selected} von 6 ausgewählt`,
+          coverPhotosHint: 'Wähle 1-4 Fotos für die gerahmte Titel-Collage. Sie bleiben zusätzlich in ihren Geschichten.',
+          coverPhotosSelected: (selected: number) => `${selected} von 4 ausgewählt`,
           grouping: 'Aufbau des Buches',
           groupingIntroWithChapters:
             'Deine Geschichten sind bereits Kapitel. Das hier bestimmt, ob sie nach Datum oder in deiner eigenen Reihenfolge stehen — und wie die hochgeladenen Fotos danach gruppiert werden.',

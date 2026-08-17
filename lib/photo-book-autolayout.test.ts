@@ -6,7 +6,13 @@ import {
   type AutoLayoutPhoto,
   type PhotoBookAutoLayoutInput,
 } from './photo-book-autolayout';
-import { checkPhotoBookPlanConsistency, isTextItem, type PhotoFlowItem, type PhotoPagePlan } from './photo-book-plan';
+import {
+  BIRTHDAY_COVER_PHOTO_MAX,
+  checkPhotoBookPlanConsistency,
+  isTextItem,
+  type PhotoFlowItem,
+  type PhotoPagePlan,
+} from './photo-book-plan';
 
 /** Narrows a flow item to a photo page — a plan section may also hold text runs, which
  *  the pure photo-book cases in this file never produce. */
@@ -472,7 +478,9 @@ describe('buildPhotoBookAutoLayout — Birthday Book template', () => {
 
     expect(plan.template).toBe('birthday');
     expect(culled).toEqual([]);
-    expect(plan.cover.assetIds).toHaveLength(6);
+    // Seven usable photos, but the cover's 2x2 grid takes four — the auto-pick loop stops
+    // at `BIRTHDAY_COVER_PHOTO_MAX` instead of filling whatever the schema allows.
+    expect(plan.cover.assetIds).toHaveLength(BIRTHDAY_COVER_PHOTO_MAX);
     const section = plan.sections[0];
     expect(section.pages[0]).toEqual({ template: 'text', from: 0, to: 4 });
     expect(section.pages.slice(1).every((item) => !isTextItem(item))).toBe(true);

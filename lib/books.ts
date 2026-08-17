@@ -39,6 +39,7 @@ import {
   referencedPhotoAssetIds,
 } from '@/lib/photo-book-content';
 import {
+  BIRTHDAY_COVER_PHOTO_MAX,
   checkPhotoBookPlanConsistency,
   isTextItem,
   photoBookTemplate,
@@ -1254,7 +1255,9 @@ export async function setBirthdayCoverPhotos(input: {
   if (!gate.ok) return gate;
 
   const assetIds = [...new Set(input.assetIds)];
-  if (assetIds.length > 6) return err('A Birthday Book cover can use at most 6 photos.');
+  if (assetIds.length > BIRTHDAY_COVER_PHOTO_MAX) {
+    return err(`A Birthday Book cover can use at most ${BIRTHDAY_COVER_PHOTO_MAX} photos.`);
+  }
 
   const availableRows = await db
     .select({ assetId: bookPhotos.assetId })

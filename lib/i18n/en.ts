@@ -826,8 +826,8 @@ export const en = {
           bookTitle: 'Title',
           subtitle: 'Subtitle',
           coverPhotos: 'Cover photos',
-          coverPhotosHint: 'Choose 1-6 photos for the framed cover collage. They still appear inside their stories.',
-          coverPhotosSelected: (selected: number) => `${selected} of 6 selected`,
+          coverPhotosHint: 'Choose 1-4 photos for the framed cover collage. They still appear inside their stories.',
+          coverPhotosSelected: (selected: number) => `${selected} of 4 selected`,
           grouping: 'How the book is organised',
           groupingIntroWithChapters:
             'Your stories are already chapters. This decides whether they run by date or in your own order, and how the uploaded photos are grouped after them.',

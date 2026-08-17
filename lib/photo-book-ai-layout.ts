@@ -19,6 +19,7 @@ import {
   type PhotoBookGrouping,
 } from '@/lib/photo-book-grouping';
 import {
+  BIRTHDAY_COVER_PHOTO_MAX,
   checkPhotoBookPlanConsistency,
   photoBookTemplate,
   validatePhotoBookPlan,
@@ -444,7 +445,10 @@ export function applyPhotoPlanCarryOver(plan: PhotoBookPlan, loaded: LoadedPhoto
     const proposedCoverIds = (plan.cover.assetIds ?? []).filter((id) =>
       loaded.photos.some((photo) => photo.assetId === id && !photo.excluded),
     );
-    const coverIds = (storedCoverIds.length > 0 ? storedCoverIds : proposedCoverIds).slice(0, 6);
+    const coverIds = (storedCoverIds.length > 0 ? storedCoverIds : proposedCoverIds).slice(
+      0,
+      BIRTHDAY_COVER_PHOTO_MAX,
+    );
     if (coverIds.length > 0) {
       cover.assetIds = coverIds;
       cover.heroAssetId = coverIds[0];

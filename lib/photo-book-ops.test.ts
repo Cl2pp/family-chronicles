@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkPhotoBookPlanConsistency, type PhotoBookPlan, type PhotoPagePlan, type PhotoPlanContent, isTextItem, type PhotoFlowItem } from './photo-book-plan';
+import { BIRTHDAY_COVER_PHOTO_MAX, checkPhotoBookPlanConsistency, type PhotoBookPlan, type PhotoPagePlan, type PhotoPlanContent, isTextItem, type PhotoFlowItem } from './photo-book-plan';
 import {
   applyPhotoLayoutOp,
   findMergeSectionsIndexHazard,
@@ -92,6 +92,17 @@ describe('applyPhotoLayoutOp', () => {
     expect('plan' in result).toBe(true);
     if (!('plan' in result)) return;
     expect(result.plan.cover.heroAssetId).toBe('b1');
+    expect(result.plan.cover.assetIds).toEqual(['b1', 'a1', 'a2', 'a3']);
+  });
+
+  it('set_cover pushes the last collage photo out rather than overfilling the grid', () => {
+    const plan = basePlan({
+      template: 'birthday',
+      cover: { title: 'Birthday', heroAssetId: 'a1', assetIds: ['a1', 'a2', 'a3', 'a4'] },
+    });
+    const result = apply(plan, { op: 'set_cover', heroAssetId: 'b1' });
+    if (!('plan' in result)) throw new Error('expected the op to apply');
+    expect(result.plan.cover.assetIds).toHaveLength(BIRTHDAY_COVER_PHOTO_MAX);
     expect(result.plan.cover.assetIds).toEqual(['b1', 'a1', 'a2', 'a3']);
   });
 
