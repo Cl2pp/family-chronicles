@@ -755,6 +755,7 @@ export const en = {
           storiesTitle: 'Stories',
           storiesHint:
             'Each story becomes a chapter. Choose whether it contributes its text, its photos, or both. Move stories to set your own order — the book then switches to “Custom” in the next step.',
+          switchedToCustom: 'Your own chapter order is kept — the book is now organised as “Custom” (see the next step).',
           addStory: 'Add story',
           noStories: 'No stories in this book yet.',
           moveUp: 'Move up',

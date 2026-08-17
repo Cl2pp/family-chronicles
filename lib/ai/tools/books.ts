@@ -192,7 +192,9 @@ export const setBookStoriesTool = defineTool({
   description:
     'Replace a book\'s chapters with the given story ids IN READING ORDER — one call covers ' +
     'adding, removing, and reordering. Call get_book first and build the new full list from its ' +
-    'chapters (never guess ids; find new ones via list_stories). Invalidates an existing preview.',
+    'chapters (never guess ids; find new ones via list_stories). Invalidates an existing preview. ' +
+    'Moving chapters out of date order switches the book to its custom chapter order (a book ' +
+    'setting); a pure add/remove keeps date order and slots the added story in by date.',
   schema: z.object({
     book: z.string().min(1).describe('The book title (or id) to change.'),
     storyIds: z
@@ -211,7 +213,11 @@ export const setBookStoriesTool = defineTool({
     if (!result.ok) return { ok: false, error: result.error };
     return {
       ok: true,
-      message: `Chapters updated (${args.storyIds.length} stories).`,
+      message:
+        `Chapters updated (${args.storyIds.length} stories).` +
+        (result.value.switchedToCustom
+          ? ' Because the chapters are no longer in date order, the book now uses the custom chapter order (its "how is the book organised" setting switched to custom) — mention this to the user.'
+          : ''),
       receipt: {
         label: `Rearranged "${found.book.title}" (${args.storyIds.length} chapters)`,
         href: `/books/${found.book.id}`,

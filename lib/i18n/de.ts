@@ -774,6 +774,7 @@ export const de: Dictionary = {
           storiesTitle: 'Geschichten',
           storiesHint:
             'Jede Geschichte wird ein Kapitel. Du entscheidest, ob sie ihren Text, ihre Fotos oder beides beisteuert. Verschiebe Geschichten, um deine eigene Reihenfolge festzulegen — das Buch wechselt im nächsten Schritt dann auf „Eigene Reihenfolge“.',
+          switchedToCustom: 'Deine eigene Kapitelreihenfolge bleibt — das Buch ist jetzt als „Eigene Reihenfolge“ aufgebaut (siehe nächster Schritt).',
           addStory: 'Geschichte hinzufügen',
           noStories: 'Noch keine Geschichten in diesem Buch.',
           moveUp: 'Nach oben',
