@@ -952,6 +952,7 @@ export const de: Dictionary = {
       // --- Echte Bestellung über Gelato (nur für Konten, die `canUserOrderBooks`
       //     freigibt; alle anderen behalten den Mailto-Weg oben unverändert). ---
       orderStatusTitle: 'Deine Bestellung',
+      previousOrderTitle: 'Frühere Bestellung',
       orderPlacedOn: 'Bestellt am',
       orderPrinterReference: 'Referenz der Druckerei',
       orderShipTo: 'Lieferadresse',

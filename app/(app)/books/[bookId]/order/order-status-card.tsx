@@ -49,7 +49,15 @@ const STEP_INDEX: Record<string, number> = {
  * every page load, so the view just has to keep asking for a fresh render — see the poll
  * in `order-view.tsx`.
  */
-export function OrderStatusCard({ order }: { order: BookOrderView }) {
+export function OrderStatusCard({
+  order,
+  history = false,
+}: {
+  order: BookOrderView;
+  /** True when this order is dead (cancelled, or failed after reaching Gelato) and shown
+   *  BELOW a fresh ordering form as a record — different heading, no "Try again". */
+  history?: boolean;
+}) {
   const { locale, t } = useI18n();
   const to = t.books.order;
   const router = useRouter();
@@ -78,7 +86,7 @@ export function OrderStatusCard({ order }: { order: BookOrderView }) {
   return (
     <Card withBorder radius="md" p="lg">
       <Title order={4} mb="md">
-        {to.orderStatusTitle}
+        {history ? to.previousOrderTitle : to.orderStatusTitle}
       </Title>
 
       {failed ? (
@@ -100,9 +108,15 @@ export function OrderStatusCard({ order }: { order: BookOrderView }) {
               </Text>
             )}
           </Alert>
-          <Button loading={retrying} onClick={retry}>
-            {to.retry}
-          </Button>
+          {/* Retry only exists for a failure BEFORE Gelato accepted the order — once a
+              `gelatoOrderId` exists, `retryBookOrder` refuses (a resubmit would create a
+              second Gelato order); the view then shows this card as history under a fresh
+              order form instead. */}
+          {!history && !order.gelatoOrderId && (
+            <Button loading={retrying} onClick={retry}>
+              {to.retry}
+            </Button>
+          )}
         </Stack>
       ) : cancelled ? (
         <Alert color="gray" icon={<IconInfoCircle size={16} />}>
