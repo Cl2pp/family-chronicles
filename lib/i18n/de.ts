@@ -617,6 +617,10 @@ export const de: Dictionary = {
     saveCaption: 'Bildunterschrift speichern',
     captionPlaceholder: 'Wer ist auf dem Foto? Wo wurde es aufgenommen?',
     noCaption: 'Noch keine Bildunterschrift',
+    removePhoto: 'Foto entfernen',
+    removePhotoConfirmText:
+      'Dieses Foto aus der Geschichte entfernen? Das kann nicht rückgängig gemacht werden.',
+    removePhotoConfirm: 'Entfernen',
     deleteStory: 'Geschichte löschen',
     deleteConfirmText:
       'Diese Geschichte für alle löschen? Das kann nicht rückgängig gemacht werden.',

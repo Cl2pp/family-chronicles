@@ -15,9 +15,9 @@ import {
   TextInput,
   UnstyledButton,
 } from '@mantine/core';
-import { IconChevronLeft, IconChevronRight, IconPencil } from '@tabler/icons-react';
+import { IconChevronLeft, IconChevronRight, IconPencil, IconTrash } from '@tabler/icons-react';
 import { useI18n } from '@/lib/i18n/client';
-import { updatePhotoCaption } from './actions';
+import { deleteStoryPhoto, updatePhotoCaption } from './actions';
 
 export interface GalleryPhoto {
   id: string;
@@ -183,6 +183,7 @@ export function PhotoGallery({
               photo={active}
               canEdit={canEdit}
               counter={photos.length > 1 ? `${(openIndex ?? 0) + 1} / ${photos.length}` : null}
+              onRemoved={() => setOpenIndex(null)}
             />
           </Stack>
         )}
@@ -191,24 +192,48 @@ export function PhotoGallery({
   );
 }
 
-/** The caption under the lightbox image — read-only, or an inline editor for editors. */
+/**
+ * The caption under the lightbox image — read-only, or an inline editor for editors,
+ * who also get a remove button (with an inline confirm) here.
+ */
 function CaptionRow({
   storyId,
   photo,
   canEdit,
   counter,
+  onRemoved,
 }: {
   storyId: string;
   photo: GalleryPhoto;
   canEdit: boolean;
   counter: string | null;
+  /** Called after the photo is gone; the parent closes the lightbox. */
+  onRemoved: () => void;
 }) {
   const router = useRouter();
   const { t } = useI18n();
   const [editing, setEditing] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [value, setValue] = useState(photo.caption ?? '');
   const [error, setError] = useState<string | null>(null);
   const [saving, startTransition] = useTransition();
+  const [removing, startRemoveTransition] = useTransition();
+
+  function remove() {
+    setError(null);
+    startRemoveTransition(async () => {
+      const result = await deleteStoryPhoto({ storyId, assetId: photo.id });
+      if (!result.ok) {
+        setError(result.error);
+        setConfirmRemove(false);
+        return;
+      }
+      // Refresh inside the transition so the button keeps its spinner until the grid
+      // has actually dropped the photo; only then close the lightbox.
+      router.refresh();
+      onRemoved();
+    });
+  }
 
   function save() {
     setError(null);
@@ -262,28 +287,75 @@ function CaptionRow({
     );
   }
 
-  return (
-    <Group justify="space-between" align="center" wrap="nowrap" gap="sm">
-      <Text size="sm" c={photo.caption ? undefined : 'dimmed'} fs={photo.caption ? undefined : 'italic'}>
-        {photo.caption ?? (canEdit ? t.story.noCaption : '')}
-      </Text>
-      <Group gap="xs" wrap="nowrap">
-        {counter && (
-          <Text size="xs" c="dimmed">
-            {counter}
+  if (confirmRemove) {
+    return (
+      <Stack gap="xs">
+        <Text size="sm">{t.story.removePhotoConfirmText}</Text>
+        {error && (
+          <Text size="sm" c="red">
+            {error}
           </Text>
         )}
-        {canEdit && (
-          <ActionIcon
+        <Group gap="xs">
+          <Button size="xs" color="red" onClick={remove} loading={removing}>
+            {t.story.removePhotoConfirm}
+          </Button>
+          <Button
+            size="xs"
             variant="subtle"
             color="gray"
-            onClick={() => setEditing(true)}
-            aria-label={t.story.editCaption}
+            onClick={() => setConfirmRemove(false)}
+            disabled={removing}
           >
-            <IconPencil size={16} />
-          </ActionIcon>
-        )}
+            {t.common.cancel}
+          </Button>
+        </Group>
+      </Stack>
+    );
+  }
+
+  return (
+    <Stack gap="xs">
+      {error && (
+        <Text size="sm" c="red">
+          {error}
+        </Text>
+      )}
+      <Group justify="space-between" align="center" wrap="nowrap" gap="sm">
+        <Text size="sm" c={photo.caption ? undefined : 'dimmed'} fs={photo.caption ? undefined : 'italic'}>
+          {photo.caption ?? (canEdit ? t.story.noCaption : '')}
+        </Text>
+        <Group gap="xs" wrap="nowrap">
+          {counter && (
+            <Text size="xs" c="dimmed">
+              {counter}
+            </Text>
+          )}
+          {canEdit && (
+            <>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                onClick={() => setEditing(true)}
+                aria-label={t.story.editCaption}
+              >
+                <IconPencil size={16} />
+              </ActionIcon>
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                onClick={() => {
+                  setError(null);
+                  setConfirmRemove(true);
+                }}
+                aria-label={t.story.removePhoto}
+              >
+                <IconTrash size={16} />
+              </ActionIcon>
+            </>
+          )}
+        </Group>
       </Group>
-    </Group>
+    </Stack>
   );
 }

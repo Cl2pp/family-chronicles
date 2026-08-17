@@ -1749,6 +1749,37 @@ export async function invalidateBooksForStory(storyId: string): Promise<void> {
   }
 }
 
+/**
+ * A photo was REMOVED from a story: every book holding that story now has a plan that
+ * may reference a figure that no longer exists (its `book_photos` mirror row already
+ * cascaded away with the asset), and any rendered PDF still shows the photo. Flags the
+ * plan stale so the next load repairs/rebuilds it, and drops a finished preview back to
+ * draft. Locked (`ordered`) books keep their STATUS — the print file the order was
+ * placed with is pinned under `orders/{id}/` and stays as printed; their plan is still
+ * flagged stale (same as `mirrorStoryPhotosIntoBooks` does on add) so a later builder
+ * visit doesn't render a figure whose asset is gone. Best-effort; never fails the
+ * caller's own write.
+ */
+export async function invalidateBooksForStoryPhotoRemoval(storyId: string): Promise<void> {
+  try {
+    await db
+      .update(books)
+      .set({
+        layoutStale: true,
+        status: sql`CASE WHEN ${books.status} = 'preview_ready' THEN 'draft' ELSE ${books.status} END`,
+        updatedAt: new Date(),
+      })
+      .where(
+        inArray(
+          books.id,
+          db.select({ id: bookStories.bookId }).from(bookStories).where(eq(bookStories.storyId, storyId)),
+        ),
+      );
+  } catch (e) {
+    console.error(`[books] could not invalidate books after photo removal for story ${storyId}:`, e);
+  }
+}
+
 /** Guard shared by every mutation: member, contributor, and the book not locked.
  *  Also hands back the acting user's story-access context so mutations that need
  *  per-story checks don't load it a second time. */
