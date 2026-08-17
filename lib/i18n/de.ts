@@ -667,8 +667,6 @@ export const de: Dictionary = {
         n === 1
           ? 'Ein Kapitel dieses Buches ist eine Geschichte, auf die du keinen Zugriff hast. Nur wer alle Geschichten lesen kann, kann die Kapitel ändern oder das Buch bestellen.'
           : `${n} Kapitel dieses Buches sind Geschichten, auf die du keinen Zugriff hast. Nur wer alle Geschichten lesen kann, kann die Kapitel ändern oder das Buch bestellen.`,
-      moveUp: 'Nach oben',
-      moveDown: 'Nach unten',
       removeStory: 'Aus dem Buch entfernen',
       moreStories: 'Weitere Geschichten',
       moreStoriesHint: 'Fertige Geschichten dieses Familienwerks, die noch nicht im Buch sind.',
@@ -776,6 +774,15 @@ export const de: Dictionary = {
           addStory: 'Geschichte hinzufügen',
           noStories: 'Noch keine Geschichten in diesem Buch.',
           dragToReorder: 'Ziehen, um die Reihenfolge zu ändern',
+          dragInstructions:
+            'Drücke Leertaste oder Enter, um eine Geschichte aufzunehmen. Verschiebe sie mit den Pfeiltasten, lege sie mit Leertaste oder Enter ab, oder brich mit Escape ab.',
+          dragPickedUp: (title: string, pos: number, total: number) =>
+            `${title} aufgenommen, Position ${pos} von ${total}.`,
+          dragMovedTo: (title: string, pos: number, total: number) =>
+            `${title} auf Position ${pos} von ${total} verschoben.`,
+          dragDropped: (title: string, pos: number, total: number) =>
+            `${title} an Position ${pos} von ${total} abgelegt.`,
+          dragCancelled: (title: string) => `Verschieben abgebrochen. ${title} bleibt an der ursprünglichen Position.`,
           removeStory: 'Aus dem Buch entfernen',
           includeText: 'Text',
           includePhotos: 'Fotos',

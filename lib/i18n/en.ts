@@ -650,8 +650,6 @@ export const en = {
         n === 1
           ? "1 chapter of this book is a story you don't have access to. Only someone who can read every story can change the chapters or order the book."
           : `${n} chapters of this book are stories you don't have access to. Only someone who can read every story can change the chapters or order the book.`,
-      moveUp: 'Move up',
-      moveDown: 'Move down',
       removeStory: 'Remove from book',
       moreStories: 'More stories',
       moreStoriesHint: 'Finished stories of this chronicle that are not in the book yet.',
@@ -757,6 +755,16 @@ export const en = {
           addStory: 'Add story',
           noStories: 'No stories in this book yet.',
           dragToReorder: 'Drag to reorder',
+          // Screen-reader text for the drag-and-drop reorder (dnd-kit accessibility).
+          dragInstructions:
+            'To pick up a story, press Space or Enter. Move it with the arrow keys, drop it with Space or Enter, or press Escape to cancel.',
+          dragPickedUp: (title: string, pos: number, total: number) =>
+            `Picked up ${title}, position ${pos} of ${total}.`,
+          dragMovedTo: (title: string, pos: number, total: number) =>
+            `${title} moved to position ${pos} of ${total}.`,
+          dragDropped: (title: string, pos: number, total: number) =>
+            `${title} dropped at position ${pos} of ${total}.`,
+          dragCancelled: (title: string) => `Reordering cancelled. ${title} stays in its original position.`,
           removeStory: 'Remove from book',
           includeText: 'Text',
           includePhotos: 'Photos',

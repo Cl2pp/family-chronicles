@@ -1,6 +1,6 @@
 'use client';
 
-import { useOptimistic, useState, useTransition } from 'react';
+import { useId, useOptimistic, useState, useTransition } from 'react';
 import { ActionIcon, Button, Card, Group, Menu, Stack, Switch, Text, Title, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useRouter } from 'next/navigation';
@@ -12,10 +12,17 @@ import {
   closestCenter,
   useSensor,
   useSensors,
+  type Announcements,
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
-import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useI18n } from '@/lib/i18n/client';
 import { setBookStoriesAction, setBookStoryFlagsAction } from '../actions';
@@ -40,8 +47,9 @@ export interface ChronicleStoryOption {
  * the book, in what order, and what each contributes — its text, its photos, or both.
  *
  * Chapters are reordered by drag-and-drop (grip handle; pointer, touch and keyboard via
- * dnd-kit). The order is applied optimistically so the dropped card stays put while the
- * server round-trip + refresh run. The per-chapter switches are what makes "a book from
+ * dnd-kit). Every list change (reorder, add, remove) is applied optimistically so the
+ * card lands where the user put it while the server round-trip + refresh run; on error
+ * the optimistic list falls back to `chapters`. The per-chapter switches are what makes "a book from
  * stories" and "a book from uploads" the same thing with different sources. Both toggles
  * off is refused server-side (`setBookStoryFlags`) — that's what removing the chapter is
  * for.
@@ -71,12 +79,14 @@ export function BookStoriesPanel({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [busyStory, setBusyStory] = useState<string | null>(null);
-  // Chapter order as shown; diverges from `chapters` only while a reorder is in flight.
-  const [orderedChapters, setOptimisticOrder] = useOptimistic(chapters);
+  // The list as shown; diverges from `chapters` only while a list change is in flight.
+  const [shownChapters, setOptimisticChapters] = useOptimistic(chapters);
+  // Stable id so dnd-kit's aria ids match between server and client render.
+  const dndId = useId();
 
   const partialView = hiddenChapterCount > 0;
   const readOnly = locked || partialView;
-  const inBook = new Set(chapters.map((c) => c.storyId));
+  const inBook = new Set(shownChapters.map((c) => c.storyId));
   const available = chronicleStories.filter((s) => !inBook.has(s.id));
 
   const sensors = useSensors(
@@ -85,10 +95,25 @@ export function BookStoriesPanel({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  function replaceStories(storyIds: string[], optimistic?: BookChapterView[]) {
+  // Localized screen-reader feedback; dnd-kit's defaults are English-only.
+  const positionOf = (id: string | number) => shownChapters.findIndex((c) => c.storyId === id);
+  const titleOf = (id: string | number) => shownChapters.find((c) => c.storyId === id)?.title ?? '';
+  const total = shownChapters.length;
+  const announcements: Announcements = {
+    onDragStart: ({ active }) => ts.dragPickedUp(titleOf(active.id), positionOf(active.id) + 1, total),
+    onDragOver: ({ active, over }) =>
+      over ? ts.dragMovedTo(titleOf(active.id), positionOf(over.id) + 1, total) : undefined,
+    onDragEnd: ({ active, over }) =>
+      over ? ts.dragDropped(titleOf(active.id), positionOf(over.id) + 1, total) : ts.dragCancelled(titleOf(active.id)),
+    onDragCancel: ({ active }) => ts.dragCancelled(titleOf(active.id)),
+  };
+  const accessibility = { announcements, screenReaderInstructions: { draggable: ts.dragInstructions } };
+
+  /** Replace the book's chapter list; `next` is shown immediately and confirmed by the refresh. */
+  function replaceStories(next: BookChapterView[]) {
     startTransition(async () => {
-      if (optimistic) setOptimisticOrder(optimistic);
-      const result = await setBookStoriesAction({ bookId, storyIds });
+      setOptimisticChapters(next);
+      const result = await setBookStoriesAction({ bookId, storyIds: next.map((c) => c.storyId) });
       if (result.error) {
         notifications.show({ color: 'red', message: result.error });
         return;
@@ -112,14 +137,19 @@ export function BookStoriesPanel({
 
   function onDragEnd({ active, over }: DragEndEvent) {
     if (!over || active.id === over.id) return;
-    const from = orderedChapters.findIndex((c) => c.storyId === active.id);
-    const to = orderedChapters.findIndex((c) => c.storyId === over.id);
+    const from = positionOf(active.id);
+    const to = positionOf(over.id);
     if (from < 0 || to < 0) return;
-    const next = arrayMove(orderedChapters, from, to);
-    replaceStories(
-      next.map((c) => c.storyId),
-      next,
-    );
+    replaceStories(arrayMove(shownChapters, from, to));
+  }
+
+  function addStory(s: ChronicleStoryOption) {
+    // Photo count and flags are placeholders until the refresh brings the real row
+    // (new chapters default to text + photos on, see `setBookStories`).
+    replaceStories([
+      ...shownChapters,
+      { storyId: s.id, title: s.title, year: s.year, photoCount: 0, includeText: true, includePhotos: true },
+    ]);
   }
 
   return (
@@ -135,10 +165,7 @@ export function BookStoriesPanel({
             </Menu.Target>
             <Menu.Dropdown mah={320} style={{ overflowY: 'auto' }}>
               {available.map((s) => (
-                <Menu.Item
-                  key={s.id}
-                  onClick={() => replaceStories([...chapters.map((c) => c.storyId), s.id])}
-                >
+                <Menu.Item key={s.id} onClick={() => addStory(s)}>
                   {s.title}
                   {s.year ? ` · ${s.year}` : ''}
                 </Menu.Item>
@@ -156,20 +183,22 @@ export function BookStoriesPanel({
         </Text>
       )}
 
-      {orderedChapters.length === 0 ? (
+      {shownChapters.length === 0 ? (
         <Text fz={13} c="dimmed">
           {ts.noStories}
         </Text>
       ) : (
         <DndContext
+          id={dndId}
           sensors={sensors}
           collisionDetection={closestCenter}
           modifiers={[restrictToVerticalAxis]}
+          accessibility={accessibility}
           onDragEnd={onDragEnd}
         >
-          <SortableContext items={orderedChapters.map((c) => c.storyId)} strategy={verticalListSortingStrategy}>
+          <SortableContext items={shownChapters.map((c) => c.storyId)} strategy={verticalListSortingStrategy}>
             <Stack gap={8}>
-              {orderedChapters.map((c) => (
+              {shownChapters.map((c) => (
                 <SortableChapterCard
                   key={c.storyId}
                   chapter={c}
@@ -177,9 +206,7 @@ export function BookStoriesPanel({
                   pending={pending}
                   busy={busyStory === c.storyId}
                   labels={ts}
-                  onRemove={() =>
-                    replaceStories(chapters.filter((x) => x.storyId !== c.storyId).map((x) => x.storyId))
-                  }
+                  onRemove={() => replaceStories(shownChapters.filter((x) => x.storyId !== c.storyId))}
                   onToggle={(patch) => toggleFlag(c.storyId, patch)}
                 />
               ))}
@@ -232,18 +259,20 @@ function SortableChapterCard({
         <Group gap={6} wrap="nowrap" align="flex-start" style={{ minWidth: 0 }}>
           {!readOnly && (
             <Tooltip label={ts.dragToReorder}>
+              {/* Not `disabled` while pending: `useSortable({disabled})` already blocks a new
+                  drag, and a disabled button can't keep focus for keyboard users after a drop.
+                  `md` for a usable touch target — dragging is the only way to reorder. */}
               <ActionIcon
                 ref={setActivatorNodeRef}
                 variant="subtle"
                 color="gray"
-                size="sm"
-                disabled={pending}
+                size="md"
                 aria-label={ts.dragToReorder}
                 style={{ cursor: isDragging ? 'grabbing' : 'grab', touchAction: 'none', flexShrink: 0 }}
                 {...attributes}
                 {...listeners}
               >
-                <IconGripVertical size={14} />
+                <IconGripVertical size={16} />
               </ActionIcon>
             </Tooltip>
           )}
