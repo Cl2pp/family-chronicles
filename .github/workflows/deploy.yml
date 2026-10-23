@@ -4,6 +4,8 @@ name: Deploy to Coolify
 # signature validation proved unreliable). On every push to main we call
 # Coolify's authenticated deploy API for both apps (web + worker), which share
 # one image. Auth is a Bearer token (GitHub secret COOLIFY_TOKEN), not an HMAC.
+# The endpoint is POST-only since Coolify 4.4, and it is the only Coolify path
+# reachable from the internet (the dashboard is SSH-tunnel only).
 #
 # The web container runs `npm run db:migrate` on boot (docker-entrypoint.sh),
 # so migrations apply automatically as part of the deploy — nothing to do here.
@@ -27,6 +29,6 @@ jobs:
           # web = lfezes7na9u52r8ka10dh57e, worker = jopm4dv6n3x5uhygcixtalhl
           UUIDS: lfezes7na9u52r8ka10dh57e,jopm4dv6n3x5uhygcixtalhl
         run: |
-          curl --fail-with-body -sS \
+          curl --fail-with-body -sS -X POST \
             -H "Authorization: Bearer ${COOLIFY_TOKEN}" \
             "https://admin.clepp.de/api/v1/deploy?uuid=${UUIDS}&force=false"

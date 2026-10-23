@@ -103,8 +103,9 @@ documents the server, Coolify, R2 (incl. the EU-endpoint gotcha), the security m
 are private; reach Coolify via SSH tunnel), env vars, the deploy loop, and the gotchas we hit.
 
 **Deploys and migrations are automatic — you don't run them by hand:**
-- **Deploy = push to `main`.** Coolify's GitHub App auto-deploys both apps (web + worker) from
-  the `Dockerfile` on every push to `main`; there is no manual deploy step. Merging a PR to
+- **Deploy = push to `main`.** The GitHub Action `.github/workflows/deploy.yml` calls Coolify's
+  deploy API on every push to `main`, and Coolify builds both apps (web + worker) from the
+  `Dockerfile`; there is no manual deploy step (a red Action = deploys stopped). Merging a PR to
   `main` is what ships it.
 - **Migrations apply themselves on deploy.** The web container runs `npm run db:migrate` on
   startup (`docker-entrypoint.sh`), so committed migrations in `db/migrations/` are applied

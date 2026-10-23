@@ -6,7 +6,7 @@ written so a future agent or engineer can pick it up cold. For the **code** conv
 plan see `~/.claude/plans/curious-gliding-dijkstra.md`.
 
 **Live:** https://familienwerk.co (real Let's Encrypt HTTPS)
-**Repo:** https://github.com/Cl2pp/family-chronicles (private, branch `main`)
+**Repo:** https://github.com/Cl2pp/family-chronicles (**public**, branch `main` — keep secrets and attack-relevant detail out of it)
 
 ---
 
@@ -88,8 +88,22 @@ recovery path if SSH ever gets locked out.
 
 ## 4. Coolify (the PaaS layer)
 
-- **Coolify 4.1.2** runs on the server (installed via the official one-line installer). It manages
-  the Docker containers (apps, Postgres, Traefik).
+- **Coolify 4.4.7** runs on the server (installed via the official one-line installer; upgraded
+  from 4.1.2 in 2026-10 for a security fix). It manages the
+  Docker containers (apps, Postgres, Traefik). Since 4.4 the realtime server is built into the
+  `coolify` container — there is **no `coolify-realtime` container** any more (ports 6001/6002 are
+  now published by `coolify` itself).
+- **Auto-update** runs nightly at 00:00 (`/data/coolify/source/upgrade.sh`). It can fail silently
+  for weeks (e.g. when the registry refuses the helper-image pull every night). Check
+  `/data/coolify/source/.upgrade-status` and the latest `upgrade-*.log` there. Gotcha: a failed run
+  has still overwritten `docker-compose*.yml` with the *new* version's files, so Coolify's
+  per-minor `patch.sh` then refuses to run — upgrade to the latest with
+  `bash /data/coolify/source/upgrade.sh <version> <helper-version>` instead. Back up Coolify's
+  own database first:
+  ```bash
+  mkdir -p /root/coolify-backups && docker exec coolify-db pg_dump -U coolify -d coolify -Fc \
+    > /root/coolify-backups/coolify-db-$(date +%F).dump
+  ```
 - Onboarding chose **"This Machine"** (single-server: deploy onto the box Coolify runs on).
 - **Two applications**, both **Private Repository (deploy key)** → repo
   `git@github.com:Cl2pp/family-chronicles.git`, branch `main`, **Build Pack: Dockerfile**,
@@ -100,7 +114,13 @@ recovery path if SSH ever gets locked out.
   network; the apps reach it by its internal hostname).
 
 **Accessing the Coolify dashboard (important — it is NOT public):** the admin UI is firewalled
-off the internet. Reach it via an SSH tunnel:
+off the internet, and Coolify's own **Instance Domain (FQDN) setting is deliberately empty** — if
+it is set, Coolify generates its own Traefik route file and serves the whole dashboard publicly on
+that domain over 443. Don't set it again. The one public piece is a hand-written Traefik file,
+`/data/coolify/proxy/dynamic/coolify-deploy-api.yaml` (Coolify doesn't manage or overwrite it),
+that routes **only** the exact path `/api/v1/deploy` on the Coolify host to Coolify, because the
+GitHub Actions deploy workflow calls it (see §9). That endpoint needs a deploy-only API token;
+every other path on that host returns 503. Reach the dashboard via an SSH tunnel:
 ```bash
 ssh -i ~/.ssh/family_chronicle_ed25519 -N \
   -L 8000:localhost:8000 -L 6001:localhost:6001 -L 6002:localhost:6002 \
@@ -115,7 +135,9 @@ New-user registration is **disabled** in Coolify settings.
   `22` (SSH), `80`, `443` (the app), `icmp` — **from anywhere**. The admin/realtime ports
   (`8000` Coolify, `8080` Traefik, `6001`/`6002` realtime) are **closed to the internet** and
   reached only via the SSH tunnel above. (We deliberately moved off IP-allowlisting to
-  "not exposed at all + reach via SSH".)
+  "not exposed at all + reach via SSH".) **One deliberate exception on 443:** Coolify's
+  token-protected `/api/v1/deploy` endpoint, routed by hand so the deploy workflow can reach it
+  (§4, §9).
 - **SSH** is key-only (`PasswordAuthentication no`, root `prohibit-password`) via a drop-in at
   `/etc/ssh/sshd_config.d/00-hardening.conf`.
 - **App-level**: better-auth (email/password + magic link). Every chronicle/story server action
@@ -195,9 +217,13 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 ## 9. The deploy loop (every change)
 
 1. `git push` to `main`.
-2. **A push auto-deploys both apps** via Coolify's **GitHub App** integration (account-level, not
-   a repo webhook — there is nothing in the repo's GitHub → Settings → Webhooks). Web and worker
-   both have auto-deploy on and build from the same `Dockerfile`.
+2. **A push auto-deploys both apps** via the **GitHub Actions workflow
+   `.github/workflows/deploy.yml`**: on every push to `main` it POSTs to Coolify's
+   `/api/v1/deploy` for web + worker, authenticated with the `COOLIFY_TOKEN` repo secret (a Coolify
+   API token with only the `deploy` ability). That's the one Coolify path that stays public (§4);
+   if the Action goes red, deploys have stopped. Coolify's own GitHub App push webhook is **not**
+   what deploys (its signature check proved unreliable, and its route is not exposed). Both apps
+   build from the same `Dockerfile`.
 3. **Builds are serialised.** The server's **`concurrent_builds` is `1`** (`server_settings`), so
    even though a push enqueues both, Coolify runs **one build at a time** — web first (it's queued
    first), then worker. They never build concurrently.
@@ -208,6 +234,12 @@ time skips validation via `SKIP_ENV_VALIDATION=1` in the Dockerfile.
 Builds take ~2–4 min each on this box (swap covers the Next build's memory spike), so a push is
 ~4–8 min end to end.
 
+**Redeploying without a push** (break-glass, e.g. after a failed deploy): re-run the workflow
+from the GitHub Actions tab ("Run workflow"), or on the server POST to Coolify's
+`/api/v1/deploy?uuid=<app-uuid>` on `localhost:8000` with a deploy-only API token (create one in
+Coolify → Keys & Tokens → API tokens, permission `deploy`). Since Coolify 4.4 this endpoint is
+**POST-only** (a GET returns "This endpoint has changed to a POST request.").
+
 > **In short: deploys and DB migrations are automatic — do not run either by hand.** Merging to
 > `main` deploys; the booting web container applies any committed `db/migrations/` via
 > `npm run db:migrate` (idempotent — Drizzle skips already-applied ones). You never run
@@ -216,13 +248,14 @@ Builds take ~2–4 min each on this box (swap covers the Next build's memory spi
 > a failed deploy) — see §11.
 
 > **⚠️ `concurrent_builds=1` is load-bearing (see §11).** Coolify's default is **2**, and with two
-> simultaneous Next.js builds on this 2-core / 4 GB box the RAM and disk-write spikes double and
-> the builds tend to fail *together* — that was the main deploy-failure cause. Serialising them is
+> simultaneous Next.js builds on this box (2-core / 4 GB at the time; now 4 vCPU / 8 GB) the RAM
+> and disk-write spikes double and the builds tend to fail *together* — that was the main deploy-failure cause. Serialising them is
 > the fix. Set it in Coolify → Server → Advanced, or
 > `update server_settings set concurrent_builds = 1 where id = 1;`. (Note: the per-app
-> "auto deploy on push" toggle / `is_auto_deploy_enabled` does **not** gate GitHub-App pushes in
-> this Coolify version — a push deploys every connected app regardless, which is why the
-> server-wide build limit, not a per-app flag, is what serialises them.)
+> "auto deploy on push" toggle / `is_auto_deploy_enabled` did **not** gate GitHub-App pushes as
+> of Coolify 4.1.2 — a push deployed every connected app regardless, which is why the
+> server-wide build limit, not a per-app flag, is what serialises them. Moot for the trigger
+> today — the deploy Action names both apps explicitly — but the build limit still applies.)
 
 **Version skew after deploys**: each Docker build writes `.deployment-id` (from Coolify's
 `SOURCE_COMMIT` build arg, or a build timestamp) and `next.config.ts` uses it as Next's
@@ -273,9 +306,9 @@ done (the creds never leave the box).
   you prepend system paths; that breaks eslint (`structuredClone is not defined`). Use the repo's
   default Node 22 for `npm`/build.
 - **ARM (cax) capacity** is often sold out at Hetzner; x86 (cx/cpx) is the fallback (multi-arch image).
-- **Deploys failing under load = disk + concurrency (the #1 operational issue).** The 40 GB disk
-  fills with Docker image layers, and back-to-back app+worker builds outpace cleanup. Symptoms:
-  builds die with `no space left on device`; at 100% full even **coolify-db (Postgres) crashes**
+- **Deploys failing under load = disk + concurrency (the #1 operational issue).** The disk (40 GB
+  then, 80 GB since the resize) fills with Docker image layers, and back-to-back app+worker
+  builds outpace cleanup. Symptoms: builds die with `no space left on device`; at 100% full even **coolify-db (Postgres) crashes**
   and the Coolify UI throws a 500 (`SQLSTATE[53100] … No space left on device`). A softer variant
   (hit 2026-07-16): near-full disk makes **coolify-redis** fail its RDB snapshot, Redis goes
   read-only (`MISCONF … stop-writes-on-bgsave-error`), the UI 500s with that message and — worse —
